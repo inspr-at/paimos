@@ -97,7 +97,8 @@ async function expectFits(page: Page) {
   expect(edged).toEqual([])
 }
 
-for (const width of [1600, 390]) {
+// P11: one narrow catalogue/vote journey; the separate policy/binding cases remain below.
+for (const width of [390]) {
   test(`public portal catalog and vote at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const posted = await install(page)

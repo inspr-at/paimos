@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/reserved-versions.spec.ts",
-    "listedTests": 12,
+    "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.037,

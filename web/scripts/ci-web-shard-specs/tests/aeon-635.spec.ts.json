@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/aeon-635.spec.ts",
-    "listedTests": 21,
+    "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
         "max": 31.673,

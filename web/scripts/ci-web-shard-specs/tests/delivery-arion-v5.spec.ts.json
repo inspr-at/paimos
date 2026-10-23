@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/delivery-arion-v5.spec.ts",
-    "listedTests": 14,
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.641,

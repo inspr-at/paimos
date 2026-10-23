@@ -610,18 +610,6 @@
     ,
     "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 light"
     ,
-    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark"
-    ,
-    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 light"
-    ,
-    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 dark"
-    ,
-    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 light"
-    ,
-    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 dark"
-    ,
-    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 light"
-    ,
     "browser:tests/dialog-full-text.spec.ts:1024 dark › keyboard full text: business"
     ,
     "browser:tests/dialog-full-text.spec.ts:1024 dark › keyboard full text: facet"
@@ -1208,15 +1196,7 @@
     ,
     "browser:tests/release-switches.spec.ts:the language is remembered per person and defaults to the app language"
     ,
-    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 dark"
-    ,
-    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 light"
-    ,
-    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 dark"
-    ,
     "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light"
-    ,
-    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 dark"
     ,
     "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 light"
     ,
@@ -1534,18 +1514,6 @@
     ,
     "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 390px light: diagonal slide, one-offs once per entry, no shift"
     ,
-    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 dark"
-    ,
-    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 light"
-    ,
-    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 dark"
-    ,
-    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 light"
-    ,
-    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 dark"
-    ,
-    "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 light"
-    ,
     "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
     ,
     "browser:tests/status-time.spec.ts:a failed lifeline keeps its height, says so, and retries"
@@ -1557,8 +1525,6 @@
     "browser:tests/status-time.spec.ts:motion › the live segment slides, past segments and the step bar only under the pointer, swatches never"
     ,
     "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker"
-    ,
-    "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (dark)"
     ,
     "browser:tests/status-time.spec.ts:with reduced motion nothing slides, not even the live segment"
     ,
@@ -1658,15 +1624,7 @@
     ,
     "browser:tests/webcore-recovery.spec.ts:knowledge keeps a failed second query visibly stale, with retry and the previous query named"
     ,
-    "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1024, dark)"
-    ,
-    "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1024, light)"
-    ,
-    "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, dark)"
-    ,
     "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)"
-    ,
-    "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, dark)"
     ,
     "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, light)"
     ,
@@ -6558,19 +6516,9 @@
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"busy waiting refresh retains keyboard focus and rejects repeated activation (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"header status stays on one line from 600px and stacks cleanly on phones dark (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"header status stays on one line from 600px and stacks cleanly on phones light (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6579,8 +6527,6 @@
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"partial and unavailable pending data never report an exact zero (AEON-635)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"successful pagination retains earlier incomplete evidence until a full refresh (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"waiting-panel keys keep the selected release and native controls at 1024 (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"waiting-panel keys keep the selected release and native controls at 1440 (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8696,23 +8642,9 @@
     ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 project definitions copy, edit, undo, conditions and reset stay bound and stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 dark expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 dark simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 light expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 light simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 dark expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 dark simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 light expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 light simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Simple keeps every Learn and section still through every window at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Simple keeps every Learn and section still through every window at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8802,23 +8734,7 @@
     ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery is absent without delivery.read, and its address leads to the tickets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1024 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1024 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 dark de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 390 dark de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 390 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 390 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 390 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8827,18 +8743,6 @@
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"tiles and charts tell partial, missing and clipped data apart and never show stale numbers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"window, level and view switches keep every control still and are the person’s own","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in dark at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8874,21 +8778,11 @@
     ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"usage shows the rework rate by harness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 1440 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 1440 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 1440 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 400 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 400 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 400 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Simple explains each number in plain words, and its controls stay still through every window","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows an English warning with retry for the de profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows an English warning with retry for the en profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -12142,17 +12036,9 @@
     ,
     {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"on a phone › the Models link keeps a 44 px target inside its sentence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 dark › a member reads the permission note and links only where they open at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 dark › three cards, rules only; a risk group grows below its head at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 light › three cards, rules only; a risk group grows below its head at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 dark › a member reads the permission note and links only where they open at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 dark › three cards, rules only; a risk group grows below its head at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 light › a member reads the permission note and links only where they open at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -12194,23 +12080,15 @@
     ,
     {"kind":"browser","file":"tests/portal-public.spec.ts","name":"disabled participation keeps the catalog readable and has no input controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/portal-public.spec.ts","name":"public portal catalog and vote at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/portal-public.spec.ts","name":"public portal catalog and vote at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/portal-public.spec.ts","name":"status chips appear only past six features, and a wish is title and summary","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/portal-releases.spec.ts","name":"public release history at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/portal-releases.spec.ts","name":"public release history at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/portal-releases.spec.ts","name":"public release history empty and missing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/portal-releases.spec.ts","name":"public release history leads with the marketing name at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/portal-releases.spec.ts","name":"public release history leads with the marketing name at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/portal-roadmap.spec.ts","name":"public roadmap at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/portal-roadmap.spec.ts","name":"public roadmap at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13042,8 +12920,6 @@
     ,
     {"kind":"browser","file":"tests/release-groups.spec.ts","name":"server groups stable100 into one benefit line per ticket at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-groups.spec.ts","name":"server groups stable100 into one benefit line per ticket at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-groups.spec.ts","name":"two bugs on one commit are both fixes, in the detail, the filters and compare (current)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-groups.spec.ts","name":"two bugs on one commit are both fixes, in the detail, the filters and compare (snapshot)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13122,13 +12998,7 @@
     ,
     {"kind":"browser","file":"tests/release-historic.spec.ts","name":"backfilled release 102 reads like release 105 at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-historic.spec.ts","name":"screenshots of releases 102 and 105","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-own-tenant.spec.ts","name":"own release notes reach another tenant at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-own-tenant.spec.ts","name":"own release notes reach another tenant at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-own-tenant.spec.ts","name":"own release notes reach another tenant at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-own-tenant.spec.ts","name":"own release notes reach another tenant at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13200,8 +13070,6 @@
     ,
     {"kind":"browser","file":"tests/release-switches.spec.ts","name":"empty and compare lines switch language with the rest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-switches.spec.ts","name":"screenshots of both switches on 102 and 105","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-switches.spec.ts","name":"search matches what the chosen language and view show","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-switches.spec.ts","name":"switches fit 1600 dark in both views, and Details passes axe","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13218,13 +13086,7 @@
     ,
     {"kind":"browser","file":"tests/release-switches.spec.ts","name":"the switches sit with search and Compare at 36 px on desktop and take their own row on phones","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"pma 1600 all: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"pma 1600 direct: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"pma 1600 header: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"pma 1600 version: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"pma 390 all: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13234,21 +13096,7 @@
     ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"pma 390 version: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"portable notes visual 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"portable notes visual 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"portable notes visual 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"portable notes visual 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 1600 all: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 1600 direct: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 1600 header: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 1600 version: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 390 all: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13298,19 +13146,7 @@
     ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"an unnamed release reads as its calendar version in the toast, never as a raw number at rest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot missing 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot missing 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot missing 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot missing 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot outdated 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot outdated 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot outdated 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot outdated 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13318,15 +13154,7 @@
     ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"the update toast uses the codename /api/version gave when the release detail fails, and reveals the version on hover and focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13383,8 +13211,6 @@
     {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"a direct hidden reservation cannot become a comparison endpoint","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"comparison choices and result counts follow their separate scopes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"direct reserved links open quietly and navigation skips them at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"direct reserved links open quietly and navigation skips them at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14672,18 +14498,6 @@
     ,
     {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1683: live and static status icons respect native focus and reduced motion without moving controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 960 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 960 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"Delivery › Tickets in Expert: six tiles and Created → live as the first trend","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14699,8 +14513,6 @@
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"motion › the live segment slides, past segments and the step bar only under the pointer, swatches never","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -15236,11 +15048,7 @@
     ,
     {"kind":"browser","file":"tests/usage-accounts.spec.ts","name":"another configured account in the same pool remains visible while verification is queued","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/usage-accounts.spec.ts","name":"configured account states at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/usage-accounts.spec.ts","name":"configured account states at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/usage-accounts.spec.ts","name":"configured account states at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/usage-accounts.spec.ts","name":"configured account states at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15368,15 +15176,7 @@
     ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"knowledge keeps a failed second query visibly stale, with retry and the previous query named","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (1024, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (1024, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (1440, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (1440, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (390, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (390, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

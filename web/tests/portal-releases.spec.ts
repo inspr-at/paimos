@@ -99,7 +99,8 @@ async function expectFits(page: Page) {
   expect(edged).toEqual([])
 }
 
-for (const width of [1600, 390]) {
+// P11: the narrow profile exercises the same public notes, copy and navigation assertions.
+for (const width of [390]) {
   test(`public release history leads with the marketing name at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await install(page, 'named')

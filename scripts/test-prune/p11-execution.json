@@ -2,49 +2,30 @@
   "version": 1,
   "ticket": "AEON-1683",
   "package": "P11",
-  "status": "verified-overlap-applied-partial-package",
+  "status": "unprotected-cutA-applied-protected-cuts-deferred",
   "baseline": "scripts/test-prune/baseline.json",
   "baselineSha256": "e017c08a8cbad7451c9c1615a98f03cb10de1f1c85bef0d561c86fec1faaafc0",
-  "before": 500,
+  "before": 508,
   "targetCeiling": 22,
   "unchangedSpecs": [
-    "tests/aeon-635.spec.ts",
-    "tests/delivery-arion-v5.spec.ts",
     "tests/delivery-building.spec.ts",
-    "tests/delivery-numbers.spec.ts",
-    "tests/delivery-polish.spec.ts",
     "tests/delivery-rating.spec.ts",
-    "tests/delivery-simple.spec.ts",
     "tests/delivery-tab-switch.spec.ts",
     "tests/deploy-target.spec.ts",
     "tests/footer-release-pill.spec.ts",
     "tests/performance.spec.ts",
     "tests/policies-ladders-moved.spec.ts",
-    "tests/policies-rules.spec.ts",
-    "tests/portal-public.spec.ts",
-    "tests/portal-releases.spec.ts",
-    "tests/portal-roadmap.spec.ts",
     "tests/release-codenames.spec.ts",
-    "tests/release-groups.spec.ts",
     "tests/release-header.spec.ts",
     "tests/release-historic-tenant.spec.ts",
-    "tests/release-historic.spec.ts",
-    "tests/release-own-tenant.spec.ts",
     "tests/release-picker.spec.ts",
     "tests/release-presentation.spec.ts",
-    "tests/release-switches.spec.ts",
-    "tests/release-tenant-notes.spec.ts",
     "tests/release-ticket-links.spec.ts",
-    "tests/release-update-notice.spec.ts",
     "tests/releases.spec.ts",
-    "tests/reserved-versions.spec.ts",
-    "tests/status-time.spec.ts",
-    "tests/usage-accounts.spec.ts",
     "tests/usage-dashboard.spec.ts",
-    "tests/version-reveal.spec.ts",
-    "tests/webcore-recovery.spec.ts"
+    "tests/version-reveal.spec.ts"
   ],
-  "unchangedMapping": "Every frozen browser identity in unchangedSpecs maps to itself, retaining its tier and assertions. Upstream additional cases are retained too. No protected original identity is cut or demoted.",
+  "unchangedMapping": "Every frozen browser identity in unchangedSpecs maps to itself, retaining its tier and assertions. New unique main cases remain; removed new-main profile copies have explicit cutA mappings. No protected original identity is cut or demoted.",
   "specs": [
     {
       "file": "tests/status-icons.spec.ts",
@@ -610,20 +591,2077 @@
           ]
         }
       ],
-      "actualAfter": 4
+      "actualAfter": 12
+    },
+    {
+      "file": "tests/delivery-arion-v5.spec.ts",
+      "before": 14,
+      "plannedAfter": 7,
+      "replacement": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert",
+      "retainedOriginalKeys": [
+        "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert",
+        "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple",
+        "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 1440",
+        "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 400",
+        "browser:tests/delivery-arion-v5.spec.ts:a v5 reading never moves its own tile or a control when the window or the level changes",
+        "browser:tests/delivery-arion-v5.spec.ts:missing, partial and unwatched facts are said as that, never as zero",
+        "browser:tests/delivery-arion-v5.spec.ts:the v5 readings sit in their tiles with exact counts and the plan’s targets"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 1440 dark expert",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 1440 dark simple",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 1440 light expert",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 1440 light simple",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 dark expert",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 dark simple",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 1024",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 1440"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 1440",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 1440"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 400",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 400"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:a v5 reading never moves its own tile or a control when the window or the level changes",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:a v5 reading never moves its own tile or a control when the window or the level changes"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:missing, partial and unwatched facts are said as that, never as zero",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:missing, partial and unwatched facts are said as that, never as zero"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-arion-v5.spec.ts:the v5 readings sit in their tiles with exact counts and the plan’s targets",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-arion-v5.spec.ts:the v5 readings sit in their tiles with exact counts and the plan’s targets"
+          ]
+        }
+      ],
+      "actualAfter": 7,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/delivery-numbers.spec.ts",
+      "before": 14,
+      "plannedAfter": 6,
+      "replacement": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still",
+      "retainedOriginalKeys": [
+        "browser:tests/delivery-numbers.spec.ts:Delivery is absent without delivery.read, and its address leads to the tickets",
+        "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still",
+        "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still",
+        "browser:tests/delivery-numbers.spec.ts:a project without data or without a repository says so in place",
+        "browser:tests/delivery-numbers.spec.ts:tiles and charts tell partial, missing and clipped data apart and never show stale numbers",
+        "browser:tests/delivery-numbers.spec.ts:window, level and view switches keep every control still and are the person’s own"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery is absent without delivery.read, and its address leads to the tickets",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery is absent without delivery.read, and its address leads to the tickets"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1024 dark en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1024 light en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 dark de keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 dark en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light de keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 dark de keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 dark en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light de keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:a project without data or without a repository says so in place",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:a project without data or without a repository says so in place"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:tiles and charts tell partial, missing and clipped data apart and never show stale numbers",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:tiles and charts tell partial, missing and clipped data apart and never show stale numbers"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-numbers.spec.ts:window, level and view switches keep every control still and are the person’s own",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-numbers.spec.ts:window, level and view switches keep every control still and are the person’s own"
+          ]
+        }
+      ],
+      "actualAfter": 6,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/delivery-polish.spec.ts",
+      "before": 18,
+      "plannedAfter": 12,
+      "replacement": "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group",
+      "retainedOriginalKeys": [
+        "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in dark at 1440",
+        "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in dark at 400",
+        "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in light at 1440",
+        "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in light at 400",
+        "browser:tests/delivery-polish.spec.ts:on a phone every Delivery control and the section tabs are at least 44 px",
+        "browser:tests/delivery-polish.spec.ts:on a phone only the selected project section shows its word; the others keep icon, name and tooltip",
+        "browser:tests/delivery-polish.spec.ts:pinned Learn words survive a scroll that leaves the button in place and close when the button moves",
+        "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group",
+        "browser:tests/delivery-polish.spec.ts:window and level switches keep every control still at 1440",
+        "browser:tests/delivery-polish.spec.ts:window and level switches keep every control still at 400",
+        "browser:tests/delivery-polish.spec.ts:zoom and playhead keep every control still at 1440",
+        "browser:tests/delivery-polish.spec.ts:zoom and playhead keep every control still at 400"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in dark at 1440",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in dark at 1440"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in dark at 400",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in dark at 400"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in light at 1440",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in light at 1440"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in light at 400",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:every text on Delivery reaches 4.5:1 in light at 400"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:on a phone every Delivery control and the section tabs are at least 44 px",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:on a phone every Delivery control and the section tabs are at least 44 px"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:on a phone only the selected project section shows its word; the others keep icon, name and tooltip",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:on a phone only the selected project section shows its word; the others keep icon, name and tooltip"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:pinned Learn words survive a scroll that leaves the button in place and close when the button moves",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:pinned Learn words survive a scroll that leaves the button in place and close when the button moves"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:window and level switches keep every control still at 1440",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:window and level switches keep every control still at 1440"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:window and level switches keep every control still at 400",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:window and level switches keep every control still at 400"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:zoom and playhead keep every control still at 1440",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:zoom and playhead keep every control still at 1440"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-polish.spec.ts:zoom and playhead keep every control still at 400",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-polish.spec.ts:zoom and playhead keep every control still at 400"
+          ]
+        }
+      ],
+      "actualAfter": 12,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/delivery-simple.spec.ts",
+      "before": 11,
+      "plannedAfter": 6,
+      "replacement": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 light en",
+      "retainedOriginalKeys": [
+        "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 light en",
+        "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 light en",
+        "browser:tests/delivery-simple.spec.ts:Simple explains each number in plain words, and its controls stay still through every window",
+        "browser:tests/delivery-simple.spec.ts:a failed preference save keeps the choice and shows an English warning with retry for the en profile",
+        "browser:tests/delivery-simple.spec.ts:a failed refresh keeps Learn still through the error and the retry",
+        "browser:tests/delivery-simple.spec.ts:a refused save and a failed read together keep both alerts and both retries, and Learn still"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 dark de",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 dark en",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 light en",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 dark de",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 dark en",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 light en",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:Simple explains each number in plain words, and its controls stay still through every window",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:Simple explains each number in plain words, and its controls stay still through every window"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:a failed preference save keeps the choice and shows an English warning with retry for the de profile",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:a failed preference save keeps the choice and shows an English warning with retry for the en profile"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:a failed preference save keeps the choice and shows an English warning with retry for the en profile",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:a failed preference save keeps the choice and shows an English warning with retry for the en profile"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:a failed refresh keeps Learn still through the error and the retry",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:a failed refresh keeps Learn still through the error and the retry"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-simple.spec.ts:a refused save and a failed read together keep both alerts and both retries, and Learn still",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-simple.spec.ts:a refused save and a failed read together keep both alerts and both retries, and Learn still"
+          ]
+        }
+      ],
+      "actualAfter": 6,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/portal-releases.spec.ts",
+      "before": 5,
+      "plannedAfter": 3,
+      "replacement": "browser:tests/portal-releases.spec.ts:public release history at 390",
+      "retainedOriginalKeys": [
+        "browser:tests/portal-releases.spec.ts:public release history at 390",
+        "browser:tests/portal-releases.spec.ts:public release history empty and missing",
+        "browser:tests/portal-releases.spec.ts:public release history leads with the marketing name at 390"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/portal-releases.spec.ts:public release history at 1600",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/portal-releases.spec.ts:public release history at 390"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-releases.spec.ts:public release history at 390",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-releases.spec.ts:public release history at 390"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-releases.spec.ts:public release history empty and missing",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-releases.spec.ts:public release history empty and missing"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-releases.spec.ts:public release history leads with the marketing name at 1600",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/portal-releases.spec.ts:public release history leads with the marketing name at 390"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-releases.spec.ts:public release history leads with the marketing name at 390",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-releases.spec.ts:public release history leads with the marketing name at 390"
+          ]
+        }
+      ],
+      "actualAfter": 3,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/release-groups.spec.ts",
+      "before": 10,
+      "plannedAfter": 9,
+      "replacement": "browser:tests/release-groups.spec.ts:server groups stable100 into one benefit line per ticket at 1600",
+      "retainedOriginalKeys": [
+        "browser:tests/release-groups.spec.ts:Enter and Space expand the commit disclosure and leave the release where it is",
+        "browser:tests/release-groups.spec.ts:a German profile stays in English; an explicit DE choice uses the German pill and falls back when German is empty",
+        "browser:tests/release-groups.spec.ts:a search that matches only a commit subject opens that disclosure",
+        "browser:tests/release-groups.spec.ts:compare places server groups that have no note text",
+        "browser:tests/release-groups.spec.ts:server groups stable100 into one benefit line per ticket at 1600",
+        "browser:tests/release-groups.spec.ts:two bugs on one commit are both fixes, in the detail, the filters and compare (current)",
+        "browser:tests/release-groups.spec.ts:two bugs on one commit are both fixes, in the detail, the filters and compare (snapshot)",
+        "browser:tests/release-groups.spec.ts:unannotated P0 commits stay under Other at 1600",
+        "browser:tests/release-groups.spec.ts:unannotated P0 commits stay under Other at 390"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/release-groups.spec.ts:Enter and Space expand the commit disclosure and leave the release where it is",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:Enter and Space expand the commit disclosure and leave the release where it is"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:a German profile stays in English; an explicit DE choice uses the German pill and falls back when German is empty",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:a German profile stays in English; an explicit DE choice uses the German pill and falls back when German is empty"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:a search that matches only a commit subject opens that disclosure",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:a search that matches only a commit subject opens that disclosure"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:compare places server groups that have no note text",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:compare places server groups that have no note text"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:server groups stable100 into one benefit line per ticket at 1600",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:server groups stable100 into one benefit line per ticket at 1600"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:server groups stable100 into one benefit line per ticket at 390",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:server groups stable100 into one benefit line per ticket at 1600"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:two bugs on one commit are both fixes, in the detail, the filters and compare (current)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:two bugs on one commit are both fixes, in the detail, the filters and compare (current)"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:two bugs on one commit are both fixes, in the detail, the filters and compare (snapshot)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:two bugs on one commit are both fixes, in the detail, the filters and compare (snapshot)"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:unannotated P0 commits stay under Other at 1600",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:unannotated P0 commits stay under Other at 1600"
+          ]
+        },
+        {
+          "source": "browser:tests/release-groups.spec.ts:unannotated P0 commits stay under Other at 390",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-groups.spec.ts:unannotated P0 commits stay under Other at 390"
+          ]
+        }
+      ],
+      "actualAfter": 9,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/release-own-tenant.spec.ts",
+      "before": 4,
+      "plannedAfter": 2,
+      "replacement": "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 1600 light",
+      "retainedOriginalKeys": [
+        "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 1600 light",
+        "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 390 light"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 1600 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 1600 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 1600 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 1600 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 390 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 390 light"
+          ]
+        }
+      ],
+      "actualAfter": 2,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/release-tenant-notes.spec.ts",
+      "before": 20,
+      "plannedAfter": 10,
+      "replacement": "browser:tests/release-tenant-notes.spec.ts:pma 390 all: frozen notes and both switches survive reload",
+      "retainedOriginalKeys": [
+        "browser:tests/release-tenant-notes.spec.ts:pma 1600 direct: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:pma 390 all: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:pma 390 direct: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:pma 390 header: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:ppm 1600 direct: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:ppm 390 all: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:ppm 390 direct: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:ppm 390 header: frozen notes and both switches survive reload",
+        "browser:tests/release-tenant-notes.spec.ts:ppm 390 version: frozen notes and both switches survive reload"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:pma 1600 all: frozen notes and both switches survive reload",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 all: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:pma 1600 direct: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 1600 direct: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:pma 1600 header: frozen notes and both switches survive reload",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 header: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:pma 1600 version: frozen notes and both switches survive reload",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:pma 390 all: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 all: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:pma 390 direct: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 direct: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:pma 390 header: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 header: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:portable notes visual 1600 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:portable notes visual 1600 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:portable notes visual 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:portable notes visual 390 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:ppm 1600 all: frozen notes and both switches survive reload",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:ppm 390 all: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:ppm 1600 direct: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:ppm 1600 direct: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:ppm 1600 header: frozen notes and both switches survive reload",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:ppm 390 header: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:ppm 1600 version: frozen notes and both switches survive reload",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:ppm 390 version: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:ppm 390 all: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:ppm 390 all: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:ppm 390 direct: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:ppm 390 direct: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:ppm 390 header: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:ppm 390 header: frozen notes and both switches survive reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-tenant-notes.spec.ts:ppm 390 version: frozen notes and both switches survive reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-tenant-notes.spec.ts:ppm 390 version: frozen notes and both switches survive reload"
+          ]
+        }
+      ],
+      "actualAfter": 10,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/status-time.spec.ts",
+      "before": 18,
+      "plannedAfter": 11,
+      "replacement": "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+      "retainedOriginalKeys": [
+        "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend",
+        "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+        "browser:tests/status-time.spec.ts:a failed lifeline keeps its height, says so, and retries",
+        "browser:tests/status-time.spec.ts:a project that does not mark releases stops at QA → merged and reads Created → done",
+        "browser:tests/status-time.spec.ts:a reopen crosses doing and done again into one final marker, and the strip sits at the same offset for every ticket",
+        "browser:tests/status-time.spec.ts:an open ticket reopened after a minute lands at once, then shows the time so far read again",
+        "browser:tests/status-time.spec.ts:motion › the live segment slides, past segments and the step bar only under the pointer, swatches never",
+        "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+        "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (light)",
+        "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+        "browser:tests/status-time.spec.ts:with reduced motion nothing slides, not even the live segment"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+            "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+            "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+            "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+            "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+            "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+            "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+            "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:a failed lifeline keeps its height, says so, and retries",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:a failed lifeline keeps its height, says so, and retries"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:a project that does not mark releases stops at QA → merged and reads Created → done",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:a project that does not mark releases stops at QA → merged and reads Created → done"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:a reopen crosses doing and done again into one final marker, and the strip sits at the same offset for every ticket",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:a reopen crosses doing and done again into one final marker, and the strip sits at the same offset for every ticket"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:an open ticket reopened after a minute lands at once, then shows the time so far read again",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:an open ticket reopened after a minute lands at once, then shows the time so far read again"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:motion › the live segment slides, past segments and the step bar only under the pointer, swatches never",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:motion › the live segment slides, past segments and the step bar only under the pointer, swatches never"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (dark)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (light)"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (light)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (light)"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place"
+          ]
+        },
+        {
+          "source": "browser:tests/status-time.spec.ts:with reduced motion nothing slides, not even the live segment",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-time.spec.ts:with reduced motion nothing slides, not even the live segment"
+          ]
+        }
+      ],
+      "actualAfter": 11,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/usage-accounts.spec.ts",
+      "before": 9,
+      "plannedAfter": 7,
+      "replacement": "browser:tests/usage-accounts.spec.ts:configured account states at 1440px in light",
+      "retainedOriginalKeys": [
+        "browser:tests/usage-accounts.spec.ts:a failed initial computer read reports incomplete inventory instead of all ready or empty",
+        "browser:tests/usage-accounts.spec.ts:a failed refresh retains pairing-only accounts and names their status as last known",
+        "browser:tests/usage-accounts.spec.ts:another configured account in the same pool remains visible while verification is queued",
+        "browser:tests/usage-accounts.spec.ts:configured account states at 1440px in light",
+        "browser:tests/usage-accounts.spec.ts:configured account states at 390px in light",
+        "browser:tests/usage-accounts.spec.ts:explicit pairing 403 keeps accessible accounts usable without a false service error",
+        "browser:tests/usage-accounts.spec.ts:the first computer read settles before Usage claims the complete account count"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:a failed initial computer read reports incomplete inventory instead of all ready or empty",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:a failed initial computer read reports incomplete inventory instead of all ready or empty"
+          ]
+        },
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:a failed refresh retains pairing-only accounts and names their status as last known",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:a failed refresh retains pairing-only accounts and names their status as last known"
+          ]
+        },
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:another configured account in the same pool remains visible while verification is queued",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:another configured account in the same pool remains visible while verification is queued"
+          ]
+        },
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:configured account states at 1440px in dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:configured account states at 1440px in light"
+          ]
+        },
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:configured account states at 1440px in light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:configured account states at 1440px in light"
+          ]
+        },
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:configured account states at 390px in dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:configured account states at 390px in light"
+          ]
+        },
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:configured account states at 390px in light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:configured account states at 390px in light"
+          ]
+        },
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:explicit pairing 403 keeps accessible accounts usable without a false service error",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:explicit pairing 403 keeps accessible accounts usable without a false service error"
+          ]
+        },
+        {
+          "source": "browser:tests/usage-accounts.spec.ts:the first computer read settles before Usage claims the complete account count",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/usage-accounts.spec.ts:the first computer read settles before Usage claims the complete account count"
+          ]
+        }
+      ],
+      "actualAfter": 7,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/webcore-recovery.spec.ts",
+      "before": 9,
+      "plannedAfter": 5,
+      "replacement": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)",
+      "retainedOriginalKeys": [
+        "browser:tests/webcore-recovery.spec.ts:a 2051-event access history shows its newest revocation and accurately reports the bounded window",
+        "browser:tests/webcore-recovery.spec.ts:knowledge keeps a failed second query visibly stale, with retry and the previous query named",
+        "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)",
+        "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, light)",
+        "browser:tests/webcore-recovery.spec.ts:timing failures keep typed values and controls anchored, and save again on blur"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:a 2051-event access history shows its newest revocation and accurately reports the bounded window",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:a 2051-event access history shows its newest revocation and accurately reports the bounded window"
+          ]
+        },
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:knowledge keeps a failed second query visibly stale, with retry and the previous query named",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:knowledge keeps a failed second query visibly stale, with retry and the previous query named"
+          ]
+        },
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1024, dark)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)"
+          ]
+        },
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1024, light)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)"
+          ]
+        },
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, dark)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)"
+          ]
+        },
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)"
+          ]
+        },
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, dark)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, light)"
+          ]
+        },
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, light)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, light)"
+          ]
+        },
+        {
+          "source": "browser:tests/webcore-recovery.spec.ts:timing failures keep typed values and controls anchored, and save again on blur",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/webcore-recovery.spec.ts:timing failures keep typed values and controls anchored, and save again on blur"
+          ]
+        }
+      ],
+      "actualAfter": 5,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/aeon-635.spec.ts",
+      "before": 21,
+      "plannedAfter": 15,
+      "replacement": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light",
+      "retainedOriginalKeys": [
+        "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1024 dark (AEON-635)",
+        "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1024 light (AEON-635)",
+        "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1440 dark (AEON-635)",
+        "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1440 light (AEON-635)",
+        "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 390 dark (AEON-635)",
+        "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 390 light (AEON-635)",
+        "browser:tests/aeon-635.spec.ts:busy waiting refresh retains keyboard focus and rejects repeated activation (AEON-635 fix2)",
+        "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light",
+        "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 light",
+        "browser:tests/aeon-635.spec.ts:header status stays on one line from 600px and stacks cleanly on phones light (AEON-635 fix2)",
+        "browser:tests/aeon-635.spec.ts:longer outdated-page status can wrap while Reload stays inside the sheet (AEON-635 fix2)",
+        "browser:tests/aeon-635.spec.ts:partial and unavailable pending data never report an exact zero (AEON-635)",
+        "browser:tests/aeon-635.spec.ts:successful pagination retains earlier incomplete evidence until a full refresh (AEON-635 fix2)",
+        "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 1440 (AEON-635 fix2)",
+        "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 390 (AEON-635 fix2)"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1024 dark (AEON-635)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1024 dark (AEON-635)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1024 light (AEON-635)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1024 light (AEON-635)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1440 dark (AEON-635)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1440 dark (AEON-635)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1440 light (AEON-635)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 1440 light (AEON-635)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 390 dark (AEON-635)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 390 dark (AEON-635)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 390 light (AEON-635)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:approved releases keep their controls still at 390 light (AEON-635)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:busy waiting refresh retains keyboard focus and rejects repeated activation (AEON-635 fix2)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:busy waiting refresh retains keyboard focus and rejects repeated activation (AEON-635 fix2)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1024 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1024 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:header status stays on one line from 600px and stacks cleanly on phones dark (AEON-635 fix2)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:header status stays on one line from 600px and stacks cleanly on phones light (AEON-635 fix2)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:header status stays on one line from 600px and stacks cleanly on phones light (AEON-635 fix2)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:header status stays on one line from 600px and stacks cleanly on phones light (AEON-635 fix2)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:longer outdated-page status can wrap while Reload stays inside the sheet (AEON-635 fix2)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:longer outdated-page status can wrap while Reload stays inside the sheet (AEON-635 fix2)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:partial and unavailable pending data never report an exact zero (AEON-635)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:partial and unavailable pending data never report an exact zero (AEON-635)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:successful pagination retains earlier incomplete evidence until a full refresh (AEON-635 fix2)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:successful pagination retains earlier incomplete evidence until a full refresh (AEON-635 fix2)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 1024 (AEON-635 fix2)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 1440 (AEON-635 fix2)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 1440 (AEON-635 fix2)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 1440 (AEON-635 fix2)"
+          ]
+        },
+        {
+          "source": "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 390 (AEON-635 fix2)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 390 (AEON-635 fix2)"
+          ]
+        }
+      ],
+      "actualAfter": 15,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/policies-rules.spec.ts",
+      "before": 9,
+      "plannedAfter": 5,
+      "replacement": "browser:tests/policies-rules.spec.ts:Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light",
+      "retainedOriginalKeys": [
+        "browser:tests/policies-rules.spec.ts:Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light",
+        "browser:tests/policies-rules.spec.ts:Policies at 1440 light › three cards, rules only; a risk group grows below its head at 1440 light",
+        "browser:tests/policies-rules.spec.ts:Policies at 390 light › a member reads the permission note and links only where they open at 390 light",
+        "browser:tests/policies-rules.spec.ts:Policies at 390 light › three cards, rules only; a risk group grows below its head at 390 light",
+        "browser:tests/policies-rules.spec.ts:“Rule in Policies” lands on the cross-family card and the next Tab stays inside it"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/policies-rules.spec.ts:Policies at 1440 dark › a member reads the permission note and links only where they open at 1440 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light"
+          ]
+        },
+        {
+          "source": "browser:tests/policies-rules.spec.ts:Policies at 1440 dark › three cards, rules only; a risk group grows below its head at 1440 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:Policies at 1440 light › three cards, rules only; a risk group grows below its head at 1440 light"
+          ]
+        },
+        {
+          "source": "browser:tests/policies-rules.spec.ts:Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light"
+          ]
+        },
+        {
+          "source": "browser:tests/policies-rules.spec.ts:Policies at 1440 light › three cards, rules only; a risk group grows below its head at 1440 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:Policies at 1440 light › three cards, rules only; a risk group grows below its head at 1440 light"
+          ]
+        },
+        {
+          "source": "browser:tests/policies-rules.spec.ts:Policies at 390 dark › a member reads the permission note and links only where they open at 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:Policies at 390 light › a member reads the permission note and links only where they open at 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/policies-rules.spec.ts:Policies at 390 dark › three cards, rules only; a risk group grows below its head at 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:Policies at 390 light › three cards, rules only; a risk group grows below its head at 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/policies-rules.spec.ts:Policies at 390 light › a member reads the permission note and links only where they open at 390 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:Policies at 390 light › a member reads the permission note and links only where they open at 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/policies-rules.spec.ts:Policies at 390 light › three cards, rules only; a risk group grows below its head at 390 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:Policies at 390 light › three cards, rules only; a risk group grows below its head at 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/policies-rules.spec.ts:“Rule in Policies” lands on the cross-family card and the next Tab stays inside it",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/policies-rules.spec.ts:“Rule in Policies” lands on the cross-family card and the next Tab stays inside it"
+          ]
+        }
+      ],
+      "actualAfter": 5,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/portal-public.spec.ts",
+      "before": 13,
+      "plannedAfter": 12,
+      "replacement": "browser:tests/portal-public.spec.ts:public portal catalog and vote at 390",
+      "retainedOriginalKeys": [
+        "browser:tests/portal-public.spec.ts:a catalog without release history hides the releases link",
+        "browser:tests/portal-public.spec.ts:a closed portal reads as unavailable",
+        "browser:tests/portal-public.spec.ts:a correction sends the statement and no name",
+        "browser:tests/portal-public.spec.ts:a default switch while drafting a correction preserves the displayed binding and reports conflict",
+        "browser:tests/portal-public.spec.ts:a default switch while drafting a vote preserves the displayed binding and reports conflict",
+        "browser:tests/portal-public.spec.ts:a default switch while drafting a wish preserves the displayed binding and reports conflict",
+        "browser:tests/portal-public.spec.ts:a policy from a newly selected default never enables the old catalog",
+        "browser:tests/portal-public.spec.ts:a product address keeps navigation and writes on that product",
+        "browser:tests/portal-public.spec.ts:an unavailable participation policy fails closed without closing the catalog",
+        "browser:tests/portal-public.spec.ts:disabled participation keeps the catalog readable and has no input controls",
+        "browser:tests/portal-public.spec.ts:public portal catalog and vote at 390",
+        "browser:tests/portal-public.spec.ts:status chips appear only past six features, and a wish is title and summary"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/portal-public.spec.ts:a catalog without release history hides the releases link",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:a catalog without release history hides the releases link"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:a closed portal reads as unavailable",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:a closed portal reads as unavailable"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:a correction sends the statement and no name",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:a correction sends the statement and no name"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:a default switch while drafting a correction preserves the displayed binding and reports conflict",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:a default switch while drafting a correction preserves the displayed binding and reports conflict"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:a default switch while drafting a vote preserves the displayed binding and reports conflict",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:a default switch while drafting a vote preserves the displayed binding and reports conflict"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:a default switch while drafting a wish preserves the displayed binding and reports conflict",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:a default switch while drafting a wish preserves the displayed binding and reports conflict"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:a policy from a newly selected default never enables the old catalog",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:a policy from a newly selected default never enables the old catalog"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:a product address keeps navigation and writes on that product",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:a product address keeps navigation and writes on that product"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:an unavailable participation policy fails closed without closing the catalog",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:an unavailable participation policy fails closed without closing the catalog"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:disabled participation keeps the catalog readable and has no input controls",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:disabled participation keeps the catalog readable and has no input controls"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:public portal catalog and vote at 1600",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:public portal catalog and vote at 390"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:public portal catalog and vote at 390",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:public portal catalog and vote at 390"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-public.spec.ts:status chips appear only past six features, and a wish is title and summary",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-public.spec.ts:status chips appear only past six features, and a wish is title and summary"
+          ]
+        }
+      ],
+      "actualAfter": 12,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/portal-roadmap.spec.ts",
+      "before": 3,
+      "plannedAfter": 2,
+      "replacement": "browser:tests/portal-roadmap.spec.ts:public roadmap at 390",
+      "retainedOriginalKeys": [
+        "browser:tests/portal-roadmap.spec.ts:public roadmap at 390",
+        "browser:tests/portal-roadmap.spec.ts:public roadmap empty and missing"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/portal-roadmap.spec.ts:public roadmap at 1600",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/portal-roadmap.spec.ts:public roadmap at 390"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-roadmap.spec.ts:public roadmap at 390",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-roadmap.spec.ts:public roadmap at 390"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-roadmap.spec.ts:public roadmap empty and missing",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/portal-roadmap.spec.ts:public roadmap empty and missing"
+          ]
+        }
+      ],
+      "actualAfter": 2,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/release-historic.spec.ts",
+      "before": 7,
+      "plannedAfter": 6,
+      "replacement": "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 light",
+      "retainedOriginalKeys": [
+        "browser:tests/release-historic.spec.ts:a German profile reads the backfilled pills and benefits in English",
+        "browser:tests/release-historic.spec.ts:a told ticket without commits keeps its block, without a disclosure",
+        "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 dark",
+        "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 light",
+        "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 390 dark",
+        "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 390 light"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/release-historic.spec.ts:a German profile reads the backfilled pills and benefits in English",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-historic.spec.ts:a German profile reads the backfilled pills and benefits in English"
+          ]
+        },
+        {
+          "source": "browser:tests/release-historic.spec.ts:a told ticket without commits keeps its block, without a disclosure",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-historic.spec.ts:a told ticket without commits keeps its block, without a disclosure"
+          ]
+        },
+        {
+          "source": "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 dark",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 dark"
+          ]
+        },
+        {
+          "source": "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 390 dark",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 390 dark"
+          ]
+        },
+        {
+          "source": "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 390 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-historic.spec.ts:screenshots of releases 102 and 105",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 light",
+            "browser:tests/release-presentation.spec.ts:a presented release leads with its header, then the ticket blocks at 1600 light"
+          ]
+        }
+      ],
+      "actualAfter": 6,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/release-switches.spec.ts",
+      "before": 17,
+      "plannedAfter": 16,
+      "replacement": "browser:tests/release-switches.spec.ts:Highlights is today's view and Details lists the commits open with the evidence, on 105 and 102",
+      "retainedOriginalKeys": [
+        "browser:tests/release-switches.spec.ts:Compare follows both switches",
+        "browser:tests/release-switches.spec.ts:Details search finds the commit SHAs and the evidence it shows",
+        "browser:tests/release-switches.spec.ts:EN and DE switch every text, round-trip in the address with the view, and keep ?view= of the page behind",
+        "browser:tests/release-switches.spec.ts:Highlights is today's view and Details lists the commits open with the evidence, on 105 and 102",
+        "browser:tests/release-switches.spec.ts:a choice that moves a filtered selection lands in the address with it, and survives a reload",
+        "browser:tests/release-switches.spec.ts:a missing translation shows the other language with a small badge, never blank",
+        "browser:tests/release-switches.spec.ts:arrow keys move focus and choice in both radio groups, all four directions",
+        "browser:tests/release-switches.spec.ts:empty and compare lines switch language with the rest",
+        "browser:tests/release-switches.spec.ts:search matches what the chosen language and view show",
+        "browser:tests/release-switches.spec.ts:switches fit 1600 dark in both views, and Details passes axe",
+        "browser:tests/release-switches.spec.ts:switches fit 1600 light in both views, and Details passes axe",
+        "browser:tests/release-switches.spec.ts:switches fit 390 dark in both views, and Details passes axe",
+        "browser:tests/release-switches.spec.ts:switches fit 390 light in both views, and Details passes axe",
+        "browser:tests/release-switches.spec.ts:the language is remembered per person and defaults to the app language",
+        "browser:tests/release-switches.spec.ts:the list and Compare badge a name shown in the other language",
+        "browser:tests/release-switches.spec.ts:the switches sit with search and Compare at 36 px on desktop and take their own row on phones"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/release-switches.spec.ts:Compare follows both switches",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:Compare follows both switches"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:Details search finds the commit SHAs and the evidence it shows",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:Details search finds the commit SHAs and the evidence it shows"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:EN and DE switch every text, round-trip in the address with the view, and keep ?view= of the page behind",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:EN and DE switch every text, round-trip in the address with the view, and keep ?view= of the page behind"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:Highlights is today's view and Details lists the commits open with the evidence, on 105 and 102",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:Highlights is today's view and Details lists the commits open with the evidence, on 105 and 102"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:a choice that moves a filtered selection lands in the address with it, and survives a reload",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:a choice that moves a filtered selection lands in the address with it, and survives a reload"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:a missing translation shows the other language with a small badge, never blank",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:a missing translation shows the other language with a small badge, never blank"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:arrow keys move focus and choice in both radio groups, all four directions",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:arrow keys move focus and choice in both radio groups, all four directions"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:empty and compare lines switch language with the rest",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:empty and compare lines switch language with the rest"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:screenshots of both switches on 102 and 105",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:Highlights is today's view and Details lists the commits open with the evidence, on 105 and 102",
+            "browser:tests/release-switches.spec.ts:EN and DE switch every text, round-trip in the address with the view, and keep ?view= of the page behind",
+            "browser:tests/release-switches.spec.ts:Compare follows both switches"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:search matches what the chosen language and view show",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:search matches what the chosen language and view show"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:switches fit 1600 dark in both views, and Details passes axe",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:switches fit 1600 dark in both views, and Details passes axe"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:switches fit 1600 light in both views, and Details passes axe",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:switches fit 1600 light in both views, and Details passes axe"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:switches fit 390 dark in both views, and Details passes axe",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:switches fit 390 dark in both views, and Details passes axe"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:switches fit 390 light in both views, and Details passes axe",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:switches fit 390 light in both views, and Details passes axe"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:the language is remembered per person and defaults to the app language",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:the language is remembered per person and defaults to the app language"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:the list and Compare badge a name shown in the other language",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:the list and Compare badge a name shown in the other language"
+          ]
+        },
+        {
+          "source": "browser:tests/release-switches.spec.ts:the switches sit with search and Compare at 36 px on desktop and take their own row on phones",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-switches.spec.ts:the switches sit with search and Compare at 36 px on desktop and take their own row on phones"
+          ]
+        }
+      ],
+      "actualAfter": 16,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/release-update-notice.spec.ts",
+      "before": 16,
+      "plannedAfter": 13,
+      "replacement": "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light",
+      "retainedOriginalKeys": [
+        "browser:tests/release-update-notice.spec.ts:a current page names a missing version and can dismiss it",
+        "browser:tests/release-update-notice.spec.ts:a current page on a known release shows no notice",
+        "browser:tests/release-update-notice.spec.ts:an outdated page opened on the history still shows only the newer-version notice",
+        "browser:tests/release-update-notice.spec.ts:an outdated page shows one newer-version notice when the server version is not in history",
+        "browser:tests/release-update-notice.spec.ts:an unnamed release reads as its calendar version in the toast, never as a raw number at rest",
+        "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light",
+        "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light",
+        "browser:tests/release-update-notice.spec.ts:the update toast uses the codename /api/version gave when the release detail fails, and reveals the version on hover and focus",
+        "browser:tests/release-update-notice.spec.ts:what’s new opens the one notice for a server version this build does not list",
+        "browser:tests/release-update-notice.spec.ts:what’s new with the history cached before the deploy never shows the missing notice"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:a current page names a missing version and can dismiss it",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:a current page names a missing version and can dismiss it"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:a current page on a known release shows no notice",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:a current page on a known release shows no notice"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:an outdated page opened on the history still shows only the newer-version notice",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:an outdated page opened on the history still shows only the newer-version notice"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:an outdated page shows one newer-version notice when the server version is not in history",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:an outdated page shows one newer-version notice when the server version is not in history"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:an unnamed release reads as its calendar version in the toast, never as a raw number at rest",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:an unnamed release reads as its calendar version in the toast, never as a raw number at rest"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 1600 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 1600 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 1600 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 1600 light",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 dark",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:the update toast uses the codename /api/version gave when the release detail fails, and reveals the version on hover and focus",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:the update toast uses the codename /api/version gave when the release detail fails, and reveals the version on hover and focus"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:what’s new opens the one notice for a server version this build does not list",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:what’s new opens the one notice for a server version this build does not list"
+          ]
+        },
+        {
+          "source": "browser:tests/release-update-notice.spec.ts:what’s new with the history cached before the deploy never shows the missing notice",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/release-update-notice.spec.ts:what’s new with the history cached before the deploy never shows the missing notice"
+          ]
+        }
+      ],
+      "actualAfter": 13,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
+    },
+    {
+      "file": "tests/reserved-versions.spec.ts",
+      "before": 14,
+      "plannedAfter": 13,
+      "replacement": "browser:tests/reserved-versions.spec.ts:direct reserved links open quietly and navigation skips them at 390px",
+      "retainedOriginalKeys": [
+        "browser:tests/reserved-versions.spec.ts:Settings opt-in persists, preserves flow controls and keeps both switches under the pointer",
+        "browser:tests/reserved-versions.spec.ts:a direct hidden reservation cannot become a comparison endpoint",
+        "browser:tests/reserved-versions.spec.ts:comparison choices and result counts follow their separate scopes",
+        "browser:tests/reserved-versions.spec.ts:direct reserved links open quietly and navigation skips them at 390px",
+        "browser:tests/reserved-versions.spec.ts:failed saves remain off with a retry, and error text moves no switch",
+        "browser:tests/reserved-versions.spec.ts:malformed and unreadable choices keep reserved rows hidden",
+        "browser:tests/reserved-versions.spec.ts:no footer badge is invented when only hidden reservations are newer",
+        "browser:tests/reserved-versions.spec.ts:rows toggle without changing counts, stats or controls at 1440px",
+        "browser:tests/reserved-versions.spec.ts:rows toggle without changing counts, stats or controls at 390px",
+        "browser:tests/reserved-versions.spec.ts:the footer and hover card count only visible new versions",
+        "browser:tests/reserved-versions.spec.ts:turning reservations off removes any reserved comparison endpoints",
+        "browser:tests/reserved-versions.spec.ts:withdrawn coordinates stay out of rows, details, names and statistics with opt-in false",
+        "browser:tests/reserved-versions.spec.ts:withdrawn coordinates stay out of rows, details, names and statistics with opt-in true"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:Settings opt-in persists, preserves flow controls and keeps both switches under the pointer",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:Settings opt-in persists, preserves flow controls and keeps both switches under the pointer"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:a direct hidden reservation cannot become a comparison endpoint",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:a direct hidden reservation cannot become a comparison endpoint"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:comparison choices and result counts follow their separate scopes",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:comparison choices and result counts follow their separate scopes"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:direct reserved links open quietly and navigation skips them at 1440px",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:direct reserved links open quietly and navigation skips them at 390px"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:direct reserved links open quietly and navigation skips them at 390px",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:direct reserved links open quietly and navigation skips them at 390px"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:failed saves remain off with a retry, and error text moves no switch",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:failed saves remain off with a retry, and error text moves no switch"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:malformed and unreadable choices keep reserved rows hidden",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:malformed and unreadable choices keep reserved rows hidden"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:no footer badge is invented when only hidden reservations are newer",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:no footer badge is invented when only hidden reservations are newer"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:rows toggle without changing counts, stats or controls at 1440px",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:rows toggle without changing counts, stats or controls at 1440px"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:rows toggle without changing counts, stats or controls at 390px",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:rows toggle without changing counts, stats or controls at 390px"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:the footer and hover card count only visible new versions",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:the footer and hover card count only visible new versions"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:turning reservations off removes any reserved comparison endpoints",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:turning reservations off removes any reserved comparison endpoints"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:withdrawn coordinates stay out of rows, details, names and statistics with opt-in false",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:withdrawn coordinates stay out of rows, details, names and statistics with opt-in false"
+          ]
+        },
+        {
+          "source": "browser:tests/reserved-versions.spec.ts:withdrawn coordinates stay out of rows, details, names and statistics with opt-in true",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/reserved-versions.spec.ts:withdrawn coordinates stay out of rows, details, names and statistics with opt-in true"
+          ]
+        }
+      ],
+      "actualAfter": 13,
+      "round": "cutA",
+      "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
     }
   ],
   "evidence": "docs/features/test-prune-p11.md",
   "blockers": [
-    "Tick visual approval and immutable reference digests remain pending; protected cuts stay closed.",
-    "Unexecuted runtime recipients keep their browser donors; the new stream-lifetime test is additive until its runtime execution and negative control pass.",
-    "Remote static checks are paused at night; performance config and affected unit suites require hosted CI or an approved remote entry point."
+    "Protected, after P02: see protectedAfterP02. Tick approval and immutable references remain pending; no protected anchor is removed or demoted.",
+    "Unproven runtime conversions retain browser donors, including delivery-tab-switch; unique binding, partial/stale results and retained-failure cases stay.",
+    "cutA same-host before/after browser timing and affected-set/static execution require remote capacity; earlier round timing is not reused as cutA evidence."
   ],
-  "actualAfter": 457,
+  "actualAfter": 386,
   "frozenBefore": 493,
-  "afterOnInitialBase": 450,
-  "latestMainCommit": "396567da01c9b7cf80d59661368d960bcbf88a17",
+  "afterOnInitialBase": 375,
+  "latestMainCommit": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
   "upstreamAdditionalCases": [
+    "browser:tests/delivery-flow-lanes.spec.ts:a live update grows the Builder lane only once the pointer has left, never under it",
+    "browser:tests/delivery-flow-lanes.spec.ts:above twelve rows a lane folds into \"+N more\" and expands in place, by pointer or keyboard",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 1024 dark, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 1024 light, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 1440 dark, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 1440 light, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 390 dark, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 390 light, never one bar on another",
     "browser:tests/release-update-notice.spec.ts:the update toast ends at the release name and counts its public notes by kind, without a gap or a shift",
     "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 dark",
     "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 light",
@@ -651,5 +2689,910 @@
     },
     "approximateRunnerSecondsSaved": 58.8,
     "limits": "The before summary rounds to tenths of a minute and contains two pre-existing 960px hidden-label geometry failures. This is an observed affected-set comparison, not a clean-green benchmark or a measured full-P11 saving."
+  },
+  "retainedUpstreamAdditionalCases": [
+    "browser:tests/delivery-flow-lanes.spec.ts:a live update grows the Builder lane only once the pointer has left, never under it",
+    "browser:tests/delivery-flow-lanes.spec.ts:above twelve rows a lane folds into \"+N more\" and expands in place, by pointer or keyboard",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 1024 dark, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 1024 light, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 1440 dark, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 1440 light, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 390 dark, never one bar on another",
+    "browser:tests/delivery-flow-lanes.spec.ts:ten concurrent builders grow the Builder lane at 390 light, never one bar on another",
+    "browser:tests/release-update-notice.spec.ts:the update toast ends at the release name and counts its public notes by kind, without a gap or a shift",
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light",
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 light"
+  ],
+  "protectedAfterP02": [
+    {
+      "file": "tests/aeon-635.spec.ts",
+      "protectedCases": 6,
+      "reason": "aeon-635.test.ts owns partial pending/version states; releases retains actual update/reload and shared no-shift owns geometry."
+    },
+    {
+      "file": "tests/delivery-rating.spec.ts",
+      "protectedCases": 3,
+      "reason": "Protect person marks a stopped run as rework with a reason and bound Undo; rates/projections stay in delivery-rating.test.ts."
+    },
+    {
+      "file": "tests/deploy-target.spec.ts",
+      "protectedCases": 1,
+      "reason": "deployTarget.test.ts owns destination labels and target-less eligibility; actual protected decision remains in decision-desk."
+    },
+    {
+      "file": "tests/footer-release-pill.spec.ts",
+      "protectedCases": 42,
+      "reason": "Transfer accessible What's new → history/reload navigation into releases; geometry is sampled in Releases visual state."
+    },
+    {
+      "file": "tests/release-codenames.spec.ts",
+      "protectedCases": 24,
+      "reason": "codenames.test.ts/release-presentation.test.ts own marketing names and exact copy strings; releases proves actual clipboard/link behavior."
+    },
+    {
+      "file": "tests/release-groups.spec.ts",
+      "protectedCases": 5,
+      "reason": "release-presentation.test.ts owns note/commit grouping and translations; releases exercises disclosure/search once."
+    },
+    {
+      "file": "tests/release-header.spec.ts",
+      "protectedCases": 27,
+      "reason": "release-stat-card.unit.test.ts/release-pending.test.ts own timeline/clock/partial status; no real browser per timer tick."
+    },
+    {
+      "file": "tests/release-historic-tenant.spec.ts",
+      "protectedCases": 2,
+      "reason": "Transfer historic foreign-tenant notes into release-own-tenant; one authority boundary covers current and frozen representations."
+    },
+    {
+      "file": "tests/release-historic.spec.ts",
+      "protectedCases": 4,
+      "reason": "release-surfaces.test.ts owns backfilled/frozen notes and copy fallback; Releases visual fixture uses long historic text."
+    },
+    {
+      "file": "tests/release-picker.spec.ts",
+      "protectedCases": 19,
+      "reason": "Protect create/assign release with captured project/revision and lost create response explicitly replaying the same id without membership duplication."
+    },
+    {
+      "file": "tests/release-presentation.spec.ts",
+      "protectedCases": 7,
+      "reason": "release-presentation.test.ts owns marketing title/benefit fallback and search; physical layout is sampled centrally."
+    },
+    {
+      "file": "tests/release-ticket-links.spec.ts",
+      "protectedCases": 14,
+      "reason": "Protect exact authorized ticket lookup/peek and revocation clearing the open link/panel; late-person/cache variants go to units."
+    },
+    {
+      "file": "tests/releases.spec.ts",
+      "protectedCases": 22,
+      "reason": "Protect release deep link/search/compare/Back, actual copy and detail disclosure, and server-version change → What's new → reload."
+    },
+    {
+      "file": "tests/reserved-versions.spec.ts",
+      "protectedCases": 3,
+      "reason": "Protect opt-in save refusal remaining off and hidden reserved releases excluded from comparison; preference variants stay in reserved-versions.unit.test.ts."
+    },
+    {
+      "file": "tests/usage-accounts.spec.ts",
+      "protectedCases": 1,
+      "reason": "accounts-overview.test.ts owns incomplete/retained/forbidden inventory; accounts-computers proves real error/retry presentation."
+    },
+    {
+      "file": "tests/usage-dashboard.spec.ts",
+      "protectedCases": 10,
+      "reason": "Protect range selection discarding a late prior response and honest incomplete pool/read failure with Retry."
+    },
+    {
+      "file": "tests/version-reveal.spec.ts",
+      "protectedCases": 4,
+      "reason": "Transfer actual copy/reveal/native activation into releases; version-crossfade.unit.test.ts owns transition timing."
+    }
+  ],
+  "cutA": {
+    "beforeCommit": "2f26947bb",
+    "beforeManifestSha256": "1f64fbff8d610c81f7b02338bc15750987eafca38bd85f3fb91feeb861913ebd",
+    "beforeBrowserCases": 465,
+    "afterBrowserCases": 386,
+    "removedBrowserCases": 79,
+    "protectedAnchorCuts": 0,
+    "groups": [
+      {
+        "file": "tests/delivery-arion-v5.spec.ts",
+        "before": 14,
+        "after": 7,
+        "removed": 7
+      },
+      {
+        "file": "tests/delivery-numbers.spec.ts",
+        "before": 14,
+        "after": 6,
+        "removed": 8
+      },
+      {
+        "file": "tests/delivery-polish.spec.ts",
+        "before": 18,
+        "after": 12,
+        "removed": 6
+      },
+      {
+        "file": "tests/delivery-simple.spec.ts",
+        "before": 11,
+        "after": 6,
+        "removed": 5
+      },
+      {
+        "file": "tests/portal-releases.spec.ts",
+        "before": 5,
+        "after": 3,
+        "removed": 2
+      },
+      {
+        "file": "tests/release-groups.spec.ts",
+        "before": 10,
+        "after": 9,
+        "removed": 1
+      },
+      {
+        "file": "tests/release-own-tenant.spec.ts",
+        "before": 4,
+        "after": 2,
+        "removed": 2
+      },
+      {
+        "file": "tests/release-tenant-notes.spec.ts",
+        "before": 20,
+        "after": 10,
+        "removed": 10
+      },
+      {
+        "file": "tests/status-time.spec.ts",
+        "before": 18,
+        "after": 11,
+        "removed": 7
+      },
+      {
+        "file": "tests/usage-accounts.spec.ts",
+        "before": 9,
+        "after": 7,
+        "removed": 2
+      },
+      {
+        "file": "tests/webcore-recovery.spec.ts",
+        "before": 9,
+        "after": 5,
+        "removed": 4
+      },
+      {
+        "file": "tests/aeon-635.spec.ts",
+        "before": 21,
+        "after": 15,
+        "removed": 6
+      },
+      {
+        "file": "tests/policies-rules.spec.ts",
+        "before": 9,
+        "after": 5,
+        "removed": 4
+      },
+      {
+        "file": "tests/portal-public.spec.ts",
+        "before": 13,
+        "after": 12,
+        "removed": 1
+      },
+      {
+        "file": "tests/portal-roadmap.spec.ts",
+        "before": 3,
+        "after": 2,
+        "removed": 1
+      },
+      {
+        "file": "tests/release-historic.spec.ts",
+        "before": 7,
+        "after": 6,
+        "removed": 1
+      },
+      {
+        "file": "tests/release-switches.spec.ts",
+        "before": 17,
+        "after": 16,
+        "removed": 1
+      },
+      {
+        "file": "tests/release-update-notice.spec.ts",
+        "before": 23,
+        "after": 13,
+        "removed": 10
+      },
+      {
+        "file": "tests/reserved-versions.spec.ts",
+        "before": 14,
+        "after": 13,
+        "removed": 1
+      }
+    ],
+    "mappings": [
+      {
+        "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 1440 dark expert",
+        "file": "tests/delivery-arion-v5.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 1440 dark simple",
+        "file": "tests/delivery-arion-v5.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 1440 light expert",
+        "file": "tests/delivery-arion-v5.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 1440 light simple",
+        "file": "tests/delivery-arion-v5.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 dark expert",
+        "file": "tests/delivery-arion-v5.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light expert"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 dark simple",
+        "file": "tests/delivery-arion-v5.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-arion-v5.spec.ts:Delivery v5 readings at 400 light simple"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1024 dark en keep controls still",
+        "file": "tests/delivery-numbers.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1024 light en keep controls still",
+        "file": "tests/delivery-numbers.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 dark de keep controls still",
+        "file": "tests/delivery-numbers.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 dark en keep controls still",
+        "file": "tests/delivery-numbers.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light de keep controls still",
+        "file": "tests/delivery-numbers.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 1440 light en keep controls still"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 dark de keep controls still",
+        "file": "tests/delivery-numbers.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 dark en keep controls still",
+        "file": "tests/delivery-numbers.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light de keep controls still",
+        "file": "tests/delivery-numbers.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-numbers.spec.ts:Delivery numbers at 390 light en keep controls still"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark",
+        "file": "tests/delivery-polish.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 light",
+        "file": "tests/delivery-polish.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 dark",
+        "file": "tests/delivery-polish.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 light",
+        "file": "tests/delivery-polish.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 dark",
+        "file": "tests/delivery-polish.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 light",
+        "file": "tests/delivery-polish.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-polish.spec.ts:the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 dark de",
+        "file": "tests/delivery-simple.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 light en"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 dark en",
+        "file": "tests/delivery-simple.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-simple.spec.ts:Delivery Simple at 1440 light en"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 dark de",
+        "file": "tests/delivery-simple.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 light en"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 dark en",
+        "file": "tests/delivery-simple.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-simple.spec.ts:Delivery Simple at 400 light en"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-simple.spec.ts:a failed preference save keeps the choice and shows an English warning with retry for the de profile",
+        "file": "tests/delivery-simple.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-simple.spec.ts:a failed preference save keeps the choice and shows an English warning with retry for the en profile"
+        ]
+      },
+      {
+        "source": "browser:tests/portal-releases.spec.ts:public release history at 1600",
+        "file": "tests/portal-releases.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/portal-releases.spec.ts:public release history at 390"
+        ]
+      },
+      {
+        "source": "browser:tests/portal-releases.spec.ts:public release history leads with the marketing name at 1600",
+        "file": "tests/portal-releases.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/portal-releases.spec.ts:public release history leads with the marketing name at 390"
+        ]
+      },
+      {
+        "source": "browser:tests/release-groups.spec.ts:server groups stable100 into one benefit line per ticket at 390",
+        "file": "tests/release-groups.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-groups.spec.ts:server groups stable100 into one benefit line per ticket at 1600"
+        ]
+      },
+      {
+        "source": "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 1600 dark",
+        "file": "tests/release-own-tenant.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 1600 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 390 dark",
+        "file": "tests/release-own-tenant.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-own-tenant.spec.ts:own release notes reach another tenant at 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:pma 1600 all: frozen notes and both switches survive reload",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:pma 390 all: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:pma 1600 header: frozen notes and both switches survive reload",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:pma 390 header: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:pma 1600 version: frozen notes and both switches survive reload",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:portable notes visual 1600 dark",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:portable notes visual 1600 light",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:portable notes visual 390 dark",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:portable notes visual 390 light",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:pma 390 version: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:ppm 1600 all: frozen notes and both switches survive reload",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:ppm 390 all: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:ppm 1600 header: frozen notes and both switches survive reload",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:ppm 390 header: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/release-tenant-notes.spec.ts:ppm 1600 version: frozen notes and both switches survive reload",
+        "file": "tests/release-tenant-notes.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-tenant-notes.spec.ts:ppm 390 version: frozen notes and both switches survive reload"
+        ]
+      },
+      {
+        "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 dark",
+        "file": "tests/status-time.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+          "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+        ]
+      },
+      {
+        "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 light",
+        "file": "tests/status-time.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+          "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+        ]
+      },
+      {
+        "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 dark",
+        "file": "tests/status-time.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+          "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+        ]
+      },
+      {
+        "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 390 light",
+        "file": "tests/status-time.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+          "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+        ]
+      },
+      {
+        "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 dark",
+        "file": "tests/status-time.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+          "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+        ]
+      },
+      {
+        "source": "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 960 light",
+        "file": "tests/status-time.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/status-time.spec.ts:the lifeline lands without moving anything above it, says every visit, and keeps hover, keys and tips in place",
+          "browser:tests/status-time.spec.ts:on a phone › a tap pins a segment tip and a tap anywhere in the marker row picks the nearest marker",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets says the typical and slow time per step, and its filters and Learn buttons stay put while another window or filter is counted",
+          "browser:tests/status-time.spec.ts:Delivery › Tickets in Expert: six tiles and Created → live as the first trend"
+        ]
+      },
+      {
+        "source": "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (dark)",
+        "file": "tests/status-time.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/status-time.spec.ts:on a phone › every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (light)"
+        ]
+      },
+      {
+        "source": "browser:tests/usage-accounts.spec.ts:configured account states at 1440px in dark",
+        "file": "tests/usage-accounts.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/usage-accounts.spec.ts:configured account states at 1440px in light"
+        ]
+      },
+      {
+        "source": "browser:tests/usage-accounts.spec.ts:configured account states at 390px in dark",
+        "file": "tests/usage-accounts.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/usage-accounts.spec.ts:configured account states at 390px in light"
+        ]
+      },
+      {
+        "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1024, dark)",
+        "file": "tests/webcore-recovery.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)"
+        ]
+      },
+      {
+        "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1024, light)",
+        "file": "tests/webcore-recovery.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)"
+        ]
+      },
+      {
+        "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, dark)",
+        "file": "tests/webcore-recovery.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)"
+        ]
+      },
+      {
+        "source": "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, dark)",
+        "file": "tests/webcore-recovery.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, light)"
+        ]
+      },
+      {
+        "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1024 dark",
+        "file": "tests/aeon-635.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light"
+        ]
+      },
+      {
+        "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1024 light",
+        "file": "tests/aeon-635.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light"
+        ]
+      },
+      {
+        "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 dark",
+        "file": "tests/aeon-635.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 1440 light"
+        ]
+      },
+      {
+        "source": "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 dark",
+        "file": "tests/aeon-635.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/aeon-635.spec.ts:coarse-pointer version copy (AEON-635 fix3) › 44px version-copy targets stay within their rows at 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/aeon-635.spec.ts:header status stays on one line from 600px and stacks cleanly on phones dark (AEON-635 fix2)",
+        "file": "tests/aeon-635.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/aeon-635.spec.ts:header status stays on one line from 600px and stacks cleanly on phones light (AEON-635 fix2)"
+        ]
+      },
+      {
+        "source": "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 1024 (AEON-635 fix2)",
+        "file": "tests/aeon-635.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/aeon-635.spec.ts:waiting-panel keys keep the selected release and native controls at 1440 (AEON-635 fix2)"
+        ]
+      },
+      {
+        "source": "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 1024",
+        "file": "tests/delivery-arion-v5.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/delivery-arion-v5.spec.ts:Simple keeps every Learn and section still through every window at 1440"
+        ]
+      },
+      {
+        "source": "browser:tests/policies-rules.spec.ts:Policies at 1440 dark › a member reads the permission note and links only where they open at 1440 dark",
+        "file": "tests/policies-rules.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/policies-rules.spec.ts:Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light"
+        ]
+      },
+      {
+        "source": "browser:tests/policies-rules.spec.ts:Policies at 1440 dark › three cards, rules only; a risk group grows below its head at 1440 dark",
+        "file": "tests/policies-rules.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/policies-rules.spec.ts:Policies at 1440 light › three cards, rules only; a risk group grows below its head at 1440 light"
+        ]
+      },
+      {
+        "source": "browser:tests/policies-rules.spec.ts:Policies at 390 dark › a member reads the permission note and links only where they open at 390 dark",
+        "file": "tests/policies-rules.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/policies-rules.spec.ts:Policies at 390 light › a member reads the permission note and links only where they open at 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/policies-rules.spec.ts:Policies at 390 dark › three cards, rules only; a risk group grows below its head at 390 dark",
+        "file": "tests/policies-rules.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/policies-rules.spec.ts:Policies at 390 light › three cards, rules only; a risk group grows below its head at 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/portal-public.spec.ts:public portal catalog and vote at 1600",
+        "file": "tests/portal-public.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/portal-public.spec.ts:public portal catalog and vote at 390"
+        ]
+      },
+      {
+        "source": "browser:tests/portal-roadmap.spec.ts:public roadmap at 1600",
+        "file": "tests/portal-roadmap.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/portal-roadmap.spec.ts:public roadmap at 390"
+        ]
+      },
+      {
+        "source": "browser:tests/release-historic.spec.ts:screenshots of releases 102 and 105",
+        "file": "tests/release-historic.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-historic.spec.ts:backfilled release 102 reads like release 105 at 1600 light",
+          "browser:tests/release-presentation.spec.ts:a presented release leads with its header, then the ticket blocks at 1600 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-switches.spec.ts:screenshots of both switches on 102 and 105",
+        "file": "tests/release-switches.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-switches.spec.ts:Highlights is today's view and Details lists the commits open with the evidence, on 105 and 102",
+          "browser:tests/release-switches.spec.ts:EN and DE switch every text, round-trip in the address with the view, and keep ?view= of the page behind",
+          "browser:tests/release-switches.spec.ts:Compare follows both switches"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 1600 dark",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 1600 light",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 dark",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:screenshots › shot missing 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 1600 dark",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 1600 light",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 dark",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:screenshots › shot outdated 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 dark",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 light",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 dark",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light"
+        ]
+      },
+      {
+        "source": "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 dark",
+        "file": "tests/release-update-notice.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 light"
+        ]
+      },
+      {
+        "source": "browser:tests/reserved-versions.spec.ts:direct reserved links open quietly and navigation skips them at 1440px",
+        "file": "tests/reserved-versions.spec.ts",
+        "disposition": "consolidated",
+        "destinations": [
+          "browser:tests/reserved-versions.spec.ts:direct reserved links open quietly and navigation skips them at 390px"
+        ]
+      }
+    ],
+    "measurements": {
+      "status": "before-running",
+      "host": "mbp2606",
+      "runner": "remote-spec.sh",
+      "before": {
+        "sourceCommit": "2f26947bb",
+        "completedBatches": [
+          {
+            "id": "boundaries",
+            "cases": 86,
+            "passed": 77,
+            "skipped": 9,
+            "failed": 0,
+            "runnerDisplay": "4.5m",
+            "log": "web/test-results/p11-cutA/before-boundaries.log",
+            "approximateRunnerSeconds": 270,
+            "mergeReportWallMilliseconds": 54519
+          }
+        ]
+      },
+      "after": null,
+      "runnerSecondsSaved": null,
+      "previousRefusal": "remote busy: 2/2 remote runs (CI pool 0/4); remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI",
+      "timingBasis": "Playwright merged run duration (rounded native summary); the final AEON_PW_PROCESSES wall_ms measures merge-reports only and is excluded from runner comparisons."
+    },
+    "verification": "Standing check, P11 exact lineage and canonical manifests run locally; browser/static proof pending guarded remote execution."
   }
 }

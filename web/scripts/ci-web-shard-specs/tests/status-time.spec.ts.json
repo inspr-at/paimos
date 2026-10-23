@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/status-time.spec.ts",
-    "listedTests": 18,
+    "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
         "max": 8.14,

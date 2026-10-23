@@ -52,7 +52,8 @@ async function evidence(page: Page, path: string) {
   await page.setViewportSize(size)
 }
 
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+// P11: retain admin/member assertions for desktop and the distinct mobile touch targets.
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test.describe(`Policies at ${width} ${theme}`, () => {
     if (width === 390) test.use({ hasTouch: true, isMobile: true })
     const min = width === 390 ? 44 : 24

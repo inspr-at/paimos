@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/portal-roadmap.spec.ts",
-    "listedTests": 3,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.212,

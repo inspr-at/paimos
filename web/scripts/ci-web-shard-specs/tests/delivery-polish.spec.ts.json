@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/delivery-polish.spec.ts",
-    "listedTests": 18,
+    "listedTests": 12,
     "tierTiming": {
       "caseSeconds": {
         "max": 17.033,

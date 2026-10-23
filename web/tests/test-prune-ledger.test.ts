@@ -44,6 +44,16 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     currentWeb: json('scripts/ci/web-test-tiers.json'), currentGo: json('scripts/ci/go-test-tiers.json'),
   }
   const sourceHash = (path: string) => createHash('sha256').update(read(path)).digest('hex')
+  const frozenHash = (path: string) => baseline.sourcePins.find((pin: { path: string }) => pin.path === path).sha256
+  const p01Snapshot = () => ({
+    ...structuredClone(original),
+    ledger: { ...structuredClone(original.ledger), phase: 'P01' },
+    currentWeb: { ...structuredClone(baseline.cataloguePolicy), tests: baseline.catalogue.map((row: { key: string }) => {
+      const { key: ignored, ...entry } = row
+      return entry
+    }) },
+    sourceHash: frozenHash,
+  })
   // Risk: pruning the old tours before Tick's replacement fixtures are encoded
   // would lose the central workspace/start surfaces and Goals profile coverage.
   for (const [id, fixture] of [
@@ -88,7 +98,15 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     else edited.currentWeb.tests.splice(index, 1)
     assert.equal(validateLedger({ ...edited, sourceHash }).cuts, false,
       `An unprotected unit ${operation} must pass without Tick references`)
-    assert.throws(() => validateLedger({ ...edited, sourceHash, p01: true }), {
+    // Start from a valid P01 snapshot: an advanced phase or an earlier cut
+    // must not satisfy this negative control for the wrong reason.
+    const snapshot = p01Snapshot()
+    assert.equal(validateLedger({ ...snapshot, p01: true }).cuts, false)
+    const frozenIndex = snapshot.currentWeb.tests.findIndex((row: Parameters<typeof key>[0]) => key(row) === key(unrelated))
+    assert.notEqual(frozenIndex, -1)
+    if (operation === 'rename') snapshot.currentWeb.tests[frozenIndex].name += ' (renamed without changing its risk)'
+    else snapshot.currentWeb.tests.splice(frozenIndex, 1)
+    assert.throws(() => validateLedger({ ...snapshot, p01: true }), {
       message: 'P01 cannot remove or demote any existing test execution',
     })
   }
@@ -142,14 +160,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   assert.throws(() => validateLedger({ ...original, sourceHash: () => '0'.repeat(64) }), /Frozen historical-evidence changed/)
   // Snapshot enforcement is explicit: future assertion additions and refreshed
   // timings must not be blocked by P01's one-time no-execution-change check.
-  const frozen = structuredClone(original)
-  // P01 is immutable fixture evidence; the working ledger can advance phases.
-  frozen.ledger.phase = 'P01'
-  frozen.currentWeb = { ...frozen.baseline.cataloguePolicy, tests: frozen.baseline.catalogue.map((row: { key: string }) => {
-    const { key: ignored, ...entry } = row
-    return entry
-  }) }
-  const frozenHash = (path: string) => original.baseline.sourcePins.find((pin: { path: string }) => pin.path === path).sha256
+  const frozen = p01Snapshot()
   assert.equal(validateLedger({ ...frozen, sourceHash: frozenHash, p01: true }).cuts, false)
   assert.throws(() => validateLedger({ ...frozen, sourceHash: () => '0'.repeat(64), p01: true }), /Frozen launch-policy changed/)
   frozen.currentWeb.defaultNewTier = 'ESSENTIAL'
@@ -169,7 +180,11 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
   const current = new Map<string, Parameters<typeof key>[0]>(json('scripts/ci/web-test-tiers.json').tests.map((row: Parameters<typeof key>[0]) => [key(row), row]))
   const protectedKeys = new Set(ledger.risks.flatMap((row: { currentKeys: string[] }) => row.currentKeys))
   type Mapping = { source: string; disposition: string; destinations: string[]; approval?: string }
-  type Execution = { baselineSha256: string; actualAfter: number; unchangedSpecs: string[]; specs: { file: string; before: number; actualAfter: number; replacement: string; mappings: Mapping[] }[] }
+  type Execution = {
+    baselineSha256: string; actualAfter: number; unchangedSpecs: string[]; upstreamAdditionalCases: string[]
+    specs: { file: string; before: number; actualAfter: number; replacement: string; mappings: Mapping[] }[]
+    cutA: { beforeBrowserCases: number; afterBrowserCases: number; removedBrowserCases: number; mappings: (Mapping & { file: string })[]; groups: { file: string; before: number; after: number; removed: number }[] }
+  }
   const validate = (proof: Execution) => {
     assert.equal(proof.baselineSha256, ledger.baselineSha256)
     const files = [...proof.unchangedSpecs, ...proof.specs.map(row => row.file)]
@@ -198,6 +213,26 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
       assert.deepEqual(current.get(key(row)), entry, 'An unmapped P11 original changed')
     }
     assert.equal(proof.actualAfter, [...current.values()].filter(row => row.kind === 'browser' && row.file !== undefined && owners.has(row.file)).length)
+    // Main added cases after P01. Derive this round's complete removal set
+    // from those inputs as well, so a missing new-main mapping cannot hide
+    // behind the frozen catalogue's original-only coverage.
+    const knownSources = [...originals.map(key), ...proof.upstreamAdditionalCases]
+    const removed = knownSources.filter(id => !current.has(id) && proof.cutA.groups.some(group => id.startsWith(`browser:${group.file}:`)))
+    assert.deepEqual(proof.cutA.mappings.map(row => row.source).sort(), removed.sort(), 'Missing cutA original mapping')
+    assert.equal(new Set(proof.cutA.groups.map(row => row.file)).size, proof.cutA.groups.length, 'Duplicate cutA owner')
+    for (const mapping of proof.cutA.mappings) {
+      assert.ok(mapping.source.startsWith(`browser:${mapping.file}:`), 'Incorrect cutA source owner')
+      assert.ok(!protectedKeys.has(mapping.source), 'P11 protected cuts remain closed')
+      assert.ok(mapping.destinations.length > 0 && mapping.destinations.every(id => current.has(id)), 'Missing P11 current destination')
+    }
+    for (const group of proof.cutA.groups) {
+      assert.equal(group.before, knownSources.filter(id => id.startsWith(`browser:${group.file}:`)).length)
+      assert.equal(group.after, [...current.values()].filter(row => row.kind === 'browser' && row.file === group.file).length)
+      assert.equal(group.removed, group.before - group.after)
+    }
+    assert.equal(proof.cutA.removedBrowserCases, removed.length)
+    assert.equal(proof.cutA.beforeBrowserCases - proof.cutA.afterBrowserCases, removed.length)
+    assert.equal(proof.cutA.afterBrowserCases, proof.actualAfter)
   }
   validate(execution)
   const missing = structuredClone(execution)
@@ -206,4 +241,9 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
   const dangling = structuredClone(execution)
   dangling.specs[0].mappings[0].destinations = ['browser:tests/status-icons.spec.ts:missing P11 replacement']
   assert.throws(() => validate(dangling), /Missing P11 current destination/)
+  const missingNewMain = structuredClone(execution)
+  const extra = missingNewMain.cutA.mappings.findIndex((row: Mapping) => missingNewMain.upstreamAdditionalCases.includes(row.source))
+  assert.notEqual(extra, -1, 'The negative control must retain a new-main cut')
+  missingNewMain.cutA.mappings.splice(extra, 1)
+  assert.throws(() => validate(missingNewMain), /Missing cutA original mapping/)
 })
