@@ -215,20 +215,20 @@ test('an unconnected sibling contributes nothing to the empty Desk, Goals and pr
   await expect(page.getByTestId('desk-empty')).toHaveText('Nothing waits for you')
 })
 
-test('phone status and project keys expose their full copy with text spacing', async ({ page }) => {
+test('phone status and project keys expose their full copy with text spacing', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 950 })
   const projectKey = 'DATENSCHUTZVERANTWORTLICHKEITEN-1234'
-  const mock = await mockBand(page, { sibling: 'ok', projectKey })
+  const mock = await mockBand(page, { sibling: 'ok', projectKey, lines: 2 })
   const band = await openBand(page), row = band.getByTestId('instance-pma')
   await row.locator('.instance-action').click()
-  const project = row.locator('.instance-project')
+  const home = row.locator('.instance-item').first(), project = home.locator('.instance-project')
   await expect(project).toHaveCSS('white-space', 'nowrap')
   await expect(project).toHaveAttribute('data-tip', projectKey)
   await expect(project).toHaveAttribute('data-clip-tip', '')
-  await expect(project).toHaveAttribute('tabindex', '0')
-  await page.keyboard.press('Tab'); await expect(row.locator('.instance-item')).toBeFocused()
-  await page.keyboard.press('Tab'); await expect(project).toBeFocused()
-  await expect(page.locator('.tooltip')).toHaveText(projectKey)
+  await expect(home.locator('[tabindex]')).toHaveCount(0)
+  await page.keyboard.press('Tab'); await expect(home).toBeFocused()
+  await expect(page.locator('.tooltip')).toHaveText(`Deploy the new sign-in flow to the second test host? · ${projectKey}`)
+  await page.keyboard.press('Tab'); await expect(row.locator('.instance-item').nth(1)).toBeFocused()
   await page.keyboard.press('Escape')
   await project.dispatchEvent('pointerdown', { pointerType: 'touch', pointerId: 7, button: 0, isPrimary: true })
   await page.clock.fastForward(501)
@@ -244,6 +244,60 @@ test('phone status and project keys expose their full copy with text spacing', a
   await expect(copy).toHaveAttribute('tabindex', '0')
   await expect(copy).toHaveAttribute('data-tip', /pma.*couldn't be reached.*showing/)
   await copy.focus(); await expect(copy).toBeFocused()
+
+  // The same row component must keep one Tab stop in the preview and full Desk.
+  mock.set('ok')
+  await page.getByRole('button', { name: /^Account for / }).click()
+  await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Preview the Decision Desk' }).click()
+  const preview = page.getByRole('dialog', { name: 'Decision Desk preview', exact: true })
+  const previewRows = preview.getByTestId('instance-pma').locator('.instance-item')
+  await expect(previewRows).toHaveCount(2)
+  await expect(previewRows.locator('[tabindex]')).toHaveCount(0)
+  await previewRows.first().focus()
+  await page.keyboard.press('Tab'); await expect(previewRows.nth(1)).toBeFocused()
+  await page.keyboard.press('Escape')
+  await mockDecisionDesk(page, { emptyDesk: true }); await mock.mount()
+  await page.goto('/decision-desk')
+  for (const width of [1440, 390] as const) {
+    await page.setViewportSize({ width, height: 950 })
+    const rows = page.getByTestId('instance-pma').locator('.instance-item'), first = rows.first()
+    await expect(rows).toHaveCount(2)
+    await expect(rows.locator('[tabindex]')).toHaveCount(0)
+    await expectStableControls({ controls: { first, next: rows.nth(1) }, scrollAreas: { rows: page.getByTestId('instance-pma') }, interactions: [
+      { name: 'tab directly to the next row', run: async () => { await first.focus(); await page.keyboard.press('Tab'); await expect(rows.nth(1)).toBeFocused() } },
+    ] })
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme })
+      await first.focus()
+      await expect(page.locator('.tooltip')).toHaveText(`Deploy the new sign-in flow to the second test host? · ${projectKey}`)
+      await shot(page, info, `desk-project-focus-${width}-${theme}`)
+    }
+  }
+})
+
+test('Settings connection statuses use sentence case and keep both connection cards stable', async ({ page }, info) => {
+  const mock = await mockBand(page, { sibling: 'down' })
+  await mockSettings(page, settingsData()); await mock.mount()
+  await page.route('**/api/decision-desk/connections', route => route.fulfill({ json: { connections: [{ id: 'c1', origin: SIBLING, instance: 'pma', created_at: iso(NOW), expires_at: iso(NOW + 90 * 86400_000), last_used_at: iso(NOW) }] } }))
+  await page.goto('/settings/personal')
+  const receiving = page.locator('#other-instances'), issuing = page.locator('#connected-instances')
+  await expect(receiving.getByRole('status')).toHaveText("Couldn't be reached")
+  await expect(issuing).toContainText('pma.example')
+  const notice = receiving.getByRole('checkbox', { name: 'Notify me about pma' })
+  await expectStableControls({ controls: { notice: receiving.locator('.instance-notify'), disconnect: receiving.getByRole('button', { name: 'Disconnect', exact: true }) }, scrollAreas: { receiving }, interactions: [
+    { name: 'mute without moving the status or actions', run: async () => { await notice.uncheck(); await expect(notice).not.toBeChecked() } },
+    { name: 'restore instance notifications', run: async () => { await notice.check(); await expect(notice).toBeChecked() } },
+  ] })
+  for (const width of [1440, 1024, 390] as const) {
+    await page.setViewportSize({ width, height: 950 })
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme })
+      await receiving.screenshot({ path: info.outputPath(`connections-here-${width}-${theme}.png`) })
+      await issuing.screenshot({ path: info.outputPath(`connections-home-${width}-${theme}.png`) })
+    }
+  }
+  mock.set('ended'); await page.clock.fastForward(30_000)
+  await expect(receiving.getByRole('status')).toHaveText('Connection ended')
 })
 
 test('sibling sync ages keep the number and seconds unit together', async ({ page }) => {

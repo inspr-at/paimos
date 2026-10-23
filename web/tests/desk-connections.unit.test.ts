@@ -8,7 +8,7 @@ import { renderToString } from '@vue/server-renderer'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useDeskConnections } from '../src/stores/deskConnections'
 import { useDecisionDesk } from '../src/stores/decisionDesk'
-import { readInstances, readSibling, revokeSibling, ConnectionEnded, type ElsewhereSummary } from '../src/lib/deskElsewhere'
+import { readInstances, readSibling, revokeSibling, connectionLabel, ConnectionEnded, type ElsewhereSummary } from '../src/lib/deskElsewhere'
 import { loadDeskProjection } from '../src/lib/decisionDesk'
 import { titlePrefix } from '../src/lib/deskTab'
 import DeskPreview from '../src/components/header/DeskPreview.vue'
@@ -285,12 +285,20 @@ it('clears only the departing person storage and in-memory grants on explicit si
 })
 
 it('uses plural-aware waiting copy and impersonal German across Goals and the header', async () => {
+  // Standalone Settings statuses use sentence case; inline statuses continue the instance line.
+  const states = ['ok', 'reading', 'connecting', 'ended', 'unreachable', 'not connected']
+  const english = ['Connected', 'Checking…', 'Confirm in the tab that opened', 'Connection ended', "Couldn't be reached", 'Not connected']
+  expect(states.map(state => connectionLabel(state))).toEqual(english)
+  expect(states.map(state => connectionLabel(state, { standalone: false }))).toEqual(['connected', 'checking…', 'confirm in the tab that opened', 'connection ended', "couldn't be reached", 'not connected'])
   const store = await start(), desk = useDecisionDesk(); await settle()
   expect(await html(DeskInstanceItems, { read: store.reads[0], variant: 'goals' })).toContain('1 waits for you')
   vi.mocked(loadDeskProjection).mockResolvedValue({ items: [], counts: { open: 0, held: 0, chores: 0 }, has_more: false, as_of: new Date().toISOString() })
   await desk.refresh()
   expect(desk.countTip).toBe('1 waits for you · 0 here · 1 on pma')
   language.value = 'de'
+  const german = ['Verbunden', 'Wird geprüft…', 'Im geöffneten Tab bestätigen', 'Verbindung beendet', 'Nicht erreichbar', 'Nicht verbunden']
+  expect(states.map(state => connectionLabel(state))).toEqual(german)
+  expect(states.map(state => connectionLabel(state, { standalone: false }))).toEqual(['verbunden', 'wird geprüft…', 'im geöffneten Tab bestätigen', 'Verbindung beendet', 'nicht erreichbar', 'nicht verbunden'])
   // A reactive read re-evaluates the labels after the language preference changes.
   await store.refresh(true); await desk.refresh()
   expect(desk.countTip).toBe('1 offen · 0 hier · 1 auf pma')

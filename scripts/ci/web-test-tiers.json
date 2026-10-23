@@ -8632,6 +8632,8 @@
     ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"Goals connection states and final-head evidence at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"Settings connection statuses use sentence case and keep both connection cards stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"an unconnected sibling contributes nothing to the empty Desk, Goals and preview","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"confirmation shows the account, keeps actions stable and Cancel shares nothing at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

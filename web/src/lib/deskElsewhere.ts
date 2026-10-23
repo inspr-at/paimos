@@ -96,9 +96,11 @@ export async function readSibling(sibling: DeskSibling, token: string, signal?: 
 }
 
 /** The same words for a connection state on every surface. */
-export function connectionLabel(state: string): string {
+export function connectionLabel(state: string, { standalone = true }: { standalone?: boolean } = {}): string {
   const de = displayLanguage() === 'de'
-  return ({ ok: de ? 'Verbunden' : 'Connected', reading: de ? 'wird geprüft…' : 'checking…', connecting: de ? 'im geöffneten Tab bestätigen' : 'confirm in the tab that opened', ended: de ? 'Verbindung beendet' : 'connection ended', unreachable: de ? 'nicht erreichbar' : "couldn't be reached", 'not connected': de ? 'Nicht verbunden' : 'Not connected' } as Record<string, string>)[state] ?? ''
+  const label = ({ ok: de ? 'Verbunden' : 'Connected', reading: de ? 'Wird geprüft…' : 'Checking…', connecting: de ? 'Im geöffneten Tab bestätigen' : 'Confirm in the tab that opened', ended: de ? 'Verbindung beendet' : 'Connection ended', unreachable: de ? 'Nicht erreichbar' : "Couldn't be reached", 'not connected': de ? 'Nicht verbunden' : 'Not connected' } as Record<string, string>)[state] ?? ''
+  // The German noun "Verbindung" retains its capital inside a sentence.
+  return standalone || (de && state === 'ended') ? label : label.charAt(0).toLocaleLowerCase(de ? 'de' : 'en') + label.slice(1)
 }
 export function waitingCount(count: number): string {
   if (displayLanguage() === 'de') return `${count} offen`

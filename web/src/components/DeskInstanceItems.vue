@@ -18,9 +18,9 @@ const message = computed(() => {
   const row = props.read
   switch (row.state) {
     case 'not connected': return text('see what waits for you there too', 'auch dort Wartendes anzeigen')
-    case 'connecting': return connectionLabel(row.state)
-    case 'reading': return connectionLabel(row.state)
-    case 'ended': return connectionLabel(row.state)
+    case 'connecting': return connectionLabel(row.state, { standalone: false })
+    case 'reading': return connectionLabel(row.state, { standalone: false })
+    case 'ended': return connectionLabel(row.state, { standalone: false })
     case 'unreachable': return text(`couldn't be reached${time.value ? ` · showing ${time.value}` : ''}`, `nicht erreichbar${time.value ? ` · Stand ${time.value}` : ''}`)
     case 'ok': return row.summary?.open ? waitingCount(row.summary.open) : text('nothing waits for you', 'nichts offen')
   }
@@ -77,14 +77,14 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
     <button v-if="variant === 'desk' && (read.summary?.open ?? 0) > 5" type="button" class="instance-expand" :aria-expanded="read.allItems" @click="store.showAll(read.tag)">{{ (read.summary?.open ?? 0) > 100 ? text('Show first 100', 'Erste 100 anzeigen') : text(`Show all ${read.summary!.open}`, `Alle ${read.summary!.open} anzeigen`) }}</button>
     <div v-if="showItems" class="instance-items" :style="!read.summary && read.slots ? { minHeight: `${read.slots * 44}px` } : undefined">
       <p v-if="read.state === 'unreachable' && read.summary" class="instance-asof">{{ text(`As of ${time}`, `Stand ${time}`) }}</p>
-      <a v-for="line in lines" :key="`${line.kind}:${line.id}`" class="instance-item" :href="line.url" target="_blank" rel="noopener noreferrer" :aria-label="`${line.title} · ${text(`Decide on ${read.tag}`, `Auf ${read.tag} entscheiden`)}`" @click="emit('navigate')">
+      <a v-for="line in lines" :key="`${line.kind}:${line.id}`" class="instance-item" :href="line.url" target="_blank" rel="noopener noreferrer" :data-tip="line.projectKey ? `${line.title} · ${line.projectKey}` : line.title" :aria-label="`${line.title} · ${text(`Decide on ${read.tag}`, `Auf ${read.tag} entscheiden`)}`" @click="emit('navigate')">
         <AppIcon :name="kindIcon(line.kind)" :size="14" />
         <template v-if="variant === 'goals'">
           <span v-clip-tip class="instance-title">{{ line.title }}</span>
-          <span v-clip-tip :tabindex="line.projectKey ? 0 : undefined" class="instance-project">{{ line.projectKey }}</span>
+          <span v-clip-tip class="instance-project">{{ line.projectKey }}</span>
           <time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time>
         </template>
-        <span v-else class="instance-body"><span v-clip-tip class="instance-title">{{ line.title }}</span><small><span v-clip-tip :tabindex="line.projectKey ? 0 : undefined" class="instance-project">{{ line.projectKey }}</span><span v-if="variant === 'preview'" class="instance-tag">{{ read.tag }}</span><time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time></small></span>
+        <span v-else class="instance-body"><span v-clip-tip class="instance-title">{{ line.title }}</span><small><span v-clip-tip class="instance-project">{{ line.projectKey }}</span><span v-if="variant === 'preview'" class="instance-tag">{{ read.tag }}</span><time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time></small></span>
         <span class="instance-decide"><span v-if="variant === 'desk'" class="decide-words">{{ text(`Decide on ${read.tag}`, `Auf ${read.tag} entscheiden`) }}</span><AppIcon name="external" :size="13" /></span>
       </a>
       <p v-if="variant === 'desk' && read.allItems && (read.summary?.open ?? 0) > lines.length" class="instance-asof">{{ text(`${lines.length} of ${read.summary!.open} shown. The rest are on the home Desk.`, `${lines.length} von ${read.summary!.open} angezeigt. Weitere Einträge stehen auf dem eigenen Desk.`) }}</p>

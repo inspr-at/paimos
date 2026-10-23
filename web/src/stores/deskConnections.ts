@@ -275,11 +275,11 @@ export const useDeskConnections = defineStore('deskConnections', () => {
   const text = (en: string, de: string) => displayLanguage() === 'de' ? de : en
   const breakdown = computed(() => reads.value.flatMap(r => {
     if (r.state === 'not connected') return []
-    if (r.state === 'ended') return [`${r.tag}: ${connectionLabel(r.state)}`]
+    if (r.state === 'ended') return [`${r.tag}: ${connectionLabel(r.state, { standalone: false })}`]
     if (r.summary) return [text(`${r.summary.open} on ${r.tag}`, `${r.summary.open} auf ${r.tag}`) + (r.state === 'unreachable' ? text(` (as of ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`, ` (Stand ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`) : '')]
-    return [`${r.tag}: ${connectionLabel(r.state)}`]
+    return [`${r.tag}: ${connectionLabel(r.state, { standalone: false })}`]
   }))
   const checkedAge = (seconds: number) => text(`checked ${seconds}\u00a0s ago`, `vor ${seconds}\u00a0s geprüft`)
-  const syncTooltip = (now: number) => reads.value.filter(r => r.state !== 'not connected').map(r => `${r.tag}: ${r.state === 'unreachable' || r.state === 'ended' || !r.summary ? connectionLabel(r.state) : checkedAge(Math.max(0, Math.floor((now - r.lastReadAt) / 1000)))}${r.state === 'unreachable' && r.summary ? text(` · showing ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, ` · Stand ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`) : ''}`).join('\n')
+  const syncTooltip = (now: number) => reads.value.filter(r => r.state !== 'not connected').map(r => `${r.tag}: ${r.state === 'unreachable' || r.state === 'ended' || !r.summary ? connectionLabel(r.state, { standalone: false }) : checkedAge(Math.max(0, Math.floor((now - r.lastReadAt) / 1000)))}${r.state === 'unreachable' && r.summary ? text(` · showing ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, ` · Stand ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`) : ''}`).join('\n')
   return { here, reads, discovery, count, complete, allClear, breakdown, syncTooltip, noticeEnabled, refresh, connect, cancel, acceptFragment, disconnect, expand, dismiss, setNotify, showAll }
 })
