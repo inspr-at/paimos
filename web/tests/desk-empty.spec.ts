@@ -84,9 +84,15 @@ async function syncPlacement(page: Page) {
 }
 function expectRowPlacement(at: Awaited<ReturnType<typeof syncPlacement>>, wide: boolean, step: string) {
   expect(at.inCard, `${step}: the line sits in the tab row`).toBe(false)
-  expect(at.text.height, `${step}: one 20 px line`).toBeCloseTo(20, 0)
+  if (wide && at.filter) {
+    // Decided shows the stamp filter beside the tabs. A line longer than the free end grows upward in its slot
+    // (the AEON-1477 slot), never onto the filter or down onto the list.
+    expect(at.text.height % 20, `${step}: whole 20 px lines`).toBeCloseTo(0, 0)
+    expect(at.line.x, `${step}: clear of the stamp filter`).toBeGreaterThanOrEqual(at.filter.right + 13.5)
+    expect(at.text.bottom, `${step}: never below the row`).toBeLessThanOrEqual(at.tabs.bottom + 0.5)
+  } else expect(at.text.height, `${step}: one 20 px line`).toBeCloseTo(20, 0)
   if (wide) {
-    expect(Math.abs(at.text.y + at.text.height / 2 - (at.tabs.y + at.tabs.height / 2)), `${step}: on the tabs' centre line`).toBeLessThanOrEqual(1)
+    if (!at.filter) expect(Math.abs(at.text.y + at.text.height / 2 - (at.tabs.y + at.tabs.height / 2)), `${step}: on the tabs' centre line`).toBeLessThanOrEqual(1)
     expect(at.line.right, `${step}: right-aligned at the row's free end`).toBeLessThanOrEqual(at.bar.right - 13.5)
     expect(at.line.right).toBeGreaterThanOrEqual(at.bar.right - 14.5)
     expect(at.list.y - at.tabs.bottom, `${step}: the line adds no height`).toBeLessThanOrEqual(at.gap + 0.5)
@@ -374,9 +380,13 @@ test.describe('touch', () => {
     expect(target.width, 'Try again is at least 44 px wide').toBeGreaterThanOrEqual(44)
     expect(target.height, 'Try again is at least 44 px tall').toBeGreaterThanOrEqual(44)
     // The whole box answers a tap: each corner hits the button, not a neighbour drawn over it.
+    // A miss names what was hit instead, so a cover is found from the failure alone.
     expect(await retry.evaluate(button => {
       const r = button.getBoundingClientRect()
-      return [[r.left + 1, r.top + 1], [r.right - 1, r.top + 1], [r.left + 1, r.bottom - 1], [r.right - 1, r.bottom - 1]].map(([x, y]) => button.contains(document.elementFromPoint(x, y)))
+      return [[r.left + 1, r.top + 1], [r.right - 1, r.top + 1], [r.left + 1, r.bottom - 1], [r.right - 1, r.bottom - 1]].map(([x, y]) => {
+        const hit = document.elementFromPoint(x, y)
+        return button.contains(hit) || `${x},${y} ${hit?.tagName}.${hit?.className} (button ${r.left},${r.top},${r.width}x${r.height})`
+      })
     })).toEqual([true, true, true, true])
     await page.screenshot({ path: testInfo.outputPath('AEON-1700-touch-retry-390.png'), clip: { x: 0, y: 0, width: 390, height: Math.min(844, (await box(list)).y + 180) } })
     world.failure = 0

@@ -780,7 +780,7 @@ onBeforeUnmount(() => {
         </div>
         <!-- AEON-1700: the sync line takes the row's free end on a wide row and its own line under the tabs on a narrow one.
              On the empty Open card it moves into the card instead; there is only ever one. -->
-        <div v-if="!syncInCard" class="sync-slot" data-testid="desk-sync-slot"><DeskSyncLine :line="sync" :pulse="desk.liveEvents" :busy="loading || desk.loading" @retry="tryAgain" /></div>
+        <div v-if="!syncInCard" class="sync-slot" :class="{ 'over-filter': filter !== 'decided' }" data-testid="desk-sync-slot"><DeskSyncLine :line="sync" :pulse="desk.liveEvents" :busy="loading || desk.loading" @retry="tryAgain" /></div>
         <!-- Wide rows retain the inline filter's box; narrow rows only take a filter line on Decided (AEON-1616). -->
         <div class="seg dec-filter" :class="{ reserved: filter !== 'decided' }" role="radiogroup" aria-label="Stamp" :aria-hidden="filter !== 'decided' || undefined" :inert="filter !== 'decided' || undefined">
           <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
@@ -911,6 +911,8 @@ onBeforeUnmount(() => {
    round action. Its slot is the row's own height and adds none; centred while it fits, a line that needs more room
    grows upward into the header's empty right side, never down onto the list (the AEON-1477 slot). */
 .sync-slot { grid-area: 1 / 3; align-self: stretch; position: relative; min-width: 0; }
+/* Open keeps the stamp filter's box but hides it (AEON-1616), so the line may use that space too; its right edge stays. */
+.sync-slot.over-filter { grid-column: 2 / 4; }
 .sync-slot > .desk-sync { position: absolute; right: 0; bottom: 0; min-height: 100%; max-width: 100%; justify-content: flex-end; text-align: right; }
 /* The empty Open card holds it centred, 8 px under "Nothing waits for you" (the card's own gap is 10 px). */
 .card-sync { justify-content: center; margin-top: -2px; text-align: center; }
@@ -935,7 +937,7 @@ onBeforeUnmount(() => {
   .dp-bar .dec-filter.reserved { display: none; }
   /* AEON-1700 §1: one line under the tab row (and under Decided's stamp filter), left-aligned: 8 px below the row
      above it, 14 px (--desk-list-gap) above the list. Auto-placed into the first free full-width row. */
-  .sync-slot { grid-area: auto / 1 / auto / -1; align-self: start; position: static; margin-top: calc(8px - var(--desk-row-gap)); }
+  .sync-slot, .sync-slot.over-filter { grid-area: auto / 1 / auto / -1; align-self: start; position: static; margin-top: calc(8px - var(--desk-row-gap)); }
   .sync-slot > .desk-sync { position: static; min-height: 20px; justify-content: flex-start; text-align: left; }
 }
 /* Below about 420 px the view tabs and the round action give up a little padding so the label still clears the tabs.

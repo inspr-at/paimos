@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import { deskSyncCopy, type DeskSyncLine } from '../../lib/deskSync'
 
@@ -12,7 +12,11 @@ const emit = defineEmits<{ retry: [] }>()
 const words = deskSyncCopy()
 const mark = ref<HTMLElement>()
 let reduced: MediaQueryList | undefined
-onMounted(() => { reduced = matchMedia('(prefers-reduced-motion: reduce)') })
+// ≤ 520 px the line takes its short forms (§3). Only the form on screen is in the DOM.
+const phone = matchMedia('(max-width: 520px)'), short = ref(phone.matches)
+const readPhone = () => { short.value = phone.matches }
+onMounted(() => { reduced = matchMedia('(prefers-reduced-motion: reduce)'); phone.addEventListener('change', readPhone) })
+onBeforeUnmount(() => phone.removeEventListener('change', readPhone))
 // Each live event pulses the icon slot once. The slot outlives the swap from the Live dot to "Change arrived"'s
 // refresh icon, which the same event causes, so the pulse is seen. Reduced motion keeps it still; the words carry it.
 watch(() => props.pulse, () => {
@@ -25,7 +29,7 @@ watch(() => props.pulse, () => {
   <p class="desk-sync" :class="{ warn: line.warn }" :data-state="line.state" data-testid="desk-sync">
     <span class="sync-text" tabindex="0" :data-tip="line.tip || undefined">
       <span v-if="line.icon" ref="mark" class="sync-mark"><span v-if="line.icon === 'dot'" class="sync-dot" role="img" :aria-label="words.live" data-testid="desk-sync-dot" /><AppIcon v-else class="sync-icon" :class="{ spin: line.spin }" :name="line.icon" :size="12" /></span>
-      <span class="sync-words" aria-hidden="true"><template v-for="(part, index) in line.parts" :key="index"><span v-if="'n' in part" class="sync-n">{{ part.n }}</span><template v-else-if="part.short === undefined">{{ part.text }}</template><template v-else><span class="wide">{{ part.text }}</span><span v-if="part.short" class="short">{{ part.short }}</span></template></template></span>
+      <span class="sync-words" aria-hidden="true"><template v-for="(part, index) in line.parts" :key="index"><span v-if="'n' in part" class="sync-n">{{ part.n }}</span><template v-else>{{ short && part.short !== undefined ? part.short : part.text }}</template></template></span>
       <span class="sr-only">{{ line.sentence }}</span>
     </span>
     <template v-if="line.retry"><span class="sync-sep" aria-hidden="true">·</span><button type="button" class="sync-retry" :disabled="busy" data-testid="desk-sync-retry" @click="emit('retry')">{{ words.tryAgain }}</button></template>
@@ -40,8 +44,6 @@ watch(() => props.pulse, () => {
 .sync-words { min-width: 0; text-wrap: balance; }
 /* A number slot reserves "59", so 9 s → 10 s and 3 min → 59 min never shift the words. */
 .sync-n { display: inline-block; min-width: 2ch; text-align: right; }
-.short { display: none; }
-@media (max-width: 520px) { .wide { display: none; } .short { display: inline; } }
 .sync-icon { flex: none; color: var(--ink-3); }
 .warn .sync-icon { color: inherit; }
 .warn { color: var(--warn-ink); }
@@ -57,5 +59,5 @@ watch(() => props.pulse, () => {
 .sync-retry { display: inline-flex; align-items: center; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; }
 .sync-retry:disabled { opacity: .55; cursor: default; }
 .sync-retry:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-@media (pointer: coarse) { .sync-retry { justify-content: center; min-width: 44px; min-height: 44px; margin: -12px 0; } }
+@media (pointer: coarse) { .sync-retry { justify-content: center; min-width: 44px; min-height: 44px; margin: -12px 0; border-radius: 0; } }
 </style>
