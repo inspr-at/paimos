@@ -69,7 +69,7 @@ func TestNixVendorHashGate(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			dir := t.TempDir()
 			log := filepath.Join(dir, "argv")
-			adapter := "#!/bin/bash\nprintf '%s\\n' \"$@\" >> \"$CALL_LOG\"\n" +
+			adapter := "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >> \"$CALL_LOG\"\n" +
 				"if [[ \" $* \" == *' --rebuild '* ]]; then exit \"$NIX_REBUILD_EXIT\"; fi\nexit \"$NIX_BUILD_EXIT\"\n"
 			if err := os.WriteFile(filepath.Join(dir, "nix"), []byte(adapter), 0700); err != nil {
 				t.Fatal(err)

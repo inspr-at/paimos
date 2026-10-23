@@ -161,7 +161,7 @@ func TestTagMatchesVersionFailsClosed(t *testing.T) {
 	_, guard := named(t, readWorkflow(t, "release.yml").Jobs["image-platform"], "Tag matches version.json")
 	for _, version := range []string{"261002004358.0.0", "261001205522.0.0"} {
 		dir := t.TempDir()
-		stub := "#!/bin/bash\nif [ \"$1\" = scripts/verify-release.mjs ]; then printf '%s' '{\"version\":\"" + version + "\"}'; else exec \"$REAL_NODE\" \"$@\"; fi\n"
+		stub := "#!/usr/bin/env bash\nif [ \"$1\" = scripts/verify-release.mjs ]; then printf '%s' '{\"version\":\"" + version + "\"}'; else exec \"$REAL_NODE\" \"$@\"; fi\n"
 		if err := os.WriteFile(filepath.Join(dir, "node"), []byte(stub), 0700); err != nil {
 			t.Fatal(err)
 		}
