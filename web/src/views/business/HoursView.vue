@@ -509,31 +509,31 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
         <div v-if="weekState === 'loading'" class="grid-skeleton" aria-hidden="true"><span v-for="i in 4" :key="i" class="skeleton" /></div>
         <p v-else-if="weekState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />{{ weekError }} <button type="button" class="btn sm" @click="loadWeek">Try again</button></p>
         <div v-else class="grid-scroll" tabindex="0" role="region" aria-label="Weekly hours" @keydown.left.stop @keydown.right.stop>
-          <table class="week-grid" aria-label="Hours per ticket and day">
-            <thead>
-              <tr>
-                <th scope="col" class="c-ticket">Ticket</th>
-                <th v-for="(day, i) in days" :key="i" scope="col" class="c-day" :class="{ today: dayKey(day) === todayKey, weekend: i > 4 }"><span class="d-name">{{ WEEKDAYS[i] }}</span><span class="d-date">{{ day.getDate() }}</span></th>
-                <th scope="col" class="c-total">Total</th>
+          <table class="week-grid" role="table" aria-label="Hours per ticket and day">
+            <thead role="rowgroup">
+              <tr role="row">
+                <th scope="col" role="columnheader" class="c-ticket">Ticket</th>
+                <th v-for="(day, i) in days" :key="i" scope="col" role="columnheader" class="c-day" :class="{ today: dayKey(day) === todayKey, weekend: i > 4 }"><span class="d-name">{{ WEEKDAYS[i] }}</span><span class="d-date">{{ day.getDate() }}</span></th>
+                <th scope="col" role="columnheader" class="c-total">Total</th>
               </tr>
             </thead>
-            <tbody>
-              <tr v-for="row in grid" :key="row.id">
-                <th scope="row" class="c-ticket"><div class="t-cell">
+            <tbody role="rowgroup">
+              <tr v-for="row in grid" :key="row.id" role="row">
+                <th scope="row" role="rowheader" class="c-ticket"><div class="t-cell">
                   <RouterLink v-if="ticketHref(row.id)" class="ticket-chip" :to="ticketHref(row.id)" :data-tip="`Open ${nodes.get(row.id)?.key}`">{{ nodes.get(row.id)?.key }}</RouterLink>
                   <span v-else class="ticket-chip plain">{{ nodes.get(row.id)?.key }}</span>
                   <span class="t-title">{{ nodes.get(row.id)?.title }}</span>
                 </div></th>
-                <td v-for="(cell, i) in row.cells" :key="i" class="c-day mono" :class="{ today: dayKey(days[i]) === todayKey, weekend: i > 4, empty: !cell }">{{ cell ? formatClock(cell) : '·' }}</td>
-                <td class="c-total mono">{{ formatClock(row.total) }}</td>
+                <td v-for="(cell, i) in row.cells" :key="i" role="cell" class="c-day mono" :class="{ today: dayKey(days[i]) === todayKey, weekend: i > 4, empty: !cell }">{{ cell ? formatClock(cell) : '·' }}</td>
+                <td role="cell" class="c-total mono" :aria-label="`Total ${formatClock(row.total)}`">{{ formatClock(row.total) }}</td>
               </tr>
-              <tr v-if="!grid.length" class="empty-row"><td :colspan="9">{{ canLog ? 'Nothing logged this week. Log your first entry above.' : 'Nothing logged this week.' }}</td></tr>
+              <tr v-if="!grid.length" role="row" class="empty-row"><td role="cell" :colspan="9">{{ canLog ? 'Nothing logged this week. Log your first entry above.' : 'Nothing logged this week.' }}</td></tr>
             </tbody>
-            <tfoot v-if="grid.length">
-              <tr>
-                <th scope="row" class="c-ticket">Per day</th>
-                <td v-for="(seconds, i) in perDay" :key="i" class="c-day mono" :class="{ today: dayKey(days[i]) === todayKey, weekend: i > 4, empty: !seconds }">{{ seconds ? formatClock(seconds) : '·' }}</td>
-                <td class="c-total mono grand">{{ formatClock(total) }}</td>
+            <tfoot v-if="grid.length" role="rowgroup">
+              <tr role="row">
+                <th scope="row" role="rowheader" class="c-ticket">Per day</th>
+                <td v-for="(seconds, i) in perDay" :key="i" role="cell" class="c-day mono" :class="{ today: dayKey(days[i]) === todayKey, weekend: i > 4, empty: !seconds }">{{ seconds ? formatClock(seconds) : '·' }}</td>
+                <td role="cell" class="c-total mono grand" :aria-label="`Total ${formatClock(total)}`">{{ formatClock(total) }}</td>
               </tr>
             </tfoot>
           </table>
@@ -647,6 +647,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
 .log-open { width: 100%; height: 44px; }
 .agent-note { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .grid-scroll { overflow-x: auto; }
+.grid-scroll:focus-visible { outline: 1px solid var(--line); box-shadow: none; }
 .week-grid { width: 100%; min-width: 720px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13px; }
 .week-grid th, .week-grid td { height: 40px; padding: 0 10px; border-bottom: 1px solid var(--line); text-align: right; font-weight: 400; }
 .week-grid thead th { height: 44px; font: 500 10px/1.2 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--line-2); font-variant-ligatures: none; }
@@ -760,13 +761,28 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .conflict .btn { margin-left: 24px; }
   .hint { display: none; }
 }
-/* Reclaim key padding before the 1 px type step: even adjacent full-day
-   values need 6 px of clear space in the bundled mono font on Linux. */
+/* Keep seven equal day columns on phones; the key and total share a line above.
+   Explicit table roles preserve the reading order when rows use CSS grid. */
 @media (max-width: 520px) {
-  .week-grid .c-ticket { width: 58px; padding-left: 0; }
-  .week-grid .ticket-chip { padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); font-size: 10.5px; }
-  .week-grid .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
-  .week-grid .c-day { font-size: 10px; }
-  .week-grid .c-total { width: 44px; padding-left: 1px; padding-right: 1px !important; font-size: 10.5px; }
+  .grid-scroll { padding: 0 12px; }
+  .week-grid, .week-grid thead, .week-grid tbody, .week-grid tfoot { display: block; }
+  .week-grid tr { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+  .week-grid thead tr { position: relative; border-bottom-color: var(--line-2); }
+  .week-grid tbody tr { position: relative; }
+  .week-grid tfoot tr { border-bottom: 0; }
+  .week-grid th, .week-grid td { border-bottom: 0; }
+  .week-grid .c-ticket { grid-column: 1 / 5; grid-row: 1; width: auto; height: 32px; padding: 0; align-content: center; }
+  .week-grid .ticket-chip { position: static; padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); font-size: 11.5px; }
+  .week-grid a.ticket-chip::before { content: ''; position: absolute; inset: 0; z-index: 1; width: auto; height: auto; transform: none; }
+  .week-grid .ticket-chip:focus-visible { outline: none; }
+  .week-grid tbody tr:has(.ticket-chip:focus-visible) { box-shadow: var(--focus-ring); }
+  .week-grid .c-day { grid-row: 2; width: auto; height: 32px; padding: 0 2px !important; text-align: center; align-content: center; font-size: clamp(10px, 2.95vw, 11.5px); }
+  .week-grid thead .c-day { grid-row: 1; height: 44px; }
+  .week-grid .c-total { grid-column: 5 / -1; grid-row: 1; width: auto; height: 32px; padding: 0 !important; align-content: center; font-size: 12px; }
+  .week-grid tfoot .c-ticket { font: 600 11.5px/1 var(--mono); letter-spacing: 0; text-transform: none; color: var(--ink); }
+  /* Keep both column names available to screen readers without taking space. */
+  .week-grid thead .c-ticket, .week-grid thead .c-total { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .week-grid .empty-row { display: block; }
+  .week-grid .empty-row td { display: block; height: auto; padding: 18px 0; }
 }
 </style>

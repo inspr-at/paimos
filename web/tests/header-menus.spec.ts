@@ -535,13 +535,18 @@ test.describe('phones', () => {
     // A unique face prevents the pinned system JetBrains from satisfying the
     // probe early. A proportional fallback makes this an actual metric swap.
     await page.addStyleTag({ content: '@font-face { font-family: HeaderLateMono; src: url("/header-late-mono.woff2"); font-weight: 100 800; font-display: swap; } :root { --mono: HeaderLateMono, var(--font); }' })
+    const inkWidth = () => key.evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect().width })
+    let fallbackWidth = 0
     try {
       await requested
       expect(await page.evaluate(() => document.fonts.check('12px HeaderLateMono'))).toBe(false)
       await page.setViewportSize({ width: 415, height: 844 })
+      fallbackWidth = await inkWidth()
     } finally { release() }
     await page.evaluate(async () => { await document.fonts.load('12px HeaderLateMono'); await document.fonts.ready })
     expect(await page.evaluate(() => document.fonts.check('12px HeaderLateMono'))).toBe(true)
+    expect(fallbackWidth, 'the proportional fallback has a positive text sample').toBeGreaterThan(0)
+    expect(Math.abs(await inkWidth() - fallbackWidth), 'the held font actually changes the ticket key metrics').toBeGreaterThan(.5)
     await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
   })

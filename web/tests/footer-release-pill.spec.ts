@@ -239,10 +239,15 @@ async function textFits(page: Page) {
       const ellipsis = getComputedStyle(clip).textOverflow === 'ellipsis'
       if (rect.top < box.top - .5 || rect.bottom > box.bottom + .5 || (!ellipsis && (rect.left < box.left - .5 || rect.right > box.right + .5))) errors.push(`${text.textContent}: ${JSON.stringify({ rect: rect.toJSON(), clip: box.toJSON() })}`)
     }
-    return { errors, measured }
+    const layout = errors.length ? [control, ...control.querySelectorAll('*')].map(node => {
+      const style = getComputedStyle(node)
+      return { class: node.className, width: node.getBoundingClientRect().width, font: style.font,
+        min: style.minWidth, max: style.maxWidth, flex: style.flex }
+    }) : []
+    return { errors, measured, layout }
   })
   expect(result.measured).toBeGreaterThan(5)
-  expect(result.errors).toEqual([])
+  expect(result.errors, JSON.stringify(result.layout)).toEqual([])
 }
 
 async function controlBoxes(page: Page) {
