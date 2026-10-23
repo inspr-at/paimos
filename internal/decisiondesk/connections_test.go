@@ -6,6 +6,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+ "encoding/base64"
+ "sync"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -325,6 +327,197 @@ func TestSummaryPreflightAllowsOnlyConfiguredReadOriginsAndHeaders(t *testing.T)
 		m.summaryPreflight(w, r)
 		if w.Code != tc.status || w.Header().Get("Access-Control-Allow-Credentials") != "" {
 			t.Fatalf("preflight: %d, want %d", w.Code, tc.status)
+		}
+	}
+}
+
+func testPKCEChallenge() string {
+	hash := sha256.Sum256([]byte(strings.Repeat("v", 43)))
+	return base64.RawURLEncoding.EncodeToString(hash[:])
+}
+
+// Risk M1: browser history becomes a reusable bearer, or a stolen/replayed code
+// can be exchanged without the initiating browser's state and PKCE verifier.
+func TestConnectionHistoryCodeRequiresSingleUsePKCE(t *testing.T) {
+	f := setup(t)
+	sibling := config.Sibling{Tag: "pma", Origin: "https://pma.example"}
+	f.m.WithInstances(config.Instances{Here: "ppm", Siblings: []config.Sibling{sibling}})
+	person := f.person
+	person.BrowserSession = true
+	request := func(method, path, origin, token string, body any) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(body)
+		r := httptest.NewRequest(method, path, bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(t.Context(), person))
+		r.Header.Set("Origin", origin)
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		return w
+	}
+	for n, scenario := range []string{"used", "expired"} {
+		state := strings.Repeat(string(rune('a'+n)), 43)
+		w := request("POST", "/api/decision-desk/connections", "http://example.com", "", map[string]string{"origin": sibling.Origin, "state": state, "code_challenge": testPKCEChallenge()})
+		if w.Code != 201 {
+			t.Fatalf("consent: %d %s", w.Code, w.Body.String())
+		}
+		var out struct {
+			URL string `json:"redirect_url"`
+		}
+		if json.Unmarshal(w.Body.Bytes(), &out) != nil {
+			t.Fatal("invalid redirect")
+		}
+		u, err := url.Parse(out.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		params, err := url.ParseQuery(u.Fragment)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code := params.Get("code")
+		if code == "" || params.Has("token") || strings.Contains(out.URL, "desk_") {
+			t.Fatal("history received a bearer instead of a single-use code")
+		}
+		if w = request("GET", "/api/decision-desk/owner-summary", sibling.Origin, code, nil); w.Code != 401 {
+			t.Fatalf("history code granted a read: %d", w.Code)
+		}
+		var stored []byte
+		var seconds float64
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT exchange_code_hash,extract(epoch FROM exchange_expires_at-created_at)::float8 FROM desk_instance_connections WHERE tenant_id=$1 AND state_hash=$2`, person.TenantID, func() []byte { h := sha256.Sum256([]byte(state)); return h[:] }()).Scan(&stored, &seconds); err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.Sum256([]byte(code))
+		if !bytes.Equal(stored, h[:]) || seconds < 59 || seconds > 65 {
+			t.Fatal("code must be hashed and expire in about 60 seconds")
+		}
+		exchange := func(state, verifier string) *httptest.ResponseRecorder {
+			return request("POST", "/api/decision-desk/connections/exchange", sibling.Origin, "", map[string]string{"code": code, "state": state, "code_verifier": verifier})
+		}
+		if w = exchange(state, strings.Repeat("w", 43)); w.Code != 401 {
+			t.Fatalf("wrong verifier: %d %s", w.Code, w.Body.String())
+		}
+		if w = exchange(strings.Repeat("z", 43), strings.Repeat("v", 43)); w.Code != 401 {
+			t.Fatalf("wrong state: %d", w.Code)
+		}
+		if scenario == "expired" {
+			f.exec(t, `UPDATE desk_instance_connections SET exchange_expires_at=clock_timestamp()-interval '1 second' WHERE tenant_id=$1 AND exchange_code_hash=$2`, person.TenantID, h[:])
+			if w = exchange(state, strings.Repeat("v", 43)); w.Code != 401 {
+				t.Fatalf("expired code: %d", w.Code)
+			}
+			continue
+		}
+		w = exchange(state, strings.Repeat("v", 43))
+		var credential struct {
+			Token string `json:"token"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &credential) != nil || credential.Token == "" {
+			t.Fatalf("correct exchange: %d %s", w.Code, w.Body.String())
+		}
+		if w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Header().Get("Vary"), "Origin") || w.Header().Get("Access-Control-Allow-Credentials") != "" {
+			t.Fatal("exchange permits credential caching or cookies")
+		}
+		if w = exchange(state, strings.Repeat("v", 43)); w.Code != 401 {
+			t.Fatalf("replayed code: %d", w.Code)
+		}
+		// The exact value in history cannot read, even after successful exchange.
+		if w = request("GET", "/api/decision-desk/owner-summary", sibling.Origin, code, nil); w.Code != 401 {
+			t.Fatal("used history value granted a read")
+		}
+		if w = request("GET", "/api/decision-desk/owner-summary", sibling.Origin, credential.Token, nil); w.Code != 200 {
+			t.Fatalf("body token cannot read: %d %s", w.Code, w.Body.String())
+		}
+		if w = request("DELETE", "/api/decision-desk/owner-summary", sibling.Origin, credential.Token, nil); w.Code != 204 {
+			t.Fatalf("self-revoke: %d %s", w.Code, w.Body.String())
+		}
+		if w = request("GET", "/api/decision-desk/owner-summary", sibling.Origin, credential.Token, nil); w.Code != 401 {
+			t.Fatal("self-revoked token still reads")
+		}
+	}
+}
+
+// Risk M2: normal parallel polls queue behind the tenant writer fence, or a
+// valid bearer can load the Desk without a per-token request budget.
+func TestSummaryParallelReadsAvoidFenceAndRateLimitBurst(t *testing.T) {
+	f := setup(t)
+	sibling := config.Sibling{Tag: "pma", Origin: "https://pma.example"}
+	f.m.WithInstances(config.Instances{Here: "ppm", Siblings: []config.Sibling{sibling}})
+	token := "desk_" + f.person.TenantID + "_" + f.person.ID + "_" + strings.Repeat("a", 43)
+	hash := sha256.Sum256([]byte(token))
+	stateHash := sha256.Sum256([]byte("hot-path"))
+	// A recent usage timestamp makes the no-write claim independent of clocks.
+	f.exec(t, `INSERT INTO desk_instance_connections(tenant_id,principal_id,origin,instance_tag,token_hash,state_hash,last_used_at) VALUES($1,$2,$3,'pma',$4,$5,clock_timestamp())`, f.person.TenantID, f.person.ID, sibling.Origin, hash[:], stateHash[:])
+	read := func() *httptest.ResponseRecorder {
+		ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+		defer cancel()
+		r := httptest.NewRequest("GET", "/api/decision-desk/owner-summary", nil).WithContext(ctx)
+		r.Header.Set("Origin", sibling.Origin)
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		return w
+	}
+	// The held fence proves each simultaneous read completed without acquiring
+	// it. The barrier releases both readers together; timeouts only guard hangs.
+	holder, err := f.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(t.Context())
+	if err := db.LockTenant(t.Context(), holder, f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan *httptest.ResponseRecorder, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for range 2 {
+		go func() { ready.Done(); <-start; results <- read() }()
+	}
+	ready.Wait()
+	close(start)
+	for range 2 {
+		w := <-results
+		if w.Code != 200 {
+			t.Fatalf("recent usage read took held fence: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if err := holder.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		if w := read(); w.Code != 200 {
+			t.Fatalf("within budget: %d %s", w.Code, w.Body.String())
+		}
+	}
+	w := read()
+	if w.Code != 429 || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("burst has no per-token limit: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestExchangeAndDisconnectPreflight(t *testing.T) {
+	m := New(nil).WithInstances(config.Instances{Siblings: []config.Sibling{{Tag: "pma", Origin: "https://pma.example"}}})
+	for _, tc := range []struct {
+		path, method, headers, origin string
+		want                          int
+	}{
+		{"/api/decision-desk/connections/exchange", "POST", "Content-Type", "https://pma.example", 204},
+		{"/api/decision-desk/connections/exchange", "POST", "Content-Type, Authorization", "https://pma.example", 403},
+		{"/api/decision-desk/connections/exchange", "GET", "Content-Type", "https://pma.example", 403},
+		{"/api/decision-desk/connections/exchange", "POST", "Content-Type", "https://evil.example", 403},
+		{"/api/decision-desk/owner-summary", "DELETE", "Authorization", "https://pma.example", 204},
+	} {
+		r := httptest.NewRequest("OPTIONS", tc.path, nil)
+		r.Header.Set("Origin", tc.origin)
+		r.Header.Set("Access-Control-Request-Method", tc.method)
+		r.Header.Set("Access-Control-Request-Headers", tc.headers)
+		w := httptest.NewRecorder()
+		mux := http.NewServeMux()
+		m.Mount(mux)
+		mux.ServeHTTP(w, r)
+		if w.Code != tc.want || w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Header().Get("Vary"), "Origin") || w.Header().Get("Access-Control-Allow-Credentials") != "" {
+			t.Fatalf("%s preflight: %d %s", tc.path, w.Code, w.Body.String())
 		}
 	}
 }
