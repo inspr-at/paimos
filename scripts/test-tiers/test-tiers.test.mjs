@@ -1500,8 +1500,14 @@ test('AEON-1696 refreshed browser costs charge the measured launch wall and sche
     const timing=records.get(recorded.file)?.tierTiming
     assert.ok(recorded.measuredSeconds>0,recorded.file)
     assert.equal(recorded.seconds,Number((recorded.measuredSeconds*proof.safetyFactor).toFixed(6)),recorded.file)
-    assert.deepEqual(timing,{caseSeconds:recorded.caseSeconds,seconds:recorded.seconds,
-      selectedTests:recorded.selectedTests},recorded.file)
+    const schedulingTests=recorded.schedulingTests??recorded.selectedTests
+    const schedulingSeconds=recorded.schedulingSeconds??recorded.seconds
+    if(recorded.schedulingTests!==undefined) {
+      assert.equal(schedulingTests,records.get(recorded.file).listedTests,recorded.file)
+      assert.equal(schedulingSeconds,recorded.seconds*schedulingTests/recorded.selectedTests,recorded.file)
+    }
+    assert.deepEqual(timing,{caseSeconds:recorded.caseSeconds,seconds:schedulingSeconds,
+      selectedTests:schedulingTests},recorded.file)
   }
   assert.ok(proof.maxMeasuredOverheadSeconds<=120,'source job setup, collection and reporting fit the retained reserve')
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')

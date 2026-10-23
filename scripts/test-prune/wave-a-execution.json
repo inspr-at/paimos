@@ -1915,10 +1915,10 @@
       "reason": "The first required-tier rerun rejected the six G7 profiles restored by the exact requested P06 head because the consolidation had narrowed its expected set to two. Restore an exact eight-name expectation, retaining every ESSENTIAL and PR/merge-group selection assertion. No test identity, selector behavior or scheduling limit changes."
     },
     "outsideWriteSet": [
-      "scripts/test-tiers/browser-areas.test.mjs \u2014 align the consolidated inventory assertion with all eight G7 profiles restored by the requested P06 head.",
-      "scripts/test-tiers/test-tiers.test.mjs \u2014 preserve both original and P02 staged historical budget counterexamples after shared main conflict.",
-      "web/tests/test-prune-ledger.test.ts \u2014 retain P02 authority regressions alongside consolidated P11/frozen-P01 fixture handling.",
-      "web/tests/chat-thread-fixtures.ts \u2014 remove only the incoming extra EOF blank line flagged by git diff --check."
+      "scripts/test-tiers/browser-areas.test.mjs — align the consolidated inventory assertion with all eight G7 profiles restored by the requested P06 head.",
+      "scripts/test-tiers/test-tiers.test.mjs — preserve both original and P02 staged historical budget counterexamples after shared main conflict.",
+      "web/tests/test-prune-ledger.test.ts — retain P02 authority regressions alongside consolidated P11/frozen-P01 fixture handling.",
+      "web/tests/chat-thread-fixtures.ts — remove only the incoming extra EOF blank line flagged by git diff --check."
     ],
     "preP02Main": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
     "preP02Catalogue": {
@@ -2369,60 +2369,60 @@
         "file": "tests/header-menus.spec.ts",
         "cases": 92,
         "missing": [
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar 390 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar-business 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar-business 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar-business 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar-business 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar-business 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a avatar-business 390 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-admin 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-admin 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-admin 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-admin 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-admin 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-admin 390 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-guest 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-guest 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-guest 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-guest 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-guest 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-guest 390 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-member 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-member 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-member 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-member 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-member 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a gear-member 390 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a header 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a header 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a header 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a header 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a header 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a header 390 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a help-member 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a help-member 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a help-member 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a help-member 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a help-member 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a help-member 390 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a hooks-member 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a hooks-member 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a hooks-member 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a hooks-member 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a hooks-member 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a hooks-member 390 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a ticket-header-business 1600 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a ticket-header-business 1600 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a ticket-header-business 375 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a ticket-header-business 375 light",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a ticket-header-business 390 dark",
-          "browser:tests/header-menus.spec.ts:screenshots \u203a ticket-header-business 390 light"
+          "browser:tests/header-menus.spec.ts:screenshots › avatar 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar 390 light",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar-business 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar-business 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar-business 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar-business 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar-business 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › avatar-business 390 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-admin 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-admin 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-admin 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-admin 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-admin 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-admin 390 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-guest 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-guest 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-guest 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-guest 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-guest 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-guest 390 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-member 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-member 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-member 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-member 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-member 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › gear-member 390 light",
+          "browser:tests/header-menus.spec.ts:screenshots › header 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › header 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › header 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › header 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › header 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › header 390 light",
+          "browser:tests/header-menus.spec.ts:screenshots › help-member 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › help-member 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › help-member 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › help-member 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › help-member 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › help-member 390 light",
+          "browser:tests/header-menus.spec.ts:screenshots › hooks-member 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › hooks-member 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › hooks-member 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › hooks-member 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › hooks-member 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › hooks-member 390 light",
+          "browser:tests/header-menus.spec.ts:screenshots › ticket-header-business 1600 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › ticket-header-business 1600 light",
+          "browser:tests/header-menus.spec.ts:screenshots › ticket-header-business 375 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › ticket-header-business 375 light",
+          "browser:tests/header-menus.spec.ts:screenshots › ticket-header-business 390 dark",
+          "browser:tests/header-menus.spec.ts:screenshots › ticket-header-business 390 light"
         ]
       },
       {
@@ -4101,7 +4101,10 @@
           "min": 1.933,
           "median": 5.374,
           "max": 14.225
-        }
+        },
+        "schedulingTests": 29,
+        "schedulingSeconds": 211.36411865384616,
+        "normalization": "The split-owner inventory retains its full native denominator of 29; the 26 measured gated cases keep exactly the same projected cost. No measurement of the three other cases is claimed."
       },
       {
         "file": "tests/no-shift-dialogs.spec.ts",
@@ -9041,8 +9044,8 @@
         "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 Parent stays out of the Epic group and the outline, and the column toggle does not move the other columns",
         "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 Parent turns on at 40 percent, stays off at 10 percent, and a live parent does not change the columns",
         "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 S5: Display keeps a dropped column ticked with \"hidden at this width\", and its sort stays offered",
-        "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 Title keeps at least 240 px at table widths 760\u20131440 for the 1388 set, every column and wide saved widths",
-        "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 a column that left returns only with 16 px to spare: \u00b18 px around a threshold keeps the set",
+        "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 Title keeps at least 240 px at table widths 760–1440 for the 1388 set, every column and wide saved widths",
+        "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 a column that left returns only with 16 px to spare: ±8 px around a threshold keeps the set",
         "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 a group of 50,000 tickets keeps its compact priority mix whole, in a column as wide as with three",
         "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 columns leave in the give-way order; sorted by Updated, Updated stays and the next one leaves instead",
         "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 group row priority mix: compact \"3 high +3\" when the full mix does not fit, the full mix in its tip, never ellipsized",
@@ -9100,7 +9103,7 @@
         "browser:tests/session-recovery.spec.ts:stale observation clears confirmation and refreshes; uncertain retry keeps request identity",
         "browser:tests/settings-computers-table.spec.ts:a changed computer: the chip says so and saves nothing; Undo never overwrites a newer change",
         "browser:tests/settings-computers-table.spec.ts:an expired sign-in says Expired in its cell and Needs you verifies it",
-        "browser:tests/settings-computers-table.spec.ts:on a phone \u203a each computer is a stack of rows, nothing scrolls sideways, targets are 44 px and the chip moves nothing",
+        "browser:tests/settings-computers-table.spec.ts:on a phone › each computer is a stack of rows, nothing scrolls sideways, targets are 44 px and the chip moves nothing",
         "browser:tests/settings-computers-table.spec.ts:one table: a row per computer, a column per account; every cell and list action of the old grid and list is reachable",
         "browser:tests/settings-computers-table.spec.ts:past six accounts the computer column stays in view while the table scrolls sideways",
         "browser:tests/settings-computers-table.spec.ts:the New starts chip saves the mode with every other field kept, without moving anything, and Undo restores it",
@@ -9151,14 +9154,14 @@
         "browser:tests/visual/public-quote.spec.ts:V-public-quote-390-dark",
         "browser:tests/visual/public-quote.spec.ts:V-public-quote-390-light",
         "browser:tests/wide.spec.ts:P02 a wide table accepts native column drag and keyboard resize and restores the stored width",
-        "browser:tests/wide.spec.ts:back trail \u203a following links inside the panel builds a trail with Back and Alt+Left; list moves clear it",
-        "browser:tests/wide.spec.ts:edit mode \u203a Cancel with changes asks first; a conflict keeps the draft",
-        "browser:tests/wide.spec.ts:edit mode \u203a Edit (or e) edits title, text and properties together with one Save",
-        "browser:tests/wide.spec.ts:edit mode \u203a the full page edits in a writing layout with a live preview",
-        "browser:tests/wide.spec.ts:wide lists \u203a columns grow with the width: Parent, Release, Tags and Created join from about 1800px",
-        "browser:tests/wide.spec.ts:wide lists \u203a columns resize by dragging the header edge and fit their content on double-click",
-        "browser:tests/wide.spec.ts:wide lists \u203a the Display menu shows, hides and reorders columns, saved per project on the server",
-        "browser:tests/wide.spec.ts:wide lists \u203a the docked list fills everything left of the panel; the splitter resizes it and is saved",
+        "browser:tests/wide.spec.ts:back trail › following links inside the panel builds a trail with Back and Alt+Left; list moves clear it",
+        "browser:tests/wide.spec.ts:edit mode › Cancel with changes asks first; a conflict keeps the draft",
+        "browser:tests/wide.spec.ts:edit mode › Edit (or e) edits title, text and properties together with one Save",
+        "browser:tests/wide.spec.ts:edit mode › the full page edits in a writing layout with a live preview",
+        "browser:tests/wide.spec.ts:wide lists › columns grow with the width: Parent, Release, Tags and Created join from about 1800px",
+        "browser:tests/wide.spec.ts:wide lists › columns resize by dragging the header edge and fit their content on double-click",
+        "browser:tests/wide.spec.ts:wide lists › the Display menu shows, hides and reorders columns, saved per project on the server",
+        "browser:tests/wide.spec.ts:wide lists › the docked list fills everything left of the panel; the splitter resizes it and is saved",
         "browser:tests/work-aggregates.spec.ts:live leaf aggregates refresh from import.node_created with unchanged parent status",
         "browser:tests/work-aggregates.spec.ts:live leaf aggregates refresh from import.node_updated with unchanged parent status",
         "browser:tests/work-aggregates.spec.ts:live leaf aggregates refresh from import.parent_changed with unchanged parent status",
@@ -9175,7 +9178,9 @@
       ],
       "ciOnlyFiles": [
         "tests/visual/public-quote.spec.ts"
-      ]
+      ],
+      "nonVisualPassed": 135,
+      "visualCasesRequirePinnedCI": 4
     },
     "constraints": {
       "shardCountUnchanged": true,
@@ -9365,6 +9370,184 @@
         "fontSetupIncludedInLaunches": true
       }
     ],
-    "maxMeasuredOverheadSeconds": 106.690901
+    "maxMeasuredOverheadSeconds": 106.690901,
+    "negativeControl": {
+      "source": "125812f8369b77de26a89e1facd916a76a418cb6",
+      "staleRecordsRejected": 306,
+      "unchangedHistoricalAssertions": true
+    },
+    "checks": {
+      "canonicalManifests": "passed",
+      "targetedShardRegressions": {
+        "passed": 8,
+        "failed": 0,
+        "includesOriginalSplitOwnerInvariant": true
+      },
+      "staticRemote": "rerun pending after native-denominator normalization",
+      "linuxShard11": {
+        "status": "permitted-cases-passed-ci-visual-still-required",
+        "hostClass": "approved-linux-runner",
+        "casesPassed": 135,
+        "wrapperWallSeconds": 401.093,
+        "batches": [
+          {
+            "batch": 1,
+            "specs": [
+              "tests/definitions-p3.spec.ts",
+              "tests/aeon-1470-list-titles.spec.ts",
+              "tests/shell.spec.ts",
+              "tests/work-aggregates.spec.ts",
+              "tests/session-recovery.spec.ts",
+              "tests/key-expiry.spec.ts"
+            ],
+            "casesPassed": 97,
+            "wallSeconds": 296.155,
+            "exitCode": 0,
+            "linuxDispatched": true
+          },
+          {
+            "batch": 2,
+            "specs": [
+              "tests/wide.spec.ts",
+              "tests/project-list.spec.ts",
+              "tests/live-panel.spec.ts",
+              "tests/settings-computers-table.spec.ts",
+              "tests/markdown-ticket-links.spec.ts",
+              "tests/add-account.spec.ts"
+            ],
+            "casesPassed": 36,
+            "wallSeconds": 89.415,
+            "exitCode": 0,
+            "linuxDispatched": true
+          },
+          {
+            "batch": 3,
+            "specs": [
+              "tests/connect-verification.spec.ts"
+            ],
+            "casesPassed": 2,
+            "wallSeconds": 15.523,
+            "exitCode": 0,
+            "linuxDispatched": true
+          }
+        ],
+        "fullShardWallMeasured": false,
+        "ciOnlyCases": 4,
+        "note": "Approved entry point runs bounded sequential file chunks. Sum includes three independent dispatch/setup/artifact cycles; it is not a single full-shard job wall.",
+        "nativeChunks": [
+          {
+            "batch": 1,
+            "run": "spec-66995dbdd7-32336",
+            "cleanupComplete": true,
+            "chunks": [
+              {
+                "file": "aeon-1470-list-titles.spec.ts",
+                "wallSeconds": 58.862,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "definitions-p3.spec.ts",
+                "wallSeconds": 106.913,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "key-expiry.spec.ts",
+                "wallSeconds": 22.773,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "session-recovery.spec.ts",
+                "wallSeconds": 21.421,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "shell.spec.ts",
+                "wallSeconds": 36.965,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "work-aggregates.spec.ts",
+                "wallSeconds": 26.191,
+                "remainingProcesses": 0
+              }
+            ]
+          },
+          {
+            "batch": 2,
+            "run": "spec-567d9f1cc3-93528",
+            "cleanupComplete": true,
+            "chunks": [
+              {
+                "file": "add-account.spec.ts",
+                "wallSeconds": 6.5,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "live-panel.spec.ts",
+                "wallSeconds": 15.209,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "markdown-ticket-links.spec.ts",
+                "wallSeconds": 6.302,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "project-list.spec.ts",
+                "wallSeconds": 15.73,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "settings-computers-table.spec.ts",
+                "wallSeconds": 12.643,
+                "remainingProcesses": 0
+              },
+              {
+                "file": "wide.spec.ts",
+                "wallSeconds": 21.752,
+                "remainingProcesses": 0
+              }
+            ]
+          },
+          {
+            "batch": 3,
+            "run": "spec-567d9f1cc3-17253",
+            "cleanupComplete": true,
+            "chunks": [
+              {
+                "file": "connect-verification.spec.ts",
+                "wallSeconds": 5.623,
+                "remainingProcesses": 0
+              }
+            ]
+          }
+        ],
+        "nativeChunkWallSeconds": 356.884
+      },
+      "ciOnlyVisual": {
+        "spec": "tests/visual/public-quote.spec.ts",
+        "cases": 4,
+        "exitCode": 5,
+        "message": "VISUAL = CI ONLY: tests/visual/** renders only in the pinned CI container (AEON-1692). Do not run it here; rely on PR CI’s visual job."
+      },
+      "initialStaticRemote": {
+        "head": "66995dbdd",
+        "exitCode": 1,
+        "passedChecks": 42,
+        "optionalSkipped": 0,
+        "durationSeconds": 419.04,
+        "fixedFailure": "Split timing count differs from native cases: tests/no-shift-agents.spec.ts",
+        "remainingTimedWrapper": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s",
+        "companionWebShardTestsPassedSeconds": 303.26
+      }
+    },
+    "splitOwnerNormalization": {
+      "file": "tests/no-shift-agents.spec.ts",
+      "selectedTests": 26,
+      "seconds": 189.498865,
+      "schedulingTests": 29,
+      "schedulingSeconds": 211.36411865384616,
+      "normalization": "The split-owner inventory retains its full native denominator of 29; the 26 measured gated cases keep exactly the same projected cost. No measurement of the three other cases is claimed."
+    }
   }
 }
