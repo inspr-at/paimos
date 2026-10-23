@@ -69,7 +69,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     // Read the header before opening the phone's full-screen session sheet.
     await page.goto('/agents')
     await expect(queue).toHaveCount(0)
-    await expect(desk).toHaveAccessibleName('Decision Desk, 1 open · 1 wait for you · 1 here')
+    await expect(desk).toHaveAccessibleName('Decision Desk, 1 open · 1 waits for you · 1 here')
     await openDeskPreview(page)
     await expect(page.getByTestId('desk-preview-item-a:bk5-approval')).toHaveAttribute('href', '/decision-desk?from=preview&item=a:bk5-approval')
     await page.keyboard.press('Escape')

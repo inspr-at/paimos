@@ -362,7 +362,7 @@ async function lessonUndoAfterReturn(page: Page) {
   await expect(page.locator('.toast').filter({ hasText: 'Undone. The lesson waits on the Desk again.' })).toBeVisible()
   expect(state.calls.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'undo']); expect(state.decided).toBe(false)
   // The header's Desk reads the restored lesson again.
-  await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 1 open · 1 wait for you · 1 here')
+  await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 1 open · 1 waits for you · 1 here')
 }
 
 // AEON-1622 risk: a Desk read that began before a lesson was decided lands after the decision, puts the

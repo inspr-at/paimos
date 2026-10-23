@@ -27,9 +27,13 @@ it('rejects direct and aliased locale detectors while allowing language selectio
     "const de = document.documentElement.lang.startsWith('de')",
     "const de = route.query.lang === 'de'",
     "const de = locale.toLowerCase().startsWith('de')",
+    "const de = /^de/i.test(language)",
+    "const de = /^de[-_]/i.test(language)",
   ]) expect(displayLanguageViolations(source, 'components/NewCard.vue.ts'), source).not.toHaveLength(0)
   const allowed = "const language = displayLanguage(profile.profile?.locale); const de = language === 'de'; new Intl.DateTimeFormat(profile.profile?.locale); // profile.locale.startsWith('de')"
   expect(displayLanguageViolations(allowed, 'lib/words.ts')).toEqual([])
+  // AEON-1709: credential validation must not be mistaken for a language switch.
+  expect(displayLanguageViolations(String.raw`const token = /^desk_[\da-f-]{36}_[\da-f-]{36}_[A-Za-z0-9_-]{43}$/i.test(value)`, 'lib/instanceConnect.ts')).toEqual([])
   expect(displayLanguageViolations("<script setup>const de = profile.locale === 'de'</script>", 'components/New.vue')).toHaveLength(1)
   expect(displayLanguageViolations('<template><Card :german="profile.profile?.locale === \'de\'" /></template>', 'components/New.vue')).toHaveLength(1)
 })

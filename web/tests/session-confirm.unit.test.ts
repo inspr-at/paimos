@@ -18,7 +18,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.resetAllMocks()
   const media = { matches: false, addEventListener() {}, removeEventListener() {} }
-  vi.stubGlobal('window', { history: { state: {} }, matchMedia: () => media, addEventListener() {}, removeEventListener() {} })
+  vi.stubGlobal('window', Object.assign(new EventTarget(), { history: { state: {} }, matchMedia: () => media }))
   vi.stubGlobal('navigator', { platform: 'MacIntel' })
   vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {}, getElementById: () => null, querySelector: () => null, visibilityState: 'visible' })
   sessionEnded.blocked = false; sessionEnded.handler = null
@@ -79,8 +79,11 @@ it('AEON-584: sign-out cancels an open confirm before the logout response', asyn
   const session = useSession(), logout = deferred<Response>()
   session.identity = person('ada')
   vi.mocked(api).mockImplementationOnce(() => logout.promise)
+  const disconnected = vi.fn()
+  window.addEventListener('aeon:desk-signout', disconnected, { once: true })
   const action = deletingTicket(), signingOut = session.signOut()
   expect(api).toHaveBeenCalledExactlyOnceWith('/auth/logout', { method: 'POST' })
+  expect(disconnected).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ detail: 'tenant:ada' }))
   expect(session.identity?.principal.id).toBe('ada')
   settleConfirm(true)
   // Release the controlled response even when an assertion fails.

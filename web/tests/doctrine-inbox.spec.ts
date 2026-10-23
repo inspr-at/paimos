@@ -131,7 +131,7 @@ test('native doctrine proposals retain diff, notices, source links and protected
   await page.getByTestId('desk-decide').click()
   await expect(page.getByTestId('desk-announcement')).toContainText('Decision recorded')
   expect(mock.calls.find(c => c.path.endsWith('/dismiss'))?.body).toEqual({ reason: 'Review size belongs in the git pack.' })
-  await expect(page.getByRole('link', { name: 'Decision Desk, 1 open · 1 wait for you · 1 here', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Decision Desk, 1 open · 1 waits for you · 1 here', exact: true })).toBeVisible()
   await page.goto(`/decision-desk?item=r:${ESTIMATE.id}`)
   await page.getByTestId('desk-decide').click()
   await expect(page.getByTestId('desk-announcement')).toContainText('Decision recorded')
@@ -188,6 +188,6 @@ for (const width of [1440, 390]) for (const theme of ['light'] as const) {
     const body = mock.calls.find(c => c.path.endsWith('/pull-request'))?.body as Record<string, unknown>
     expect(body).toMatchObject({ source: ESTIMATE.proposed, why: ESTIMATE.why, rule_sha256: TESTS_SHA, tldr: { en: 'Estimate before work.' } })
     await expect(page.getByTestId('desk-decide')).toHaveText(/Next/)
-    await expect(page.getByRole('link', { name: 'Decision Desk, 1 open · 1 wait for you · 1 here', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Decision Desk, 1 open · 1 waits for you · 1 here', exact: true })).toBeVisible()
   })
 }
