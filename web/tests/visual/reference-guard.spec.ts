@@ -294,7 +294,10 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
     expect(await healthyNative.json()).toEqual({ reason: 'feature_disabled', request_id: null, retryable: false })
     const thread = healthyPage.getByRole('list', { name: 'Messages', exact: true })
     await expect(thread.locator('.msg.desk')).toHaveCount(2)
-    await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toHaveCount(1)
+    const day = thread.locator(':scope > .day')
+    await expect(day).toHaveCount(1)
+    await expect(day).toHaveText('Today')
+    await expect(thread.locator(':scope > .msg').first()).toHaveAccessibleDescription('Today')
     await expect(thread.locator('.msg.mine').last()).toContainText('Start it now. Keep the CI fixes in their own PR.')
     await expect(healthyPage.getByText('The session’s live capabilities could not be read. Reopen the panel to try again.', { exact: true })).toHaveCount(0)
     expect(healthyReads.filter(response => response.status() >= 400).map(response => ({ path: new URL(response.url()).pathname, status: response.status() }))).toEqual([{ path: new URL(healthyNative.url()).pathname, status: 503 }])
@@ -303,7 +306,7 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
     await healthyPage.screenshot({ path: info.outputPath('session-chat-1440.png'), animations: 'disabled', caret: 'hide' })
     await healthyPage.setViewportSize({ width: 390, height: 844 })
     await healthyPage.locator('.thread-scroll').evaluate(element => { element.scrollTop = 0 })
-    await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toBeVisible()
+    await expect(day).toBeInViewport({ ratio: 1 })
     await healthyPage.screenshot({ path: info.outputPath('session-chat-390.png'), animations: 'disabled', caret: 'hide' })
   } finally { await healthyContext.close() }
 
