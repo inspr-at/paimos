@@ -133,7 +133,7 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     try { body = request.postDataJSON() } catch { body = null }
     // The Agents page also reads hosted identities. A session-only world has
     // none; a later mockAssistants route can supply its explicit identities.
-    if (path === '/api/assistants' && method === 'GET') return route.fulfill({ json: { assistants: [], next_cursor: null } })
+    if (path === '/api/assistants' && method === 'GET') return route.fulfill({ json: { assistants: [] } })
     if (path === '/api/agents/plan' && method === 'GET') {
       const stored = options.workingPreference?.()
       const running: Record<string, number> = {}

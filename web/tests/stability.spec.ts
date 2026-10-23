@@ -87,7 +87,7 @@ for (const width of [390, 1440]) {
       await expect(page.locator('.agents-page [data-row^="s:"]').first()).toBeVisible()
       const response = await assistantsRead
       expect(response.status()).toBe(200)
-      expect(await response.json()).toEqual({ assistants: [], next_cursor: null })
+      expect(await response.json()).toEqual({ assistants: [] })
       // AEON-569 / #458 and AEON-1209 / #586 route decisions to the Desk.
       await expect(page.getByRole('link', { name: /Decision Desk/ }).first()).toBeVisible()
       await expectStill(page)
