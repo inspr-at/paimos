@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/parent-benefits.spec.ts",
-    "listedTests": 21,
+    "listedTests": 8,
     "tierTiming": {
       "caseSeconds": {
-        "max": 19.232,
-        "median": 3.483,
-        "min": 2.002
+        "max": 5.583,
+        "median": 3.922,
+        "min": 2.158
       },
-      "seconds": 67.501,
-      "selectedTests": 16
+      "seconds": 40.260374,
+      "selectedTests": 8
     },
     "weightSeconds": 60
   }

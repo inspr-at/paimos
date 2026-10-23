@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/cost-units.spec.ts",
-    "listedTests": 5,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 1.269,

@@ -2,7 +2,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { benefitDraft, benefitIssues, completedTicketState, firstBenefitGap, firstPillGap, pillIssues } from '../src/lib/ticketBenefits.ts'
+import * as benefits from '../src/lib/ticketBenefits.ts'
 import { displayHeadline, emptyNotesLine, hasUsableNotes, localizedNote, noteLocale, ticketsOf, matches, writtenAfterRelease, WRITTEN_AFTER_LABEL, type Release } from '../src/lib/releases.ts'
+import { flatten, mountView, textOf } from './webcore-view-harness.ts'
 
 const fields = { pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.' }
 test('benefit completion covers product completion states without guessing custom or cancelled states', () => {
@@ -84,4 +86,35 @@ test('a backfilled snapshot says the notes were written after the release, and a
 
   const historical = { headline: 'Git headline', notes: { source: 'unavailable', fallback: 'historical-tag-headline', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: ['missing'], written_after_release: true } } as unknown as Release
   assert.equal(writtenAfterRelease(historical), false)
+})
+
+test('P03: historic completion and read-only benefit guidance render from the actual component', () => {
+  for (const state of ['open', 'done', 'accepted', 'delivered']) for (const editing of [false, true]) {
+    const view = mountView('../src/components/work/TicketBenefits.vue', { '../../lib/ticketBenefits': benefits }, {
+      fields: {}, done: completedTicketState(state), editing, editable: false,
+    })
+    try {
+      const text = textOf(view.root)
+      assert.equal(text.includes('This completed ticket has incomplete benefit fields.'), state !== 'open', `${state}/${editing}`)
+      assert.equal(text.includes('Before Done'), state === 'open', `${state}/${editing}`)
+      if (editing) {
+        assert.match(text, /Each non-empty pill needs 2–4 words to save/)
+        assert.equal(flatten(view.root).filter(node => node.tag === 'input' && node.props.type !== 'checkbox').length, 2)
+      } else assert.equal(flatten(view.root).filter(node => node.tag === 'button').length, 0)
+    } finally { view.app.unmount() }
+  }
+})
+
+test('P03: benefit visibility preserves language text and independent release flags', () => {
+  for (const extra of [{}, { hide_from_release_notes: true }, { no_release_needed: true }, { hide_from_release_notes: true, no_release_needed: true }]) {
+    const view = mountView('../src/components/work/TicketBenefits.vue', { '../../lib/ticketBenefits': benefits }, { fields: { ...fields, ...extra } })
+    try {
+      const text = textOf(view.root)
+      assert.match(text, /Tickets explain what you gain/)
+      assert.match(text, /Tickets erklären den Nutzen/)
+      assert.equal(text.includes('No release needed'), 'no_release_needed' in extra)
+      assert.equal(text.includes('Hidden from release notes'), 'hide_from_release_notes' in extra && !('no_release_needed' in extra))
+      assert.doesNotMatch(text, /Before Done/)
+    } finally { view.app.unmount() }
+  }
 })

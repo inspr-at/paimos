@@ -5,6 +5,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -22,6 +23,15 @@ test('checkbox and Shift-click select a range; one status change for all of them
   const calls = await mockWork(page, data)
   await page.goto('/p/PHAROS')
   await expect(rows(page)).toHaveCount(5)
+  await grid(page).focus()
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+J')
+  await page.keyboard.press('Shift+J')
+  await expect(grid(page).locator('tr.ticket-row.selected .key')).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
+  await page.keyboard.press('ControlOrMeta+a')
+  await expect(bulkBar(page)).toHaveAccessibleName('5 selected tickets')
+  await page.keyboard.press('Escape')
+  await expect(bulkBar(page)).toHaveCount(0)
   await row(page, 'PHAROS-11').hover()
   await row(page, 'PHAROS-11').getByRole('checkbox', { name: 'Select PHAROS-11' }).check()
   await row(page, 'PHAROS-13').locator('.title-link').click({ modifiers: ['Shift'] })
@@ -29,7 +39,10 @@ test('checkbox and Shift-click select a range; one status change for all of them
   await expect(grid(page).locator('tr.ticket-row.selected .key')).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
   // Shift-click selects; it never opens the ticket.
   await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
-  await bulkBar(page).getByRole('button', { name: 'Status' }).click()
+  await grid(page).focus()
+  await page.keyboard.press('s')
+  const violations = await new AxeBuilder({ page }).include('[role="toolbar"]').include('[role="menu"]').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  expect(violations.violations).toEqual([])
   await page.getByRole('menu', { name: 'Status of 3 tickets' }).getByRole('menuitemradio', { name: 'Cancelled' }).click()
   await expect(page.getByText('3 tickets are now Cancelled')).toBeVisible()
   expect(bulkCalls(calls)[0].body).toEqual({
@@ -44,6 +57,19 @@ test('checkbox and Shift-click select a range; one status change for all of them
   await expect(rows(page)).toHaveCount(5)
   expect(calls.some(call => call.method === 'POST' && call.path === '/api/events/5000/undo')).toBe(true)
   expect(data.nodes.find(n => n.id === 'n-2')!.state).toBe('backlog')
+  // A later revision invalidates the captured batch event, so Undo must leave
+  // every item alone rather than restoring an obsolete snapshot.
+  await row(page, 'PHAROS-14').hover()
+  await row(page, 'PHAROS-14').getByRole('checkbox').check()
+  await bulkBar(page).getByRole('button', { name: 'Archive' }).click()
+  await expect(page.getByText('Archived 1 ticket')).toBeVisible()
+  const changed = data.nodes.find(node => node.id === 'n-4')!
+  changed.updated_at = new Date(Date.parse(changed.updated_at) + 1).toISOString()
+  const authoritative = structuredClone(data.nodes)
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.getByText('Some of them changed since, so nothing was undone.')).toBeVisible()
+  expect(calls.filter(call => call.method === 'POST' && /\/events\/\d+\/undo$/.test(call.path)).map(call => call.path)).toEqual(['/api/events/5000/undo', '/api/events/5001/undo'])
+  expect(data.nodes).toEqual(authoritative)
   expect(errors).toEqual([])
 })
 
@@ -125,22 +151,6 @@ test('assignee, priority, labels and parent change in one request each; stale ti
   expect(bulkCalls(calls).at(-1)!.body).toMatchObject({ parent_id: 'n-epic' })
 })
 
-test('archive hides the tickets; a change made elsewhere since makes Undo refuse and change nothing', async ({ page }) => {
-  const data = fixtures()
-  await mockWork(page, data)
-  await page.goto('/p/PHAROS')
-  await expect(rows(page)).toHaveCount(5)
-  await row(page, 'PHAROS-14').hover()
-  await row(page, 'PHAROS-14').getByRole('checkbox').check()
-  await bulkBar(page).getByRole('button', { name: 'Archive' }).click()
-  await expect(page.getByText('Archived 1 ticket')).toBeVisible()
-  await expect(rows(page)).toHaveCount(4)
-  data.nodes.find(n => n.id === 'n-4')!.updated_at = '2026-09-23T12:30:00.000Z'
-  await page.getByRole('button', { name: 'Undo' }).click()
-  await expect(page.getByText('Some of them changed since, so nothing was undone.')).toBeVisible()
-  expect(data.nodes.find(n => n.id === 'n-4')!.state).toBe('archived')
-})
-
 test('read-only people see no selection', async ({ page }) => {
   await mockWork(page, fixtures(), { readOnly: true })
   await page.goto('/p/PHAROS')
@@ -152,23 +162,40 @@ test('read-only people see no selection', async ({ page }) => {
   await expect(bulkBar(page)).toHaveCount(0)
 })
 
-test('on a phone a long press starts a selection, taps add to it, and the bar fits', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
-  await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
-  await expect(rows(page)).toHaveCount(5)
-  await expect(grid(page).getByRole('checkbox').first()).toBeHidden()
-  await row(page, 'PHAROS-12').dispatchEvent('contextmenu')
-  await expect(bulkBar(page)).toBeVisible()
-  await row(page, 'PHAROS-14').click()
-  await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
-  await expect(bulkBar(page)).toContainText('2')
-  const box = (await bulkBar(page).boundingBox())!
-  expect(box.x).toBeGreaterThanOrEqual(0)
-  expect(box.x + box.width).toBeLessThanOrEqual(390)
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await bulkBar(page).getByRole('button', { name: 'Clear the selection' }).click()
-  await expect(bulkBar(page)).toHaveCount(0)
+test('on a phone a long press starts a selection, taps add to it, and the bar fits', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, reducedMotion: 'reduce' })
+  try {
+    const page = await context.newPage(), calls = await mockWork(page, fixtures())
+    await page.clock.install({ time: new Date('2026-09-23T12:00:00Z') })
+    await page.goto('/p/PHAROS')
+    await expect(rows(page)).toHaveCount(5)
+    await expect(grid(page).getByRole('checkbox').first()).toBeHidden()
+    const target = row(page, 'PHAROS-12').locator('.title-link')
+    await target.scrollIntoViewIfNeeded()
+    const box = await target.boundingBox()
+    expect(box).not.toBeNull()
+    const input = await context.newCDPSession(page)
+    // Browser-dispatched touch/pointer events enter the real hold handler;
+    // the injected page clock controls its threshold without a wall-clock sleep.
+    await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }] })
+    await page.clock.fastForward(500)
+    await expect(bulkBar(page)).toHaveAccessibleName('1 selected ticket')
+    await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await expect(row(page, 'PHAROS-12').getByRole('checkbox')).toBeChecked()
+    const bar = bulkBar(page), clear = bar.getByRole('button', { name: 'Clear the selection' })
+    await expectStableControls({ controls: { clear, bar }, scrollAreas: { page: page.locator('html') }, interactions: [{ name: 'tap another card', run: async () => {
+      await row(page, 'PHAROS-14').tap()
+      await expect(bar).toHaveAccessibleName('2 selected tickets')
+      await expect(row(page, 'PHAROS-14').getByRole('checkbox')).toBeChecked()
+    } }] })
+    await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
+    const clearBox = await clear.boundingBox()
+    expect(clearBox!.height).toBeGreaterThanOrEqual(44)
+    expect(clearBox!.width).toBeGreaterThanOrEqual(44)
+    expect(calls.filter(call => call.method !== 'GET' && call.path.startsWith('/api/nodes'))).toEqual([])
+    await clear.tap()
+    await expect(bar).toHaveCount(0)
+  } finally { await context.close() }
 })
 
 test('the bulk bar and its menus have no axe violations in light and dark', async ({ page }) => {

@@ -9,7 +9,8 @@ const benefits = {
   benefit_de: 'Jeder Arbeitsschritt erklärt den Nutzen seiner Änderung, auch bei ausführlichen Beschreibungen in deutscher Sprache.',
 }
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+// AEON-1677: retain both completion/edit layouts without duplicate rendering profiles.
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`migrated work completion and benefit editing ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.clock.setSystemTime(new Date('2026-10-04T10:00:00Z'))

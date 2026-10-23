@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/session-recovery.spec.ts",
-    "listedTests": 15,
+    "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
-        "max": 6.299,
-        "median": 3.484,
-        "min": 2.643
+        "max": 5.763,
+        "median": 3.325,
+        "min": 2.729
       },
-      "seconds": 57.935,
-      "selectedTests": 15
+      "seconds": 49.497519,
+      "selectedTests": 11
     },
     "weightSeconds": 37.192982,
     "weightSource": "web-13"

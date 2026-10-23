@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/approval-feedback.spec.ts",
-    "listedTests": 18,
+    "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
-        "max": 9.337,
-        "median": 5.227,
-        "min": 2.032
+        "max": 9.769,
+        "median": 3.783,
+        "min": 2.345
       },
-      "seconds": 88.484,
-      "selectedTests": 18
+      "seconds": 53.057045,
+      "selectedTests": 9
     },
     "weightSeconds": 32.233918,
     "weightSource": "web-13"

@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/aeon-1448-desk-tabrow.spec.ts",
     "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 32.95,
+        "median": 14.527,
+        "min": 4.018
+      },
+      "seconds": 82.235823,
+      "selectedTests": 4
+    },
     "weightSeconds": 8.878049,
     "weightSource": "unmeasured-test-rate"
   }

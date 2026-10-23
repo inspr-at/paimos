@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/lead-adoption.spec.ts",
-    "listedTests": 10,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
-        "max": 13.055,
-        "median": 9.393,
-        "min": 2.732
+        "max": 11.683,
+        "median": 5.7299999999999995,
+        "min": 2.616
       },
-      "seconds": 91.504,
-      "selectedTests": 10
+      "seconds": 31.577036,
+      "selectedTests": 4
     },
     "weightSeconds": 24,
     "weightSource": "local-targeted-run"

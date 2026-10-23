@@ -81,6 +81,16 @@ test('AEON-1309: fake-host mode changes stay read-only, preserve the menu and re
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(async choice => { const { setTheme } = await import('/src/lib/theme.ts'); setTheme(choice, false) }, theme)
+    // Resizing can start the list's split transition and the menu's fitting
+    // ResizeObserver. Finish that resize before taking the interaction baseline;
+    // tab clicks below must still keep every control within the original .5px.
+    await page.locator('.agents-split').evaluate(async split => {
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      await Promise.all(split.getAnimations({ subtree: true })
+        .filter(animation => animation instanceof CSSTransition && animation.transitionProperty === 'flex-basis')
+        .map(animation => animation.finished))
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    })
     const controls = { chat: panel.getByRole('tab', { name: 'Chat', exact: true }),
       details: panel.getByRole('tab', { name: 'Details', exact: true }), menu: panel.getByRole('tablist'),
       more: panel.getByRole('button', { name: 'More session actions' }), close: panel.getByRole('button', { name: 'Close session details' }) }

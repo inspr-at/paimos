@@ -93,7 +93,8 @@ const box = (page: Page, selector: string) => page.locator(selector).first().eva
   return [r.x, r.y + top, r.width, r.height].map(v => Math.round(v * 2) / 2)
 })
 
-for (const theme of ['light', 'dark'] as const) test(`${theme} 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip`, async ({ page }, info) => {
+// AEON-1678: remove theme/viewport copies; preserve keyboard, folds, filters and all three long-name widths.
+for (const theme of ['light'] as const) test(`${theme} 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip`, async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
   const errors = watchErrors(page)
@@ -390,7 +391,7 @@ const PROBES = () => {
   const main = document.querySelector('main')!
   return { edge, glyphs, german, hscroll: Math.max(document.documentElement.scrollWidth - innerWidth, main.scrollWidth - main.clientWidth) }
 }
-for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`design gate at ${width} ${theme}: the grouped list, its menus and its folds`, async ({ page }, info) => {
     test.setTimeout(90_000)
     await page.setViewportSize({ width, height: 1000 })
@@ -460,7 +461,7 @@ for (const width of [390, 1024, 1440]) test(`${width}: long German names stay re
 
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true })
-  for (const theme of ['light', 'dark'] as const) test(`${theme} 390: the lead line, the queue chip and every row target reach 44 px`, async ({ page }, info) => {
+  for (const theme of ['light'] as const) test(`${theme} 390: the lead line, the queue chip and every row target reach 44 px`, async ({ page }, info) => {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     await setup(page)
     await page.goto('/agents')

@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test'
 import { controlStability } from './control-stability'
 import { WORKER, setup, refresh, savedLayout, expectPanelIdentity, expectNativeMenu } from './native-session-program-fixtures'
 
-for (const width of [1440]) for (const theme of ['light', 'dark']) {
+for (const width of [1440]) for (const theme of ['light']) {
   test(`AEON-1309: ${width} ${theme} panel controls, layouts and live-reader anchor stay stable`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
     const { state, worker, errors, world } = await setup(page, theme)

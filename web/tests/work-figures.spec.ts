@@ -329,7 +329,8 @@ for (const theme of ['light', 'dark']) {
 
 // Evidence for the visual check against the approved design: 390 / 960 / 1440, light and dark, comfortable and compact,
 // with the counts and a column popup open on desktop.
-for (const width of [390, 960, 1440]) for (const theme of ['light', 'dark']) {
+// AEON-1677: retain phone/desktop evidence and the separate two-theme contrast test.
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`AEON-1358 evidence ${width} ${theme}`, async ({ page }, info) => {
     await open(page, { width, theme, comfortable: true, automaticColumns: true })
     await settled(page)
@@ -366,7 +367,8 @@ function sparseFigures(): ProjectFigures {
 }
 const TOP_N: [string, string, number][] = [['model', 'Model', 3], ['parent', 'Parent', 2], ['release', 'Release', 3], ['suggested', 'Suggested release', 3], ['tags', 'Tags', 2], ['cost', 'Cost unit', 3]]
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+// AEON-1677: retain phone refusal and both desktop column-layout profiles.
+for (const width of [390, 1024, 1440]) for (const theme of ['light']) {
   test(`AEON-1358 the Model popup names each model as its Model cells do (${width} ${theme})`, async ({ page }, info) => {
     const { errors } = await open(page, { width, theme, comfortable: true, models: true, visible: ['key', 'title', 'status', 'model', 'cost'] })
     if (width <= 720) {

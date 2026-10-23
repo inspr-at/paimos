@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/release-groups.spec.ts",
-    "listedTests": 10,
+    "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.521,
-        "median": 2.016,
-        "min": 1.741
+        "max": 2.053,
+        "median": 1.834,
+        "min": 1.417
       },
-      "seconds": 21.893,
-      "selectedTests": 10
+      "seconds": 11.722867,
+      "selectedTests": 5
     },
     "weightSeconds": 22.195122,
     "weightSource": "unmeasured-test-rate"

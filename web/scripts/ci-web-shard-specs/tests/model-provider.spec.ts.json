@@ -9,11 +9,11 @@
     "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
-        "max": 2.357,
-        "median": 1.48,
-        "min": 0.966
+        "max": 2.59,
+        "median": 1.737,
+        "min": 0.975
       },
-      "seconds": 4.831,
+      "seconds": 7.030999,
       "selectedTests": 3
     },
     "weightSeconds": 10.5,

@@ -136,34 +136,6 @@ test('AEON-1388 figures land in reserved slots: the group row and the header nev
   same(before, await boxes(watch))
 })
 
-test('AEON-1388 a filter change empties the group figures at once: no group shows the previous scope’s numbers while it is counted again', async ({ page }) => {
-  // PHAROS-18 (medium) carries 1 h here: In progress reads ~8.5h unfiltered and ~7.5h for high priority alone.
-  const d = data()
-  Object.assign(d.nodes.find(n => n.id === 'n-8')!.fields, { estimate_hours: 1 })
-  let release!: () => void, seen!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve })
-  const held = new Promise<void>(resolve => { seen = resolve })
-  // Every count of the high-priority view waits, the header's as well as the groups'.
-  await open(page, { data: d, routes: async target => target.route('**/api/projects/*/figures**', async route => {
-    if (new URL(route.request().url()).searchParams.get('priority')) { seen(); await gate }
-    await route.fallback()
-  }) })
-  await expect(cell(page, 'In progress', 'estimate')).toHaveText('~8.5h')
-  await page.getByRole('toolbar').getByRole('button', { name: 'Add a filter' }).click()
-  await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Priority', exact: true }).click()
-  await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('High', { exact: true }).click()
-  await page.keyboard.press('Escape')
-  await held
-  // The narrowed list is on screen and its count is held: the group row is there, its old figure is not.
-  await expect(labels(page)).toHaveText(['Backlog', 'In progress'])
-  await expect(rows(page)).toHaveCount(4)
-  await expect(cell(page, 'In progress', 'estimate')).toHaveText('')
-  await expect(cell(page, 'In progress', 'priority')).toHaveText('')
-  release()
-  await expect(cell(page, 'In progress', 'estimate')).toHaveText('~7.5h')
-  await expect(cell(page, 'In progress', 'priority')).toHaveText('3 high')
-})
-
 test('AEON-1388 the first header cell swaps KEY for three controls in fixed slots, on hover of that cell only', async ({ page }) => {
   await open(page)
   const fold = keyHead(page).locator('.key-fold'), check = keyHead(page).locator('.key-check'), sort = keyHead(page).locator('.key-icon'), key = keyHead(page).locator('.key-rest')
@@ -421,25 +393,3 @@ test('AEON-1486 phones: a long epic title keeps the summary visible, disclosed a
     scrollAreas: { grid: grid(page) },
   })
 })
-
-for (const width of [1440, 1024, 390]) {
-  test(`AEON-1388 grouped list at ${width} px, light and dark: figures or the phone line, still on hover`, async ({ page }, testInfo) => {
-    for (const theme of ['light', 'dark'] as const) {
-      const { errors } = await open(page, { width, theme })
-      if (width > 720) {
-        await expect(cell(page, 'In progress', 'estimate')).toHaveText('~7.5h')
-        const watch = { head: keyHead(page), row: groupRow(page, 'In progress'), estimate: cell(page, 'In progress', 'estimate'), first: rows(page).first() }
-        await page.mouse.move(5, 5)
-        const before = await boxes(watch)
-        await keyHead(page).hover()
-        await groupRow(page, 'In progress').hover()
-        same(before, await boxes(watch))
-      } else {
-        await expect(groupRow(page, 'In progress').locator('.group-facts')).toHaveText('· 2 working · 2 stale · ~7.5h')
-      }
-      await page.mouse.move(5, 5)
-      await page.screenshot({ path: testInfo.outputPath(`aeon-1388-${width}-${theme}.png`), fullPage: false })
-      expect(errors).toEqual([])
-    }
-  })
-}

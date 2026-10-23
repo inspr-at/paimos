@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/key-dialog.spec.ts",
-    "listedTests": 9,
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
-        "max": 7.897,
-        "median": 3.593,
-        "min": 2.29
+        "max": 5.074,
+        "median": 2.853,
+        "min": 1.88
       },
-      "seconds": 44.332,
-      "selectedTests": 9
+      "seconds": 28.361966,
+      "selectedTests": 7
     },
     "weightSeconds": 23.879032,
     "weightSource": "web-8"

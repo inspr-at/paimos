@@ -8,6 +8,15 @@
   "spec": {
     "file": "tests/visual/capacity.spec.ts",
     "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.232,
+        "median": 2.7975000000000003,
+        "min": 2.453
+      },
+      "seconds": 14.952124,
+      "selectedTests": 4
+    },
     "weightSeconds": 40,
     "weightSource": "AEON-1674-initial-estimate"
   }

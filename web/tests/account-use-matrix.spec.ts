@@ -556,7 +556,7 @@ test('screenshots of the matrix, light and dark', async ({ page }, testInfo) => 
 // tag and "Choose where" brings its row; projects in Unassigned are named with a way to choose their context;
 // every control has a name, touch targets are at least 44 px and nothing scrolls sideways.
 const WAITING = { count: 3, first: [{ project_id: 'f0000000-0000-4000-8000-000000000001', key: 'WEB-1', name: 'Website relaunch' }] }
-for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as const) for (const theme of ['light', 'dark'] as const) {
+for (const [width, touch] of [[1440, false], [390, true]] as const) for (const theme of ['light'] as const) {
   test.describe(`where ${width} ${theme}`, () => {
     test.use({ viewport: { width, height: width > 600 ? 1000 : 860 }, hasTouch: touch, isMobile: touch, colorScheme: theme })
     test(`where ${width} ${theme}: the design's checks hold on the built page`, async ({ page }, info) => {

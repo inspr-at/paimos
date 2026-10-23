@@ -205,10 +205,9 @@ it('S8-013: a delayed session-ended send error for A cannot disable B', async ()
   expect(state.sending.value).toBe(false)
 })
 
-it('S8-007: confirming deletion of A passes A even after selection moves to B', async () => {
-  const answer = deferred<boolean>(), remove = vi.fn(async () => true)
+function ticketWorkspace(answer = deferred<boolean>(), remove = vi.fn(async () => true)) {
   const a = { id: 'A', key: 'AEON-1', kind_slug: 'ticket', title: 'A', fields: {}, children_count: 0 }
-  const props = reactive({ item: a, project: { id: 'p', routeKey: 'AEON' }, names: new Map(), canDelete: true, people: [], me: null })
+  const props = reactive({ item: a, mode: 'panel', project: { id: 'p', routeKey: 'AEON' }, names: new Map(), canDelete: true, people: [], me: null })
   const state = setup('components/work/TicketWorkspace.vue', props, {
     'vue-router': { useRouter: () => ({}) }, '../../lib/api': {}, '../../lib/confirm': { confirmAction: () => answer.promise },
     '../../lib/rowStore': { rowStore: { row: () => null, adopt: (row: unknown) => row } }, '../../lib/toast': {}, '../../lib/workQueue': {},
@@ -223,7 +222,58 @@ it('S8-007: confirming deletion of A passes A even after selection moves to B', 
     '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {}, watch: () => () => {} }) },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) }, '../../stores/session': { useSession: () => ({}) },
   }).state
+  return { state, props, a, answer, remove }
+}
+
+it('S8-007: confirming deletion of A passes A even after selection moves to B', async () => {
+  const { state, props, a, answer, remove } = ticketWorkspace()
   const deleting = state.remove(); props.item = { ...a, id: 'B', key: 'AEON-2' }; await flush()
   answer.resolve(true); await deleting
   expect(remove).toHaveBeenCalledWith(expect.objectContaining({ id: 'A' }))
+})
+
+it('P03: the same ticket retains its owned comment draft when expanded and returned', async () => {
+  const { state, props, a, remove } = ticketWorkspace()
+  state.commentDraft.value = 'Stay with ticket A'
+  for (const mode of ['full', 'panel']) {
+    props.mode = mode; props.item = { ...a }; await flush()
+    expect(state.commentDraft.value).toBe('Stay with ticket A')
+  }
+  expect(remove).not.toHaveBeenCalled()
+})
+
+it('P03: conflicted titles and failed comments retain their drafts and ignore late results after A changes to B', async () => {
+  const titleAnswer = deferred<string>(), commentAnswer = deferred<boolean>()
+  const save = vi.fn().mockResolvedValueOnce('conflict').mockReturnValueOnce(titleAnswer.promise)
+  const post = vi.fn().mockResolvedValueOnce(false).mockReturnValueOnce(commentAnswer.promise)
+  const titleProps = reactive({ recordId: 'A', value: 'A saved', editable: true, save })
+  const title = setup('components/work/InlineTitle.vue', titleProps, {}).state
+  const commentProps = reactive({ recordId: 'A', me: 'Ada', post })
+  const comment = setup('components/work/CommentComposer.vue', commentProps, {}).state
+  await title.start(); title.draft.value = 'A typed title'
+  titleProps.value = 'A newer title'
+  await title.commit()
+  expect(save).toHaveBeenCalledExactlyOnceWith('A typed title')
+  expect(title.editing.value).toBe(true)
+  expect(title.conflict.value).toBe(true)
+  expect(title.draft.value).toBe('A typed title')
+  expect(title.saving.value).toBe(false)
+  comment.draft.value = 'A comment that failed'
+  await comment.submit()
+  expect(post).toHaveBeenCalledExactlyOnceWith('A comment that failed')
+  expect(comment.draft.value).toBe('A comment that failed')
+  expect(comment.busy.value).toBe(false)
+  const saving = title.commit(), posting = comment.submit()
+  titleProps.recordId = 'B'; titleProps.value = 'B saved'; commentProps.recordId = 'B'
+  await flush()
+  expect(title.editing.value).toBe(false)
+  expect(title.conflict.value).toBe(false)
+  expect(title.draft.value).toBe('')
+  expect(comment.draft.value).toBe('')
+  await title.start(); title.draft.value = 'B typed title'; comment.draft.value = 'B comment'
+  titleAnswer.resolve('ok'); commentAnswer.resolve(true)
+  await Promise.all([saving, posting])
+  expect(title.editing.value).toBe(true)
+  expect(title.draft.value).toBe('B typed title')
+  expect(comment.draft.value).toBe('B comment')
 })

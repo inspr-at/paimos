@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/agent-pause.spec.ts",
-    "listedTests": 15,
+    "listedTests": 18,
     "tierTiming": {
       "caseSeconds": {
-        "max": 9.345,
-        "median": 4.738,
-        "min": 4.406
+        "max": 8.857,
+        "median": 5.2075,
+        "min": 4.516
       },
-      "seconds": 48.023,
-      "selectedTests": 8
+      "seconds": 31.005375,
+      "selectedTests": 4
     },
     "weightSeconds": 19.97561,
     "weightSource": "hosted-CI-39565819178"

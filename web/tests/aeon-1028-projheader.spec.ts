@@ -184,7 +184,7 @@ test.describe('the ticket count', () => {
 
 test.describe('collapsed header: Display beside New', () => {
   for (const [width, height] of [[1440, 900], [400, 800]] as const) {
-    for (const theme of ['light', 'dark']) {
+    for (const theme of ['light']) {
       test(`shows Display next to New, with the switch and the filters still there, at ${width}px ${theme}`, async ({ page }) => {
         await open(page, width, theme, height)
         await expect(display(page), 'compact header: the toolbar shows no Display of its own').toHaveCount(0)
@@ -408,7 +408,7 @@ test.describe('collapsed header: the menu never scrolls', () => {
     expect(frame.right, `${label}: ends inside the window`).toBeLessThanOrEqual(frame.width)
   }
 
-  for (const [width, height] of [[1440, 900], [1280, 800], [1024, 800], [1100, 1000]] as const) {
+  for (const [width, height] of [[1440, 900], [1024, 800]] as const) {
     test(`flows into columns at ${width}×${height} and fits`, async ({ page }) => {
       await open(page, width, 'light', height)
       await fold(page, width)

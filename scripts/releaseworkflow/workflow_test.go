@@ -501,14 +501,14 @@ func TestDarwinRestoreGateRequiresExactReleaseVersion(t *testing.T) {
 					}
 					// Model a valid Developer ID signature independently of the embedded
 					// coordinate; only the version probe distinguishes the older release.
-					codesign := `#!/bin/bash
+					codesign := `#!/usr/bin/env bash
 case "$1" in
   --verify) [ "$SIGNATURE_OK" = true ] && { [ "$BINARY_KIND" != cli ] || [ "$SIGNED_TEAM" = P66J39QV6V ]; } ;;
   -dv) printf 'TeamIdentifier=%s\n' "$SIGNED_TEAM" >&2 ;;
   *) exit 1 ;;
 esac
 `
-					binary := `#!/bin/bash
+					binary := `#!/usr/bin/env bash
 [ "$1" = --version ] || exit 1
 printf 'executed\n' >> "$TRACE"
 printf '%s%s\n' "$BINARY_PREFIX" "$BINARY_VERSION"
@@ -671,7 +671,7 @@ func TestLoadedImageResolverFailsClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			stub := "#!/bin/bash\nprintf '%s\\n' '" + tc.response + "'\n"
+			stub := "#!/usr/bin/env bash\nprintf '%s\\n' '" + tc.response + "'\n"
 			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(stub), 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -712,7 +712,7 @@ func TestPublishedRuntimeMustMatchSmokedRuntime(t *testing.T) {
 			smoked := "sha256:" + strings.Repeat("a", 64)
 			// Stub only Docker transport; identity data are the unchanged configs
 			// of real BuildKit exports, including two injected creation clocks.
-			stub := `#!/bin/bash
+			stub := `#!/usr/bin/env bash
 if [[ $1 == pull ]]; then exit 0; fi
 if [[ ${@: -1} == "$SMOKED_IMAGE" ]]; then cat "$SMOKED_FIXTURE"; else cat "$PUBLISHED_FIXTURE"; fi
 `
@@ -744,7 +744,7 @@ func TestExportsShareSourceEpoch(t *testing.T) {
 	}
 	for _, value := range []string{"1700000000", "1700000100", "", "bad", "1700000000\n1700000100"} {
 		dir := t.TempDir()
-		stub := "#!/bin/bash\n[[ $1 == show && $2 == -s && $3 == --format=%ct && $4 == HEAD ]] || exit 1\nprintf '%s\\n' \"$FIXTURE_EPOCH\"\n"
+		stub := "#!/usr/bin/env bash\n[[ $1 == show && $2 == -s && $3 == --format=%ct && $4 == HEAD ]] || exit 1\nprintf '%s\\n' \"$FIXTURE_EPOCH\"\n"
 		if err := os.WriteFile(filepath.Join(dir, "git"), []byte(stub), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -855,7 +855,7 @@ func shell(t *testing.T, run, git, gh string, vars ...string) error {
 	t.Helper()
 	dir := t.TempDir()
 	for name, script := range map[string]string{"git": git, "gh": gh} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/bash\n"+script+"\n"), 0700); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/usr/bin/env bash\n"+script+"\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -933,7 +933,7 @@ case "$*" in
 esac`,
 			}
 			for name, script := range stubs {
-				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/bash\n"+script+"\n"), 0700); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/usr/bin/env bash\n"+script+"\n"), 0700); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -994,7 +994,7 @@ func TestNativePlatformsAndIndexPublication(t *testing.T) {
 			ok            bool
 		}{{"amd64", "x86_64", true}, {"arm64", "aarch64", true}, {"arm64", "x86_64", false}, {"amd64", "aarch64", false}} {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "uname"), []byte("#!/bin/bash\necho "+tc.machine+"\n"), 0700); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "uname"), []byte("#!/usr/bin/env bash\necho "+tc.machine+"\n"), 0700); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("bash", "-c", probe.Run)

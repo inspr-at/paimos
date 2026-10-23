@@ -59,7 +59,8 @@ async function openWind(page: Page, width = 1440) {
   await page.getByRole('menuitem', { name: /^Wind down…/ }).click()
 }
 async function startWindDown(page: Page, width = 1440) { await openWind(page, width); await formPopover(page).locator('button[type=submit]').click() }
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: keep desktop/phone Wind down interactions once; protected chosen-agent vectors stay intact.
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`${width} ${theme}: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 }); await page.emulateMedia({ colorScheme: theme })
     const errors = watchErrors(page), mock = await setup(page)
@@ -446,7 +447,7 @@ test('AEON-783: live outcome text keeps wind-down status actions still', async (
   }
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`${width} ${theme}: stop request stays visible until the worker confirms stopped`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
@@ -491,7 +492,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
 // AEON-783 (CI #355): beside the docked session panel the head is only ~820 px wide. The Wind down
 // button then gives up its label, so wider text (Linux fonts) or a longer count never wraps the head and
 // pushes the rows down. The extra letter-spacing stands in for those wider fonts.
-for (const theme of ['light', 'dark'] as const) {
+for (const theme of ['light'] as const) {
   test(`1440 ${theme}: the head stays on one line beside the session panel while a stop is requested`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })

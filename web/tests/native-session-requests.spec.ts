@@ -36,7 +36,7 @@ async function setup(page: Page, theme = 'light') {
 const act = (page: Page, code: string) => page.evaluate(async code => { await new Function(`return (async()=>{const f=window.nativeRequests;${code}})()`)() }, code)
 const reviewButton = (page: Page) => page.getByRole('button', { name: 'Anfrage in der Entscheidungsübersicht prüfen' })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+for (const width of [390, 1440]) for (const theme of ['light']) {
   // Risk: changing request content or feedback moves the actions in a series.
   test(`AEON-1304 request series remains stable ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 820 })

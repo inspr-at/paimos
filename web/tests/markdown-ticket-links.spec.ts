@@ -4,7 +4,6 @@
 // existing links are left alone. The epic panel keeps the status chips against
 // the lifeline and the lifeline against Updated: the reserved strip (AEON-1359,
 // r4b) sits between them, and neither gap is an empty band.
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 
@@ -25,8 +24,6 @@ const BODY = [
   '',
   'Not a link: javascript:alert(1) or https://user:pass@example.com/secret.',
 ].join('\n')
-
-const shots = '../.agent-shots'
 
 async function openDescribed(page: Page) {
   const data = fixtures()
@@ -120,29 +117,6 @@ test('the epic panel keeps the Updated line against the status chips', async ({ 
   expect(gaps.lifelineToUpdated).toBeLessThan(24)
 })
 
-test('markdown ticket links and the epic panel, light and dark', async ({ page }) => {
-  test.setTimeout(60_000)
-  mkdirSync(shots, { recursive: true })
-  await page.setViewportSize({ width: 1280, height: 800 })
-  await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
-  const { ws } = await openDescribed(page)
-  await expect(ws.getByRole('link', { name: 'AEON-1: Aeon foundation' }).first()).toBeVisible()
-  for (const colorScheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme })
-    await page.screenshot({ path: `${shots}/md1-links-${colorScheme}.png` })
-  }
-  await page.goto('/p/PHAROS/PHAROS-10')
-  await expect(page.locator('.ticket-ws').getByRole('heading', { name: 'Guarded multi-cloud provisioning' })).toBeVisible()
-  for (const colorScheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme })
-    for (const width of [1280, 390]) {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 800 })
-      await expect(page.locator('.ticket-ws .meta')).toBeVisible()
-      await page.screenshot({ path: `${shots}/md1-epic-gap-${colorScheme}-${width}.png` })
-    }
-  }
-})
-
 for (const [oldKey, canonicalKey, projectId, projectKey] of [
   ['PHAROS-14', 'AEON-2', 'p-aeon', 'AEON'],
   ['AEON-1', 'PHAROS-17', 'p-pharos', 'PHAROS'],
@@ -171,6 +145,12 @@ for (const [oldKey, canonicalKey, projectId, projectKey] of [
     const link = ws.getByRole('link', { name: `${oldKey}: ${moved.title}`, exact: true })
     await expect(link).toHaveText(oldKey)
     await expect(link).toHaveAttribute('href', `/p/${projectKey}/${canonicalKey}`)
+    const tabOpened = page.context().waitForEvent('page')
+    await link.click({ modifiers: ['ControlOrMeta'] })
+    const tab = await tabOpened
+    await tab.waitForURL(`**/p/${projectKey}/${canonicalKey}`)
+    await tab.close()
+    await expect(page).toHaveURL(sourceURL)
     await link.click()
     await expect(page).toHaveURL(`/p/${projectKey}/${canonicalKey}?q=Oracle&type=ticket`)
     await expect(ws).toHaveCount(1)

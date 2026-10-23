@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/release-update-notice.spec.ts",
-    "listedTests": 16,
+    "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.328,
-        "median": 0.797,
-        "min": 0
+        "max": 1.466,
+        "median": 1.288,
+        "min": 1.11
       },
-      "seconds": 17.983,
-      "selectedTests": 16
+      "seconds": 3.571984,
+      "selectedTests": 2
     },
     "weightSeconds": 35.512195,
     "weightSource": "unmeasured-test-rate"

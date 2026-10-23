@@ -34,7 +34,8 @@ async function setup(page: Page, theme: 'light' | 'dark', extra = false) {
   await page.route('**/api/agent-pairing/computers', route => route.fulfill({ json: { computers: [computer] } }))
 }
 
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+// P11: preserve both layouts and all incomplete-inventory/retained-failure cases below.
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`configured account states at ${width}px in ${theme}`, async ({ page }, testInfo) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: 1000 })

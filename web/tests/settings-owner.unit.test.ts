@@ -14,7 +14,7 @@ import * as arrival from '../src/lib/arrival'
 import { displayLanguage } from '../src/lib/displayLanguage'
 import { textForKinds } from '../src/lib/workKindsCopy'
 import { scopeOwner } from '../src/lib/identityScope'
-import { flush } from './record-source'
+import { deferred, flush, setupSource } from './record-source'
 
 type Owner = { tenant: { id: string }; principal: { id: string } }
 type Node = { tag: string; text: string; props: Record<string, unknown>; children: Node[]; parent: Node | null }
@@ -277,4 +277,81 @@ it('pending arrivals yield to input, route changes, unmount and the five-second 
     if (name !== 'unmount') apps.pop()!.unmount()
     expect(vi.getTimerCount(), `${name}: timers released`).toBe(0)
   }
+})
+
+function agentFields() {
+  const notices: { message: string; options: { action?: { run: () => void } } }[] = []
+  const values: Record<string, Record<string, string | number>> = {
+    '/settings/agent-activity': { mode: 'agent_summary' }, '/settings/eta-interval': { interval_minutes: 10 }, '/settings/heartbeat-lost': { heartbeat_lost_minutes: 15 },
+  }
+  const api = vi.fn(async (path: string, init?: RequestInit): Promise<Response> => {
+    if (init?.method === 'PUT') {
+      const body = JSON.parse(init.body as string)
+      const key = Object.keys(values[path]!)[0]!
+      if (body[`expected_${key}`] !== values[path]![key]) return new Response('{}', { status: 409 })
+      values[path] = { [key]: body[key] }
+    }
+    return new Response(JSON.stringify(values[path]))
+  })
+  const mounted = setupSource('components/settings/AgentActivityCard.vue', {}, {
+    '../../lib/api': { api }, '../../lib/brand': { brand: Vue.ref({ short_name: 'PAIMOS' }) },
+    '../../lib/authz': { can: () => grants.admin && !grants.revoked }, '../../stores/session': { useSession: () => session },
+    '../../lib/toast': { toast: (message: string, options: typeof notices[number]['options']) => { notices.push({ message, options }); return notices.length }, dismiss: vi.fn() },
+  })
+  return { ...mounted, api, notices, values }
+}
+
+it('agent fields keep independent revisions when one held save conflicts and another succeeds', async () => {
+  vi.useFakeTimers()
+  const card = agentFields()
+  try {
+    await flush()
+    const { estimate, lost, save } = card.state
+    const held = deferred<Response>()
+    card.api.mockImplementationOnce(() => held.promise)
+    estimate.draft = '20'
+    const first = save(estimate)
+    expect(estimate.saving).toBe(true)
+    lost.draft = '30'
+    await save(lost)
+    expect(lost.confirmed).toBe('30')
+    expect(lost.saved).toBe(true)
+    held.resolve(new Response('{}', { status: 409 }))
+    await first
+    expect(estimate).toMatchObject({ draft: '20', confirmed: '10', conflict: true, saved: false, error: 'Changed elsewhere. Reload to continue.' })
+    expect(lost).toMatchObject({ draft: '30', confirmed: '30', conflict: false, saved: true })
+    expect(card.notices.map(notice => notice.message)).toEqual(['Silent sessions saved.'])
+    expect(card.api.mock.calls.filter(([, init]) => init?.method === 'PUT').map(([path, init]) => ({ path, body: JSON.parse(init!.body as string) }))).toEqual([
+      { path: '/settings/eta-interval', body: { interval_minutes: 20, expected_interval_minutes: 10 } },
+      { path: '/settings/heartbeat-lost', body: { heartbeat_lost_minutes: 30, expected_heartbeat_lost_minutes: 15 } },
+    ])
+    const calls = card.api.mock.calls.length
+    lost.draft = '40'
+    card.notices[0]!.options.action!.run()
+    await flush()
+    expect(card.api).toHaveBeenCalledTimes(calls)
+    expect(lost.draft).toBe('40')
+  } finally { card.stop() }
+})
+
+it('a failed numeric Undo retains the confirmed value and draft, and retry uses that field’s revision', async () => {
+  vi.useFakeTimers()
+  const card = agentFields()
+  try {
+    await flush()
+    const { estimate, lost, save } = card.state
+    estimate.draft = '20'
+    await save(estimate)
+    expect(estimate).toMatchObject({ confirmed: '20', draft: '20', saved: true })
+    card.api.mockResolvedValueOnce(new Response('{}', { status: 503 }))
+    card.notices[0]!.options.action!.run()
+    await flush()
+    expect(estimate).toMatchObject({ confirmed: '20', draft: '20', saved: false, error: 'Could not save. Try again.' })
+    expect(card.notices.map(notice => notice.message)).toEqual(['Estimates saved.'])
+    expect(lost).toMatchObject({ confirmed: '15', draft: '15', error: '' })
+    estimate.draft = '30'
+    await save(estimate)
+    expect(JSON.parse(card.api.mock.calls.at(-1)![1]!.body as string)).toEqual({ interval_minutes: 30, expected_interval_minutes: 20 })
+    expect(estimate).toMatchObject({ confirmed: '30', draft: '30', saved: true, error: '' })
+  } finally { card.stop() }
 })

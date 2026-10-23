@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/status-icons.spec.ts",
-    "listedTests": 12,
+    "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
-        "max": 6.844,
-        "median": 3.918,
-        "min": 2.07
+        "max": 9.166,
+        "median": 3.127,
+        "min": 2.237
       },
-      "seconds": 49.414,
-      "selectedTests": 12
+      "seconds": 23.171245,
+      "selectedTests": 4
     },
     "weightSeconds": 20.84,
     "weightSource": "AEON-1362 remote-spec ab7ffee93: 12 cases, one worker on mbp2606, wall_ms 20840"

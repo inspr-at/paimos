@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/portal-public.spec.ts",
-    "listedTests": 6,
+    "listedTests": 12,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.091,

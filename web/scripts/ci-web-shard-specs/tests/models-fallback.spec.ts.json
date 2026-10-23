@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/models-fallback.spec.ts",
-    "listedTests": 13,
+    "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.909,
-        "median": 1.595,
-        "min": 1.152
+        "max": 4.043,
+        "median": 1.301,
+        "min": 0.995
       },
-      "seconds": 29.112,
-      "selectedTests": 15
+      "seconds": 22.151568,
+      "selectedTests": 9
     },
     "weightSeconds": 14,
     "weightSource": "AEON-1161 mbp2606 single worker: with models-simple and its shots (20s weight) the three specs ran in 30.1s; plus margin"

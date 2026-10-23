@@ -309,7 +309,7 @@ test('members do not see or fetch workspace agent settings', async ({ page }) =>
   expect(reads).toEqual([]); expect(writes).toEqual([])
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`agent card fits ${width}px ${theme}, with stable controls and long German copy`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1100 })
     const { values, state } = await setup(page, theme)

@@ -104,6 +104,16 @@ test('a ticket in the agents session panel opens the peek and keeps the session 
   expect(list.x + list.width).toBeLessThanOrEqual(box.x + 2)
   expect(box.x + box.width).toBeLessThanOrEqual(1600)
 
+  await page.keyboard.press('Escape')
+  await expect(peek(page)).toHaveCount(0)
+  const details = page.getByRole('complementary', { name: 'Session details' })
+  await expect(details).toBeVisible()
+  await expect(details).toBeFocused()
+  await expect(chip).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+  await chip.focus()
+  await page.keyboard.press('Enter')
+  await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
+
   await openInProject(page, peek(page).getByRole('button', { name: 'Open in project' }), '/p/PHAROS/PHAROS-11')
   await expect(page.getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
 })

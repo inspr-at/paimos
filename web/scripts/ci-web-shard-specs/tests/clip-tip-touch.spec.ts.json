@@ -9,12 +9,11 @@
     "listedTests": 40,
     "tierTiming": {
       "caseSeconds": {
-        "max": 25.719,
-        "median": 1.348,
-        "min": 0.813
+        "max": 26.021,
+        "median": 1.3615,
+        "min": 0.828
       },
-      "estimateSource": "AEON-1674: retain 111.536s measured for 39 original cases; add 1 staged cases at the measured owner mean. Estimate, not a new runtime measurement.",
-      "seconds": 114.395897,
+      "seconds": 132.337941,
       "selectedTests": 40
     },
     "weightSeconds": 58.070907,

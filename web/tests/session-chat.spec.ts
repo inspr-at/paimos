@@ -12,7 +12,9 @@ import { controlStability } from './control-stability'
 
 const now = Date.parse('2026-09-29T06:00:00Z')
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1679: exercise the phone and desktop composer branches once; the
+// repeated tablet/theme matrix does not change these behavioral assertions.
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`AEON-1487 waiting chat ${theme} ${width}: stall notice keeps controls still`, async ({ page }, testInfo) => {
     // Risk: offline chat offers a duplicate resend, or the stall notice moves
     // its queue actions/composer. Only receipt evidence changes during the test.
@@ -71,7 +73,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
   })
 }
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`fast chat ${theme} ${width}: live bursts retain the latest post and stable controls`, async ({ page }, testInfo) => {
     // Risk: a message arriving inside the old four-second window, or during
     // an in-flight read, stays unseen. Frozen timers cannot rescue this test.
@@ -783,7 +785,7 @@ test.describe('phone screenshots', () => {
   }
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+for (const theme of ['light'] as const) for (const width of [390, 1440]) {
   test(`session queued input stays stable without a delivery toggle ${theme} ${width}`, async ({ page }, testInfo) => {
     const { worker, data, calls } = await setup(page, { admin: false, theme, count: 5, storage: { 'aeon.session-tab': 'messages' } })
     worker.display_label = 'Freigabeprüfung mit ausführlicher deutschsprachiger Rückmeldung'
@@ -855,7 +857,7 @@ test('a held-request 403 keeps the session composer (AEON-942)', async ({ page }
   await expect(panel.getByText('Still here', { exact: true })).toBeVisible()
 })
 
-for (const locale of ['en', 'de'] as const) for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const locale of ['en', 'de'] as const) for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`managed optimistic input and retry ${theme} ${width}${locale === 'de' ? ' de-AT profile' : ''}`, async ({ page }, testInfo) => {
     const { worker, calls } = await setup(page, { admin: false, theme, count: 3 })
     Object.assign(worker, { management_mode: 'managed', activity: 'busy', advertised_capabilities: ['inbox', 'steer', 'interrupt', 'managed_control_v1'] })
@@ -929,7 +931,7 @@ async function hintStream(page: Page) {
 }
 const signal976 = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event('test:976-hint')))
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`AEON-976 markdown controls ${theme} ${width}: safe shell tail and stable expansion`, async ({ page, context }, testInfo) => {
     const { worker, messages } = await setup(page, { theme, count: 1 })
     Object.assign(worker, { management_mode: 'managed', advertised_capabilities: ['interrupt', 'stop', 'steer'], activity: 'busy' })
@@ -1063,7 +1065,7 @@ test('AEON-976 Stop: Esc leaves the field then interrupts with captured process 
 
 // AEON-977: actual Vue components, deterministic inbox evidence and held cancel
 // responses prove that editing cannot resend an original the agent already has.
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`AEON-977 queue actions ${theme} ${width}: edit, cancel, receipts and stable controls`, async ({ page, context }, testInfo) => {
     const { worker, messages, calls, data } = await setup(page, { theme, count: 3 })
     Object.assign(worker, { management_mode: 'managed', activity: 'busy', advertised_capabilities: ['inbox', 'steer', 'interrupt'] })
@@ -1308,7 +1310,7 @@ test('AEON-977 empty, offline and no-permission states preserve drafts and contr
   await page.screenshot({ path: testInfo.outputPath('aeon-977-chatreceipts/no-permission.png') })
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) for (const language of ['en', 'de'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) for (const language of ['en', 'de'] as const) {
  test(`AEON-1254 binding refusal ${language} profile ${theme} ${width}: empty chat and queued delivery stay honest and stable`, async ({ page }, testInfo) => {
   const { worker, messages, data } = await setup(page, { theme, count: 3 })
   await hintStream(page)
