@@ -10,7 +10,7 @@
     "tierTiming": {
       "caseSeconds": {
         "max": 5.075,
-        "median": 2.615,
+        "median": 2.6035000000000004,
         "min": 1.895
       },
       "seconds": 65.879481,

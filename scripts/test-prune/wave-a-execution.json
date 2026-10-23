@@ -2356,7 +2356,7 @@
     "r0RowsAdded": []
   },
   "fix4": {
-    "status": "implemented-validation-pending",
+    "status": "implemented-ci-proof-required",
     "sourceMain": "21815206bef5777ba47f192de32afb96865c9ad3",
     "mainRun": "39972730649",
     "measurementRun": "39969924024",
@@ -3507,7 +3507,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.18,
-          "median": 2.364,
+          "median": 1.7719999999999998,
           "max": 2.364
         }
       },
@@ -3523,7 +3523,7 @@
         "selectedTests": 24,
         "caseSeconds": {
           "min": 0.865,
-          "median": 1.303,
+          "median": 1.3025,
           "max": 4.117
         }
       },
@@ -3571,7 +3571,7 @@
         "selectedTests": 22,
         "caseSeconds": {
           "min": 0.774,
-          "median": 1.228,
+          "median": 1.202,
           "max": 2.16
         }
       },
@@ -3587,7 +3587,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 1.54,
-          "median": 1.951,
+          "median": 1.871,
           "max": 4.286
         }
       },
@@ -3667,7 +3667,7 @@
         "selectedTests": 16,
         "caseSeconds": {
           "min": 2.377,
-          "median": 3.431,
+          "median": 3.3360000000000003,
           "max": 12.997
         }
       },
@@ -3683,7 +3683,7 @@
         "selectedTests": 14,
         "caseSeconds": {
           "min": 1.289,
-          "median": 3.345,
+          "median": 3.2655000000000003,
           "max": 5.598
         }
       },
@@ -3715,7 +3715,7 @@
         "selectedTests": 10,
         "caseSeconds": {
           "min": 2.145,
-          "median": 2.536,
+          "median": 2.4855,
           "max": 4.01
         }
       },
@@ -3731,7 +3731,7 @@
         "selectedTests": 24,
         "caseSeconds": {
           "min": 1.199,
-          "median": 1.578,
+          "median": 1.577,
           "max": 1.895
         }
       },
@@ -3747,7 +3747,7 @@
         "selectedTests": 14,
         "caseSeconds": {
           "min": 1.233,
-          "median": 2.634,
+          "median": 2.6325,
           "max": 7.802
         }
       },
@@ -3763,7 +3763,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 3.279,
-          "median": 27.748,
+          "median": 25.992,
           "max": 60.268
         }
       },
@@ -3795,7 +3795,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 1.856,
-          "median": 9.397,
+          "median": 9.363,
           "max": 13.182
         }
       },
@@ -3827,7 +3827,7 @@
         "selectedTests": 30,
         "caseSeconds": {
           "min": 1.195,
-          "median": 2.081,
+          "median": 2.0774999999999997,
           "max": 12.706
         }
       },
@@ -3843,7 +3843,7 @@
         "selectedTests": 38,
         "caseSeconds": {
           "min": 1.9,
-          "median": 3.535,
+          "median": 3.4205,
           "max": 24.23
         }
       },
@@ -3859,7 +3859,7 @@
         "selectedTests": 46,
         "caseSeconds": {
           "min": 1.72,
-          "median": 3.717,
+          "median": 3.6950000000000003,
           "max": 17.637
         }
       },
@@ -3923,7 +3923,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.322,
-          "median": 3.683,
+          "median": 3.2535,
           "max": 4.048
         }
       },
@@ -3971,7 +3971,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 0.442,
-          "median": 0.924,
+          "median": 0.7595000000000001,
           "max": 1.699
         }
       },
@@ -4003,7 +4003,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 4.04,
-          "median": 4.67,
+          "median": 4.355,
           "max": 4.67
         }
       },
@@ -4099,7 +4099,7 @@
         "selectedTests": 26,
         "caseSeconds": {
           "min": 1.933,
-          "median": 5.374,
+          "median": 5.2780000000000005,
           "max": 14.225
         },
         "schedulingTests": 29,
@@ -4118,7 +4118,7 @@
         "selectedTests": 22,
         "caseSeconds": {
           "min": 2.668,
-          "median": 3.982,
+          "median": 3.9585,
           "max": 6.468
         }
       },
@@ -4134,7 +4134,7 @@
         "selectedTests": 24,
         "caseSeconds": {
           "min": 0.13,
-          "median": 3.53,
+          "median": 3.027,
           "max": 7.065
         }
       },
@@ -4182,7 +4182,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 3.019,
-          "median": 4.869,
+          "median": 3.944,
           "max": 4.869
         }
       },
@@ -4214,7 +4214,7 @@
         "selectedTests": 32,
         "caseSeconds": {
           "min": 1.102,
-          "median": 1.905,
+          "median": 1.863,
           "max": 7.893
         }
       },
@@ -4230,7 +4230,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 11.734,
-          "median": 13.459,
+          "median": 13.369,
           "max": 16.292
         }
       },
@@ -4262,7 +4262,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 4.018,
-          "median": 22.72,
+          "median": 14.527,
           "max": 32.95
         }
       },
@@ -4278,7 +4278,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.209,
-          "median": 13.015,
+          "median": 7.697,
           "max": 15.276
         }
       },
@@ -4310,7 +4310,7 @@
         "selectedTests": 14,
         "caseSeconds": {
           "min": 1.986,
-          "median": 4.906,
+          "median": 4.756,
           "max": 37.141
         }
       },
@@ -4342,7 +4342,7 @@
         "selectedTests": 60,
         "caseSeconds": {
           "min": 1.707,
-          "median": 3.51,
+          "median": 3.4855,
           "max": 17.795
         }
       },
@@ -4358,7 +4358,7 @@
         "selectedTests": 10,
         "caseSeconds": {
           "min": 1.878,
-          "median": 8.444,
+          "median": 5.816000000000001,
           "max": 10.44
         }
       },
@@ -4374,7 +4374,7 @@
         "selectedTests": 10,
         "caseSeconds": {
           "min": 0.955,
-          "median": 1.778,
+          "median": 1.748,
           "max": 3.78
         }
       },
@@ -4406,7 +4406,7 @@
         "selectedTests": 14,
         "caseSeconds": {
           "min": 1.073,
-          "median": 1.861,
+          "median": 1.8575,
           "max": 5.267
         }
       },
@@ -4470,7 +4470,7 @@
         "selectedTests": 42,
         "caseSeconds": {
           "min": 1.186,
-          "median": 2.371,
+          "median": 2.364,
           "max": 4.735
         }
       },
@@ -4518,7 +4518,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 3.885,
-          "median": 4.397,
+          "median": 4.141,
           "max": 4.397
         }
       },
@@ -4566,7 +4566,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.557,
-          "median": 2.276,
+          "median": 1.9164999999999999,
           "max": 2.276
         }
       },
@@ -4598,7 +4598,7 @@
         "selectedTests": 24,
         "caseSeconds": {
           "min": 0.671,
-          "median": 1.049,
+          "median": 1.0305,
           "max": 3.415
         }
       },
@@ -4630,7 +4630,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 0.79,
-          "median": 1.46,
+          "median": 1.222,
           "max": 2.481
         }
       },
@@ -4646,7 +4646,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.631,
-          "median": 2.22,
+          "median": 1.9255,
           "max": 2.22
         }
       },
@@ -4742,7 +4742,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 6.892,
-          "median": 9.477,
+          "median": 8.1845,
           "max": 9.477
         }
       },
@@ -4758,7 +4758,7 @@
         "selectedTests": 12,
         "caseSeconds": {
           "min": 8.96,
-          "median": 17.789,
+          "median": 14.116,
           "max": 24.897
         }
       },
@@ -4774,7 +4774,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 4.049,
-          "median": 4.542,
+          "median": 4.4655000000000005,
           "max": 4.739
         }
       },
@@ -4790,7 +4790,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 15.908,
-          "median": 16.478,
+          "median": 16.3305,
           "max": 16.873
         }
       },
@@ -4806,7 +4806,7 @@
         "selectedTests": 24,
         "caseSeconds": {
           "min": 1.228,
-          "median": 1.432,
+          "median": 1.43,
           "max": 2.097
         }
       },
@@ -4822,7 +4822,7 @@
         "selectedTests": 24,
         "caseSeconds": {
           "min": 0.941,
-          "median": 1.955,
+          "median": 1.5175,
           "max": 2.78
         }
       },
@@ -4838,7 +4838,7 @@
         "selectedTests": 40,
         "caseSeconds": {
           "min": 0.828,
-          "median": 1.372,
+          "median": 1.3615,
           "max": 26.021
         }
       },
@@ -4918,7 +4918,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 6.282,
-          "median": 8.418,
+          "median": 8.379,
           "max": 9.636
         }
       },
@@ -4950,7 +4950,7 @@
         "selectedTests": 16,
         "caseSeconds": {
           "min": 2.337,
-          "median": 3.351,
+          "median": 3.3354999999999997,
           "max": 11.535
         }
       },
@@ -4998,7 +4998,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.246,
-          "median": 3.155,
+          "median": 3.009,
           "max": 3.419
         }
       },
@@ -5014,7 +5014,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.083,
-          "median": 2.9,
+          "median": 1.9914999999999998,
           "max": 2.9
         }
       },
@@ -5030,7 +5030,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 2.886,
-          "median": 3.149,
+          "median": 3.1399999999999997,
           "max": 4.187
         }
       },
@@ -5110,7 +5110,7 @@
         "selectedTests": 56,
         "caseSeconds": {
           "min": 1.458,
-          "median": 3.912,
+          "median": 3.883,
           "max": 65.294
         }
       },
@@ -5126,7 +5126,7 @@
         "selectedTests": 12,
         "caseSeconds": {
           "min": 2.453,
-          "median": 3.249,
+          "median": 2.9325,
           "max": 12.041
         }
       },
@@ -5142,7 +5142,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.684,
-          "median": 2.986,
+          "median": 2.922,
           "max": 4.059
         }
       },
@@ -5174,7 +5174,7 @@
         "selectedTests": 16,
         "caseSeconds": {
           "min": 2.002,
-          "median": 2.447,
+          "median": 2.4465000000000003,
           "max": 4.468
         }
       },
@@ -5222,7 +5222,7 @@
         "selectedTests": 16,
         "caseSeconds": {
           "min": 1.895,
-          "median": 2.615,
+          "median": 2.6035000000000004,
           "max": 5.075
         }
       },
@@ -5270,7 +5270,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 1.639,
-          "median": 3.103,
+          "median": 2.843,
           "max": 3.622
         }
       },
@@ -5302,7 +5302,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 1.209,
-          "median": 1.461,
+          "median": 1.4015,
           "max": 3.825
         }
       },
@@ -5350,7 +5350,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 3.121,
-          "median": 6.341,
+          "median": 4.8585,
           "max": 13.583
         }
       },
@@ -5366,7 +5366,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 4.027,
-          "median": 7.679,
+          "median": 6.561,
           "max": 14.771
         }
       },
@@ -5382,7 +5382,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.303,
-          "median": 4.252,
+          "median": 3.8564999999999996,
           "max": 8.35
         }
       },
@@ -5414,7 +5414,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 25.354,
-          "median": 25.701,
+          "median": 25.5975,
           "max": 25.838
         }
       },
@@ -5430,7 +5430,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 5.428,
-          "median": 7.139,
+          "median": 6.895,
           "max": 7.478
         }
       },
@@ -5446,7 +5446,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 2.144,
-          "median": 3.4,
+          "median": 3.021,
           "max": 5.1
         }
       },
@@ -5478,7 +5478,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 1.976,
-          "median": 2.128,
+          "median": 2.067,
           "max": 2.888
         }
       },
@@ -5494,7 +5494,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.148,
-          "median": 8.822,
+          "median": 4.984999999999999,
           "max": 8.822
         }
       },
@@ -5542,7 +5542,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.251,
-          "median": 2.097,
+          "median": 1.674,
           "max": 2.097
         }
       },
@@ -5574,7 +5574,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 2.862,
-          "median": 5.719,
+          "median": 4.508,
           "max": 22.31
         }
       },
@@ -5590,7 +5590,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 2.058,
-          "median": 3.508,
+          "median": 3.4915000000000003,
           "max": 6.285
         }
       },
@@ -5670,7 +5670,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 1.836,
-          "median": 1.897,
+          "median": 1.8835000000000002,
           "max": 2.667
         }
       },
@@ -5686,7 +5686,7 @@
         "selectedTests": 12,
         "caseSeconds": {
           "min": 2.01,
-          "median": 4.768,
+          "median": 4.339,
           "max": 13.348
         }
       },
@@ -5702,7 +5702,7 @@
         "selectedTests": 16,
         "caseSeconds": {
           "min": 2.011,
-          "median": 3.076,
+          "median": 3.031,
           "max": 8.474
         }
       },
@@ -5734,7 +5734,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.127,
-          "median": 1.656,
+          "median": 1.3915,
           "max": 1.656
         }
       },
@@ -5750,7 +5750,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.197,
-          "median": 13.84,
+          "median": 8.5105,
           "max": 27.445
         }
       },
@@ -5766,7 +5766,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 23.107,
-          "median": 40.305,
+          "median": 31.706,
           "max": 40.305
         }
       },
@@ -5782,7 +5782,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.402,
-          "median": 2.645,
+          "median": 2.535,
           "max": 3.489
         }
       },
@@ -5814,7 +5814,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.235,
-          "median": 1.453,
+          "median": 1.344,
           "max": 1.453
         }
       },
@@ -5830,7 +5830,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 0.853,
-          "median": 2.559,
+          "median": 1.706,
           "max": 2.559
         }
       },
@@ -5862,7 +5862,7 @@
         "selectedTests": 22,
         "caseSeconds": {
           "min": 2.885,
-          "median": 4.456,
+          "median": 4.349,
           "max": 9.926
         }
       },
@@ -5911,7 +5911,7 @@
         "selectedTests": 12,
         "caseSeconds": {
           "min": 1.766,
-          "median": 2.115,
+          "median": 2.091,
           "max": 4.854
         }
       },
@@ -5928,7 +5928,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 2.191,
-          "median": 7.942,
+          "median": 6.0920000000000005,
           "max": 17.543
         }
       },
@@ -5944,7 +5944,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 1.992,
-          "median": 2.121,
+          "median": 2.077,
           "max": 3.798
         }
       },
@@ -5960,7 +5960,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 2.44,
-          "median": 3.078,
+          "median": 2.9835,
           "max": 7.504
         }
       },
@@ -5976,7 +5976,7 @@
         "selectedTests": 12,
         "caseSeconds": {
           "min": 1.98,
-          "median": 7.118,
+          "median": 6.984500000000001,
           "max": 19.396
         }
       },
@@ -6008,7 +6008,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 2.5,
-          "median": 4.702,
+          "median": 4.1055,
           "max": 18.816
         }
       },
@@ -6024,7 +6024,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 12.531,
-          "median": 15.352,
+          "median": 13.941500000000001,
           "max": 15.352
         }
       },
@@ -6041,7 +6041,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 2.012,
-          "median": 4.33,
+          "median": 3.9385000000000003,
           "max": 6.925
         }
       },
@@ -6105,7 +6105,7 @@
         "selectedTests": 20,
         "caseSeconds": {
           "min": 2.033,
-          "median": 2.428,
+          "median": 2.386,
           "max": 9.207
         }
       },
@@ -6137,7 +6137,7 @@
         "selectedTests": 14,
         "caseSeconds": {
           "min": 2.015,
-          "median": 7.711,
+          "median": 7.6395,
           "max": 11.5
         }
       },
@@ -6201,7 +6201,7 @@
         "selectedTests": 10,
         "caseSeconds": {
           "min": 1.571,
-          "median": 3.466,
+          "median": 3.2545,
           "max": 10.776
         }
       },
@@ -6281,7 +6281,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 1.288,
-          "median": 2.127,
+          "median": 1.8834999999999997,
           "max": 3.093
         }
       },
@@ -6313,7 +6313,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.804,
-          "median": 4.332,
+          "median": 3.5785,
           "max": 8.129
         }
       },
@@ -6329,7 +6329,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 1.817,
-          "median": 2.465,
+          "median": 2.2035,
           "max": 3.881
         }
       },
@@ -6377,7 +6377,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 12.121,
-          "median": 36.114,
+          "median": 24.1175,
           "max": 36.114
         }
       },
@@ -6441,7 +6441,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.557,
-          "median": 16.059,
+          "median": 8.808,
           "max": 16.059
         }
       },
@@ -6457,7 +6457,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.5,
-          "median": 1.753,
+          "median": 1.6265,
           "max": 1.753
         }
       },
@@ -6473,7 +6473,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 2.785,
-          "median": 3.908,
+          "median": 3.3465,
           "max": 3.908
         }
       },
@@ -6489,7 +6489,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 0.499,
-          "median": 1.214,
+          "median": 0.8565,
           "max": 1.214
         }
       },
@@ -6505,7 +6505,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.435,
-          "median": 3.41,
+          "median": 3.027,
           "max": 4.385
         }
       },
@@ -6569,7 +6569,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.446,
-          "median": 2.657,
+          "median": 2.5695,
           "max": 3.024
         }
       },
@@ -6601,7 +6601,7 @@
         "selectedTests": 10,
         "caseSeconds": {
           "min": 3.704,
-          "median": 4.384,
+          "median": 4.329000000000001,
           "max": 8.874
         }
       },
@@ -6633,7 +6633,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.974,
-          "median": 4.155,
+          "median": 3.0645000000000002,
           "max": 4.155
         }
       },
@@ -6665,7 +6665,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.858,
-          "median": 2.045,
+          "median": 1.9515,
           "max": 2.045
         }
       },
@@ -6697,7 +6697,7 @@
         "selectedTests": 34,
         "caseSeconds": {
           "min": 1.389,
-          "median": 1.812,
+          "median": 1.8025,
           "max": 4.532
         }
       },
@@ -6761,7 +6761,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.232,
-          "median": 3.191,
+          "median": 2.742,
           "max": 4.252
         }
       },
@@ -6825,7 +6825,7 @@
         "selectedTests": 12,
         "caseSeconds": {
           "min": 1.338,
-          "median": 32.844,
+          "median": 32.6555,
           "max": 42.27
         }
       },
@@ -6873,7 +6873,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 4.838,
-          "median": 6.199,
+          "median": 5.6259999999999994,
           "max": 8.941
         }
       },
@@ -6953,7 +6953,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.916,
-          "median": 2.267,
+          "median": 2.0915,
           "max": 2.267
         }
       },
@@ -7001,7 +7001,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 2.315,
-          "median": 2.859,
+          "median": 2.5869999999999997,
           "max": 2.859
         }
       },
@@ -7017,7 +7017,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 1.739,
-          "median": 1.894,
+          "median": 1.8175,
           "max": 2.264
         }
       },
@@ -7065,7 +7065,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.11,
-          "median": 1.466,
+          "median": 1.288,
           "max": 1.466
         }
       },
@@ -7097,7 +7097,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.687,
-          "median": 6.347,
+          "median": 4.017,
           "max": 6.347
         }
       },
@@ -7113,7 +7113,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.883,
-          "median": 5.361,
+          "median": 5.0195,
           "max": 9.564
         }
       },
@@ -7145,7 +7145,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 5.101,
-          "median": 6.182,
+          "median": 5.6655,
           "max": 7.081
         }
       },
@@ -7209,7 +7209,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 1.525,
-          "median": 2.11,
+          "median": 2.0545,
           "max": 4.07
         }
       },
@@ -7241,7 +7241,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 2.063,
-          "median": 2.679,
+          "median": 2.371,
           "max": 2.679
         }
       },
@@ -7257,7 +7257,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 2.675,
-          "median": 7.037,
+          "median": 4.856,
           "max": 7.037
         }
       },
@@ -7273,7 +7273,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 1.924,
-          "median": 2.365,
+          "median": 2.2585,
           "max": 4.408
         }
       },
@@ -7354,7 +7354,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.237,
-          "median": 3.871,
+          "median": 3.127,
           "max": 9.166
         }
       },
@@ -7370,7 +7370,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.858,
-          "median": 3.766,
+          "median": 3.7545,
           "max": 4.309
         }
       },
@@ -7386,7 +7386,7 @@
         "selectedTests": 28,
         "caseSeconds": {
           "min": 7.934,
-          "median": 8.544,
+          "median": 8.502,
           "max": 11.239
         }
       },
@@ -7402,7 +7402,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.668,
-          "median": 2.625,
+          "median": 2.1465,
           "max": 2.625
         }
       },
@@ -7418,7 +7418,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 0.91,
-          "median": 1.19,
+          "median": 1.1735,
           "max": 1.945
         }
       },
@@ -7434,7 +7434,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 3.642,
-          "median": 8.039,
+          "median": 5.913,
           "max": 21.339
         }
       },
@@ -7450,7 +7450,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.738,
-          "median": 3.666,
+          "median": 3.243,
           "max": 3.792
         }
       },
@@ -7530,7 +7530,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 3.498,
-          "median": 4.081,
+          "median": 4.0545,
           "max": 4.362
         }
       },
@@ -7546,7 +7546,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 3.481,
-          "median": 4.633,
+          "median": 4.509,
           "max": 5.046
         }
       },
@@ -7562,7 +7562,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.357,
-          "median": 2.605,
+          "median": 2.4995000000000003,
           "max": 3.065
         }
       },
@@ -7578,7 +7578,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 3.021,
-          "median": 4.226,
+          "median": 4.195,
           "max": 4.585
         }
       },
@@ -7594,7 +7594,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.453,
-          "median": 2.894,
+          "median": 2.7975000000000003,
           "max": 3.232
         }
       },
@@ -7610,7 +7610,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 3.399,
-          "median": 4.523,
+          "median": 4.5120000000000005,
           "max": 4.8
         }
       },
@@ -7626,7 +7626,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 5.492,
-          "median": 5.616,
+          "median": 5.571999999999999,
           "max": 6.85
         }
       },
@@ -7642,7 +7642,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 6.353,
-          "median": 6.572,
+          "median": 6.5280000000000005,
           "max": 6.676
         }
       },
@@ -7658,7 +7658,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.794,
-          "median": 3.78,
+          "median": 3.53,
           "max": 3.898
         }
       },
@@ -7674,7 +7674,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 3.854,
-          "median": 4.778,
+          "median": 4.7585,
           "max": 4.878
         }
       },
@@ -7690,7 +7690,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 3.454,
-          "median": 4.552,
+          "median": 4.4384999999999994,
           "max": 4.593
         }
       },
@@ -7706,7 +7706,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 3.077,
-          "median": 3.845,
+          "median": 3.6395,
           "max": 3.852
         }
       },
@@ -7722,7 +7722,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.569,
-          "median": 2.599,
+          "median": 2.585,
           "max": 2.979
         }
       },
@@ -7738,7 +7738,7 @@
         "selectedTests": 6,
         "caseSeconds": {
           "min": 2.872,
-          "median": 3.022,
+          "median": 3.014,
           "max": 3.657
         }
       },
@@ -7770,7 +7770,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 3.952,
-          "median": 5.424,
+          "median": 5.309,
           "max": 5.966
         }
       },
@@ -7786,7 +7786,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 3.701,
-          "median": 4.866,
+          "median": 4.8045,
           "max": 5.093
         }
       },
@@ -7802,7 +7802,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 4.459,
-          "median": 5.247,
+          "median": 5.233499999999999,
           "max": 5.336
         }
       },
@@ -7818,7 +7818,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 1.982,
-          "median": 2.731,
+          "median": 2.6390000000000002,
           "max": 2.792
         }
       },
@@ -7866,7 +7866,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.093,
-          "median": 2.243,
+          "median": 1.668,
           "max": 2.243
         }
       },
@@ -7882,7 +7882,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 2.343,
-          "median": 3.049,
+          "median": 2.6959999999999997,
           "max": 3.049
         }
       },
@@ -7930,7 +7930,7 @@
         "selectedTests": 12,
         "caseSeconds": {
           "min": 1.487,
-          "median": 7.224,
+          "median": 4.8629999999999995,
           "max": 8.893
         }
       },
@@ -7946,7 +7946,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 0.295,
-          "median": 0.309,
+          "median": 0.302,
           "max": 0.309
         }
       },
@@ -7978,7 +7978,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 4.516,
-          "median": 5.845,
+          "median": 5.2075,
           "max": 8.857
         }
       },
@@ -8010,7 +8010,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 2.158,
-          "median": 4.354,
+          "median": 3.922,
           "max": 5.583
         }
       },
@@ -8042,7 +8042,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 3.61,
-          "median": 3.982,
+          "median": 3.7960000000000003,
           "max": 3.982
         }
       },
@@ -8074,7 +8074,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.654,
-          "median": 9.553,
+          "median": 6.399500000000001,
           "max": 10.363
         }
       },
@@ -8090,7 +8090,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 12.225,
-          "median": 12.672,
+          "median": 12.4485,
           "max": 12.672
         }
       },
@@ -8106,7 +8106,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 3.075,
-          "median": 3.5,
+          "median": 3.2875,
           "max": 3.5
         }
       },
@@ -8122,7 +8122,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.261,
-          "median": 5.495,
+          "median": 4.0855,
           "max": 5.698
         }
       },
@@ -8138,7 +8138,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 3.652,
-          "median": 3.842,
+          "median": 3.747,
           "max": 3.842
         }
       },
@@ -8154,7 +8154,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 7.963,
-          "median": 8.874,
+          "median": 8.4185,
           "max": 8.874
         }
       },
@@ -8170,7 +8170,7 @@
         "selectedTests": 8,
         "caseSeconds": {
           "min": 2.148,
-          "median": 4.596,
+          "median": 3.558,
           "max": 11.829
         }
       },
@@ -8234,7 +8234,7 @@
         "selectedTests": 4,
         "caseSeconds": {
           "min": 2.616,
-          "median": 8.604,
+          "median": 5.7299999999999995,
           "max": 11.683
         }
       },
@@ -8250,7 +8250,7 @@
         "selectedTests": 14,
         "caseSeconds": {
           "min": 2.356,
-          "median": 3.105,
+          "median": 3.081,
           "max": 11.003
         }
       },
@@ -8314,7 +8314,7 @@
         "selectedTests": 10,
         "caseSeconds": {
           "min": 0.941,
-          "median": 1.064,
+          "median": 1.0470000000000002,
           "max": 3.006
         }
       },
@@ -8346,7 +8346,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 1.639,
-          "median": 2.323,
+          "median": 1.9809999999999999,
           "max": 2.323
         }
       },
@@ -8378,7 +8378,7 @@
         "selectedTests": 2,
         "caseSeconds": {
           "min": 0.957,
-          "median": 1.69,
+          "median": 1.3235,
           "max": 1.69
         }
       },
@@ -9190,7 +9190,11 @@
       "noCasesSkippedOrWeakened": true,
       "noOriginPush": true,
       "noDeploy": true,
-      "noReviewGate": true
+      "noReviewGate": true,
+      "r0RowsAdded": [],
+      "newSourceFiles": [],
+      "noModelCLI": true,
+      "reviewAndReleaseOwner": "coordinator"
     },
     "measuredSourceShards": [
       {
@@ -9381,9 +9385,73 @@
       "targetedShardRegressions": {
         "passed": 8,
         "failed": 0,
-        "includesOriginalSplitOwnerInvariant": true
+        "includesOriginalSplitOwnerInvariant": true,
+        "durationSeconds": 2.898804708
       },
-      "staticRemote": "rerun pending after native-denominator normalization",
+      "staticRemote": {
+        "status": "43-passed-one-inherited-wrapper-timeout",
+        "head": "e9011f953",
+        "exitCode": 1,
+        "passedChecks": 43,
+        "optionalSkipped": 0,
+        "durationSeconds": 421.71,
+        "passed": {
+          "volatile-identity": 0.21,
+          "public-names": 1.39,
+          "request-body-ownership": 4.12,
+          "go-vet": 16.66,
+          "rules-bootstrap": 7.17,
+          "test-tiers": 160.92,
+          "go-tiers": 89.98,
+          "go-shards-7": 4.43,
+          "go-shards-4": 3.23,
+          "release-metadata": 0.07,
+          "release-rehearsal-tests": 5.06,
+          "own-release-notes-tests": 0.12,
+          "own-release-notes": 0.05,
+          "release-tool-tests": 0.37,
+          "live-policy-tests": 0.2,
+          "cross-family-tests": 4.53,
+          "release-pin-tests": 0.54,
+          "release-completion-tests": 0.18,
+          "audit-tests": 5.67,
+          "audit-coverage": 5.08,
+          "tracked-bytecode": 0.07,
+          "ci-plan-tests": 16.04,
+          "full-ui-qa-tests": 0.17,
+          "releaseworkflow-tests": 173.59,
+          "runner-route-tests": 1.75,
+          "runner-guard-tests": 7.33,
+          "runner-guard": 0.37,
+          "docker-web-inputs": 0.25,
+          "web-typecheck": 15.85,
+          "web-lint": 7.02,
+          "migration-tests": 8.49,
+          "migrations": 0.13,
+          "migration-splitter": 0.83,
+          "migration-probe-tests": 30.13,
+          "web-shard-tests": 304.64,
+          "openapi-properties": 2.51,
+          "web-tiers": 5.06,
+          "web-spec-inventory": 0.98,
+          "web-browser-safety": 36.14,
+          "openapi-sort": 1.37,
+          "theme-colour-literals": 0.17,
+          "apt-step-bounds": 59.46,
+          "web-classification": 0.33
+        },
+        "remaining": {
+          "id": "web-shard-spec-tests",
+          "wallSeconds": 120.02,
+          "budgetSeconds": 120,
+          "error": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested)",
+          "failedAssertions": 0,
+          "cancelled": 1,
+          "sameAssertionsPassedInCompanionSeconds": 304.64,
+          "classification": "worker-common known environment failure item 3: unchanged exact-spec scheduling/listing path and weightSeconds; the larger companion passes identical assertions. No timeout increase or skip."
+        },
+        "finalMetadataNote": "Follow-up changes correct descriptive sample medians and append execution evidence only. Costs, selection, shard assignment, launch policy and test code are identical; all eight targeted invariants pass on the final metadata."
+      },
       "linuxShard11": {
         "status": "permitted-cases-passed-ci-visual-still-required",
         "hostClass": "approved-linux-runner",
@@ -9522,7 +9590,8 @@
             ]
           }
         ],
-        "nativeChunkWallSeconds": 356.884
+        "nativeChunkWallSeconds": 356.884,
+        "snapshotNote": "Batch 1 uses 66995dbdd; batches 2 and 3 use 567d9f1cc. The subsequent normalization preserves all 22 assignments and their projected costs; browser sources and launch policies are unchanged across these commits."
       },
       "ciOnlyVisual": {
         "spec": "tests/visual/public-quote.spec.ts",
@@ -9548,6 +9617,19 @@
       "schedulingTests": 29,
       "schedulingSeconds": 211.36411865384616,
       "normalization": "The split-owner inventory retains its full native denominator of 29; the 26 measured gated cases keep exactly the same projected cost. No measurement of the three other cases is claimed."
-    }
+    },
+    "workerPct": 95,
+    "recordedAt": "2026-10-23T15:32:36.455064+00:00",
+    "remainingProof": [
+      {
+        "owner": "coordinator / pinned CI renderer",
+        "requirement": "Run the four required tests/visual/public-quote.spec.ts cases and measure complete shard 11 job wall; remote-spec.sh explicitly refuses them with exit 5."
+      },
+      {
+        "owner": "hosted CI",
+        "requirement": "Complete the 120-second web-shard-spec-tests wrapper without timing out. All 43 other static checks pass, including test-tiers and the larger companion executing the same assertions."
+      }
+    ],
+    "note": "All 22 shards fit the unchanged 900s budget and 1200s cap with a maximum projection of 819.565894s including 120s per-shard setup/reporting and a 15% reserve over refreshed launch allocations. Current source jobs measured 507–1025s wall, including font preflight; their largest non-launch residual was 106.690901s. New shard 11 has 139 required cases in 14 files versus 89 in 15 files in the cancelled run; all old files moved out and all new files moved in (exact lists above). The 135 permitted cases pass on the approved Linux runner in 356.884s native chunks / 401.093s including three dispatch cycles. Four pinned-CI visual cases remain required. Eight targeted regressions and all 306 stale-record negative controls pass; remote static has 43 passing checks and one inherited duplicate-wrapper timeout, whose larger companion passes identical assertions. No full-shard wall or complete-static green is claimed; no origin push, deploy, review gate or model CLI."
   }
 }
