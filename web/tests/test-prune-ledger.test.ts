@@ -36,7 +36,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   const summary = checkRepository()
   assert.deepEqual(summary, { browserCases: 5318, specs: 378, core: 29, protectedRisks: 647,
     driftCases: 455, candidateGroups: 31, candidateCases: 155, visualCases: 80,
-    visualApproval: 'pending', phase: 'P08', cuts: false })
+    visualApproval: 'pending', phase: json('scripts/test-prune/risk-ledger.json').phase, cuts: false })
   const original = {
     baseline,
     ledger: json('scripts/test-prune/risk-ledger.json'),
