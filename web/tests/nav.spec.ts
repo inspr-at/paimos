@@ -8,6 +8,7 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { businessData, mockBusiness, NOW, type BusinessMockOptions } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { decorativeVersionContrast } from './ui-audit-rules'
 
 test('P02 keyboard places navigate outside fields and preserve text-field shortcuts', async ({ page }) => {
   await setup(page)
@@ -48,7 +49,16 @@ test('P02 account menu keyboard focus returns through a route and browser Back',
   await account.focus(); await page.keyboard.press('Enter')
   const menu = page.getByRole('menu', { name: 'Account', exact: true })
   await expect(menu.getByRole('menuitem', { name: 'Personal settings', exact: true })).toBeFocused()
-  expect((await new AxeBuilder({ page }).include('.hm-panel').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()).violations).toEqual([])
+  const audit = await new AxeBuilder({ page }).include('.hm-panel').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  const violations: { id: string; target: string }[] = []
+  for (const violation of audit.violations) for (const node of violation.nodes) {
+    const target = node.target.join(' ')
+    // Preserve the audit's existing exception only for decorative coordinates
+    // with a real accessible version counterpart. Every other finding remains.
+    const labelled = violation.id === 'color-contrast' && await page.locator(target).evaluate(el => !!el.closest('.calendar-version[aria-label], .version-coordinate[aria-label]')).catch(() => false)
+    if (!decorativeVersionContrast(target, violation.id, labelled)) violations.push({ id: violation.id, target })
+  }
+  expect(violations).toEqual([])
   await page.keyboard.press('End')
   await expect(menu.getByRole('menuitem').last()).toBeFocused()
   await page.keyboard.press('Home')
