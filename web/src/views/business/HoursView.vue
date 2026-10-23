@@ -746,7 +746,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .t-cell .t-title { display: none; }
   .c-day { width: auto; padding: 0 1px 0 0 !important; font-size: 10.5px; }
   .d-date { font-size: 10.5px; }
-  .c-total { width: 52px; padding-left: 2px; padding-right: 6px !important; font-size: 11.5px; }
+  .c-total { width: 54px; padding-left: 2px; padding-right: 6px !important; font-size: 11.5px; }
   .week-grid thead .c-day { padding-right: 5px !important; }
   /* Preserve the Total inset over base cell padding at every compact width. */
   .week-grid .c-total { padding-left: 2px; }
