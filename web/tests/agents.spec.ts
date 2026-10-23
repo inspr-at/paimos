@@ -804,6 +804,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   }
   const lastActivity = section.locator('.assistant-row').first().locator('.last-column')
   await expect(lastActivity).toHaveText('Ran Inbox triage 1 · 30 min ago')
+  await expect(lastActivity).not.toHaveAttribute('data-tip', 'Not available yet')
+  await expect(section.locator('.assistant-row').first().locator('.routines-column')).not.toHaveAttribute('data-tip', 'Not available yet')
   await expect(section.locator('.assistant-open').first()).toHaveAccessibleDescription(/Ran Inbox triage 1 · 30 min ago/)
   expect(await lastActivity.evaluate(cell => cell.scrollWidth <= cell.clientWidth)).toBe(true)
   await section.locator('.budget-unknown').first().hover()
