@@ -362,3 +362,80 @@ for (const lang of ['en', 'de'] as const) {
     }
   })
 }
+
+// P11: the native mode controls and a held live refresh share one selected time.
+test('AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1300 })
+  const flow = await setup(page)
+  await page.goto('/p/AEON/delivery?view=flow')
+  await expect(chip(page)).toHaveText('Live · now 20:25')
+  await expect(page.getByTestId('delivery-updated')).toHaveText('Now 20:25 · live')
+  await expect(page.getByTestId('flow-empty')).toHaveCount(0)
+  await expect(page.getByTestId('flow-moment-head')).toContainText('At 20:25 (now) Release 126 is live but not working properly (since 20:14)')
+  const table = page.getByTestId('flow-inflight')
+  await expect(table.locator('tbody tr')).toHaveCount(4)
+  await expect(table.locator('tbody tr').first()).toContainText('the checks, then you: release GO')
+  await expect(table.locator('tbody tr').first()).toContainText('healthy ~20:35')
+  await expect(lanes(page).getByTestId('flow-avatar')).toHaveCount(1)
+
+  const guard = await controlStability(page, {
+    modes: modes(page), chip: page.getByTestId('flow-chip'), follow: page.getByTestId('flow-follow'),
+    zoom: page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' }), lanes: lanes(page), moment: page.getByTestId('flow-moment'),
+  })
+  // Only a playhead drag moves the time: "Viewing HH:MM" and "Back to now".
+  const pill = await center(page, '[data-testid="flow-playhead"] .ln-phpill')
+  await guard.check(async () => { await page.mouse.move(pill.x, pill.y); await page.mouse.down(); await page.mouse.move(pill.x - 150, pill.y, { steps: 8 }); await page.mouse.up() })
+  await expect(chip(page)).toHaveText(/^Viewing \d\d:\d\d$/)
+  const viewing = await chip(page).textContent()
+  await expect(page.getByTestId('flow-follow')).toContainText('Back to now')
+
+  // A hint on the stream reads the flow again; the new "now" does not take the person's time away.
+  const reads = flow.reads.filter(r => r.includes('/delivery/flow?')).length
+  flow.setNow('20:26')
+  let releaseHint!: () => void
+  const heldHint = new Promise<void>(resolve => { releaseHint = resolve })
+  let hintedReads = 0
+  const hold = async (route: Route) => { hintedReads++; await heldHint; await route.fallback() }
+  await page.route(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, hold)
+  flow.hint('delivery.step', RUN.r126)
+  await expect.poll(() => hintedReads).toBeGreaterThan(0)
+  // The read is on the wire before the person chooses a different time.
+  await lanes(page).focus()
+  await guard.check(() => page.keyboard.press('Shift+ArrowLeft'))
+  const selectedTime = await chip(page).textContent()
+  expect(selectedTime).not.toBe(viewing)
+  releaseHint()
+  await expect.poll(() => flow.reads.filter(r => r.includes('/delivery/flow?')).length).toBeGreaterThan(reads)
+  await expect(page.getByTestId('delivery-updated')).toHaveText('Now 20:26 · live')
+  await expect(chip(page)).toHaveText(selectedTime!)
+  await page.unroute(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, hold)
+  await guard.check(() => page.getByTestId('flow-follow').click())
+  await expect(chip(page)).toHaveText('Live · now 20:26')
+  await expect(page.getByTestId('flow-moment-head')).toContainText('At 20:26 (now)')
+  guard.done()
+  const modeGuard = await controlStability(page, {
+    modes: modes(page), live: modes(page).getByRole('radio', { name: 'Live', exact: true }),
+    replay: modes(page).getByRole('radio', { name: 'Replay', exact: true }), compare: modes(page).getByRole('radio', { name: 'Compare', exact: true }),
+  })
+  await modeGuard.check(async () => {
+    await modes(page).getByRole('radio', { name: 'Replay', exact: true }).click()
+    await expect(page).toHaveURL(/mode=replay/)
+    await expect(page.getByTestId('flow-pick')).toHaveValue(RUN.r126)
+    await expect(clock(page)).toHaveText('18:21 · 0 min in')
+  })
+  await expect(play(page)).toBeDisabled()
+  await expect(page.getByTestId('flow-rm')).toHaveText('Reduced motion: drag the time handle to step through.')
+  await lanes(page).focus(); await page.keyboard.press('Shift+ArrowRight')
+  await expect(clock(page)).toHaveText('18:22 · 1 min in')
+  await modeGuard.check(async () => {
+    await modes(page).getByRole('radio', { name: 'Compare', exact: true }).click()
+    await expect(lanes(page).locator('.fl-ttl')).toHaveText(['Release 126 (a → l)', 'Arion target'])
+  })
+  await expect(page.getByTestId('flow-went').locator('.went')).toHaveCount(2)
+  await modeGuard.check(async () => {
+    await modes(page).getByRole('radio', { name: 'Live', exact: true }).click()
+    await expect(chip(page)).toHaveText('Live · now 20:26')
+  })
+  modeGuard.done()
+
+})
