@@ -772,7 +772,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .week-grid th, .week-grid td { border-bottom: 0; }
   .week-grid .c-ticket { grid-column: 1 / 5; grid-row: 1; width: auto; height: 32px; padding: 0; align-content: center; }
   .week-grid .ticket-chip { position: static; padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); font-size: 11.5px; }
-  .week-grid a.ticket-chip::before { content: ''; position: absolute; inset: 0; width: auto; height: auto; transform: none; }
+  .week-grid a.ticket-chip::before { content: ''; position: absolute; inset: 0; z-index: 1; width: auto; height: auto; transform: none; }
   .week-grid .ticket-chip:focus-visible { outline: none; }
   .week-grid tbody tr:has(.ticket-chip:focus-visible) { box-shadow: var(--focus-ring); }
   .week-grid .c-day { grid-row: 2; width: auto; height: 32px; padding: 0 2px !important; text-align: center; align-content: center; font-size: clamp(10px, 2.95vw, 11.5px); }

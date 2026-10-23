@@ -189,7 +189,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
           expect(day.x, 'day columns line up with their headers').toBe(phoneGrid.headers[i].x)
           expect(day.width, 'day columns keep the header width').toBe(phoneGrid.headers[i].width)
         }
-        expect(row.taps.every(Boolean), 'both lines of a ticket row share its link target').toBe(true)
+        expect(row.taps.every(Boolean), `both lines of a ticket row share its link target: ${JSON.stringify(row)}`).toBe(true)
       }
       expect(phoneGrid.rows.flatMap(row => row.taps)).toHaveLength(12)
       expect(phoneGrid.today).toHaveLength(5)
