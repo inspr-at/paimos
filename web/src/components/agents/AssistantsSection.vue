@@ -11,14 +11,14 @@ import AssistantBudget from './AssistantBudget.vue'
 const props = defineProps<{ items: Assistant[]; facts: Record<string, AssistantFacts>; state: string; error: string; truncated: boolean; canConnect: boolean; canApprove: boolean; now: number; sortEpoch: number; selected: string; owner: string; projectNames?: Record<string, string> }>()
 const emit = defineEmits<{ open: [id: string, anchor: HTMLElement]; retry: [] }>()
 const words = assistantCopy(), root = ref<HTMLElement>(), order = ref<string[]>([]), expanded = ref(false)
-let pointer = false
+const pointer = ref(false)
 const storageKey = () => `aeon:assistants:expanded:${props.owner}`
 watch(() => props.owner, () => {
-  order.value = []; pointer = false
+  order.value = []; pointer.value = false
   try { expanded.value = localStorage.getItem(storageKey()) === 'true' } catch { expanded.value = false }
 }, { immediate: true })
 function reorder() {
-  if (pointer || root.value?.contains(document.activeElement)) return
+  if (pointer.value || root.value?.contains(document.activeElement)) return
   order.value = assistantOrder(props.items, props.facts, props.now)
 }
 watch(() => props.items, items => {
@@ -51,7 +51,7 @@ function adapterLine(item: Assistant) {
   if (!adapter) return `${vendor} · ${words.unavailable.toLowerCase()}`
   if (adapter.state === 'setup') return words.connectVendor(vendor)
   if (adapter.state === 'ok') return words.adapterOk(vendor)
-  return adapter.failingSince ? words.failing(vendor, new Date(adapter.failingSince).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) : words.noReceipt(vendor, adapter.lastReceipt ? relativeTime(adapter.lastReceipt, props.now).replace(/ ago$/, '') : words.notReported)
+  return adapter.failingSince ? words.failing(vendor, new Date(adapter.failingSince).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) : words.noReceipt(vendor, adapter.lastReceipt ? relativeTime(adapter.lastReceipt, { now: props.now }).replace(/ ago$/, '') : words.notReported)
 }
 </script>
 <template>
@@ -68,11 +68,11 @@ function adapterLine(item: Assistant) {
       <div class="assistant-rows">
         <div v-for="item in shown" :key="item.principal_id" class="assistant-row" :class="{ selected: selected === item.principal_id }" :data-assistant="item.principal_id" :data-status="statusOf(item)">
           <button type="button" class="assistant-open" :aria-label="`${item.display_name} · ${labelOf(item)}`" :aria-pressed="selected === item.principal_id" :title="`${item.display_name} · ${glance(item)} · ${policyGroups(item.policy.allowed_scopes).join(', ')}`" @click="emit('open', item.principal_id, $event.currentTarget as HTMLElement)">
-            <span class="assistant-identity"><span class="assistant-name"><HarnessMark :harness="item.vendor" :size="16" /><strong v-clip-tip>{{ item.display_name }}</strong></span><span v-clip-tip class="assistant-glance">{{ glance(item) }}</span><span v-clip-tip class="folded-facts">{{ factsOf(item).lastActivity ? `${factsOf(item).lastActivity!.text} ${relativeTime(factsOf(item).lastActivity!.at, now)}` : words.notReported }} · {{ factsOf(item).routines ? words.routineCount(factsOf(item).routines!.length) : words.routinesUnavailable }}</span><span v-clip-tip class="phone-facts"><template v-if="factsOf(item).spend">{{ words.weekAmount(assistantMoney(factsOf(item).spend!.amount, item.policy.weekly_budget.unit, true), assistantMoney(item.policy.weekly_budget.amount, item.policy.weekly_budget.unit)) }}</template><template v-else>{{ item.status === 'deactivated' ? words.disconnected : words.statusUnavailable }}</template></span></span>
+            <span class="assistant-identity"><span class="assistant-name"><HarnessMark :harness="item.vendor" :size="16" /><strong v-clip-tip>{{ item.display_name }}</strong></span><span v-clip-tip class="assistant-glance">{{ glance(item) }}</span><span v-clip-tip class="folded-facts">{{ factsOf(item).lastActivity ? `${factsOf(item).lastActivity!.text} ${relativeTime(factsOf(item).lastActivity!.at, { now })}` : words.notReported }} · {{ factsOf(item).routines ? words.routineCount(factsOf(item).routines!.length) : words.routinesUnavailable }}</span><span v-clip-tip class="phone-facts"><template v-if="factsOf(item).spend">{{ words.weekAmount(assistantMoney(factsOf(item).spend!.amount, item.policy.weekly_budget.unit, true), assistantMoney(item.policy.weekly_budget.amount, item.policy.weekly_budget.unit)) }}</template><template v-else>{{ item.status === 'deactivated' ? words.disconnected : words.statusUnavailable }}</template></span></span>
           </button>
           <span aria-hidden="true" />
           <span class="assistant-state"><AppIcon :name="ASSISTANT_STATUS_ICON[statusOf(item)]" :size="14" />{{ labelOf(item) }}<template v-if="statusOf(item) === 'paused' && factsOf(item).spend && Number(factsOf(item).spend!.amount) >= Number(item.policy.weekly_budget.amount)"> · {{ words.budgetReached }}</template></span>
-          <span v-clip-tip class="last-column">{{ factsOf(item).lastActivity ? `${factsOf(item).lastActivity!.text} ${relativeTime(factsOf(item).lastActivity!.at, now)}` : words.unavailable }}</span>
+          <span v-clip-tip class="last-column">{{ factsOf(item).lastActivity ? `${factsOf(item).lastActivity!.text} ${relativeTime(factsOf(item).lastActivity!.at, { now })}` : words.unavailable }}</span>
           <AssistantBudget class="row-budget" :policy="item.policy" :facts="factsOf(item)" />
           <span class="assistant-approvals"><RouterLink v-if="approvalsOf(item)" :to="assistantDeskLink(item.principal_id)" @click.stop>{{ words.toApprove(approvalsOf(item)!) }}</RouterLink><span v-else>{{ approvalsOf(item) === 0 ? '—' : words.unavailable }}</span></span>
           <span v-clip-tip class="routines-column">{{ routineLine(item) }}</span>

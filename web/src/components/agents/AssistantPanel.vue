@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAssistants } from '../../stores/assistants'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
-import { assistantCapabilities, assistantDeskLink, assistantMoney, assistantStatus, ASSISTANT_STATUS_ICON, policyChange, policyGroups, type Assistant, type AssistantFacts, type AssistantPolicy } from '../../lib/assistants'
+import { assistantCapabilities, assistantDeskLink, assistantMoney, assistantStatus, ASSISTANT_STATUS_ICON, cloneAssistantPolicy, policyChange, policyGroups, type Assistant, type AssistantFacts, type AssistantPolicy } from '../../lib/assistants'
 import { assistantCopy } from '../../lib/assistantsCopy'
 import { can } from '../../lib/authz'
 import { APIError } from '../../lib/api'
@@ -37,10 +37,10 @@ const statusLine = computed(() => {
   if (props.item.status === 'deactivated') return words.disconnected
   if (status.value === 'waiting') return words.approvalLine(openApprovals.value!.length)
   if (status.value === 'working' && props.facts.lastActivity) return words.since(time(props.facts.lastActivity.at), props.facts.lastActivity.text)
-  if (status.value === 'idle') return props.facts.lastActivity ? words.lastActive(relativeTime(props.facts.lastActivity.at, props.now)) : words.notReported
+  if (status.value === 'idle') return props.facts.lastActivity ? words.lastActive(relativeTime(props.facts.lastActivity.at, { now: props.now })) : words.notReported
   if (status.value === 'paused') return props.facts.paused ? words.pausedBy(props.facts.paused.by, time(props.facts.paused.at)) : props.facts.spend?.resumes ? words.resumes(props.facts.spend.resumes) : words.budgetReached
   if (status.value === 'setup') return words.connectVendor(vendor.value)
-  if (status.value === 'down') return [props.facts.adapter?.lastReceipt ? words.noReceipt(vendor.value, relativeTime(props.facts.adapter.lastReceipt, props.now).replace(/ ago$/, '')) : words.notReported, props.facts.adapter?.error].filter(Boolean).join(' · ')
+  if (status.value === 'down') return [props.facts.adapter?.lastReceipt ? words.noReceipt(vendor.value, relativeTime(props.facts.adapter.lastReceipt, { now: props.now }).replace(/ ago$/, '')) : words.notReported, props.facts.adapter?.error].filter(Boolean).join(' · ')
   return words.statusUnavailable
 })
 const history = computed(() => store.events.filter(event => (event.after?.principal_id ?? event.before?.principal_id) === props.item.principal_id).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id - a.id))
@@ -70,14 +70,14 @@ function toggleScope(scopes: string[], checked: boolean) {
 function beginEdit() {
   menuAnchor.value = null
   if (!mayEdit.value || pending.value) return
-  original.value = structuredClone({ ...props.item, policy: JSON.parse(JSON.stringify(props.item.policy)) })
-  draft.value = JSON.parse(JSON.stringify(props.item.policy)); editing.value = true; tab.value = 'policy'; feedback.value = ''; failed.value = false
+  original.value = { ...props.item, policy: cloneAssistantPolicy(props.item.policy) }
+  draft.value = cloneAssistantPolicy(props.item.policy); editing.value = true; tab.value = 'policy'; feedback.value = ''; failed.value = false
 }
 function cancelEdit() { if (pending.value) return; editing.value = false; draft.value = undefined; original.value = undefined; feedback.value = ''; failed.value = false }
 async function save() {
   const record = original.value, policy = draft.value, person = who.value
   if (!record || !policy || !mayEdit.value || pending.value || !budgetValid.value || !dirty.value) return
-  const submitted = JSON.parse(JSON.stringify(policy)) as AssistantPolicy
+  const submitted = cloneAssistantPolicy(policy)
   feedback.value = ''; failed.value = false
   try {
     const saved = await store.save(record, submitted)
@@ -134,12 +134,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
     <div class="assistant-panel-scroll">
       <div v-show="tab === 'overview'" id="assistant-pane-overview" role="tabpanel" aria-labelledby="assistant-tab-overview">
         <section class="assistant-block"><h3>{{ words.thisWeek }}</h3><AssistantBudget :policy="item.policy" :facts="facts" daily /></section>
-        <section class="assistant-block"><h3>{{ words.adapter }}</h3><dl><div><dt>{{ words.vendor }}</dt><dd>{{ vendor }}</dd></div><div><dt>{{ words.status }}</dt><dd>{{ facts.adapter ? facts.adapter.state === 'ok' ? words.adapterOk(vendor) : statusWord : words.adapterUnavailable }}</dd></div><div><dt>{{ words.lastReceipt }}</dt><dd>{{ facts.adapter?.lastReceipt ? relativeTime(facts.adapter.lastReceipt, now) : words.notReported }}</dd></div><div v-if="facts.adapter?.error"><dt>{{ words.lastError }}</dt><dd>{{ facts.adapter.error }}</dd></div></dl></section>
+        <section class="assistant-block"><h3>{{ words.adapter }}</h3><dl><div><dt>{{ words.vendor }}</dt><dd>{{ vendor }}</dd></div><div><dt>{{ words.status }}</dt><dd>{{ facts.adapter ? facts.adapter.state === 'ok' ? words.adapterOk(vendor) : facts.adapter.state === 'down' ? words.statuses.down : words.statuses.setup : words.adapterUnavailable }}</dd></div><div><dt>{{ words.lastReceipt }}</dt><dd>{{ facts.adapter?.lastReceipt ? relativeTime(facts.adapter.lastReceipt, { now }) : words.notReported }}</dd></div><div v-if="facts.adapter?.error"><dt>{{ words.lastError }}</dt><dd>{{ facts.adapter.error }}</dd></div></dl></section>
         <section class="assistant-block"><h3>{{ words.next }}</h3><p>{{ facts.routines === null ? words.routinesUnavailable : facts.routines.length ? facts.routines[0]?.name : words.noRoutines }}</p><RouterLink v-if="openApprovals?.length" :to="assistantDeskLink(item.principal_id)">{{ words.toApprove(openApprovals.length) }} · {{ words.openDesk }}</RouterLink><p v-else>{{ openApprovals === null ? words.approvalsUnavailable : words.noApprovals }}</p></section>
       </div>
       <div v-show="tab === 'approvals'" id="assistant-pane-approvals" role="tabpanel" aria-labelledby="assistant-tab-approvals" class="assistant-block">
         <p v-if="facts.approvals === null">{{ words.approvalsUnavailable }}</p>
-        <template v-else><p v-if="!openApprovals?.length">{{ words.noApprovals }}</p><article v-for="approval in openApprovals" :key="approval.id" class="assistant-log-entry"><strong>{{ approval.title }}</strong><p>{{ approval.target }} · {{ relativeTime(approval.at, now) }}</p><RouterLink :to="approval.href">{{ words.openDesk }}</RouterLink></article><h3>{{ words.recentDecisions }}</h3><article v-for="approval in facts.approvals.filter(row => row.decision)" :key="approval.id" class="assistant-log-entry"><strong>{{ approval.title }}</strong><p>{{ approval.decision }} · {{ approval.by }} · {{ relativeTime(approval.at, now) }}</p></article></template>
+        <template v-else><p v-if="!openApprovals?.length">{{ words.noApprovals }}</p><article v-for="approval in openApprovals" :key="approval.id" class="assistant-log-entry"><strong>{{ approval.title }}</strong><p>{{ approval.target }} · {{ relativeTime(approval.at, { now }) }}</p><RouterLink :to="approval.href">{{ words.openDesk }}</RouterLink></article><h3>{{ words.recentDecisions }}</h3><article v-for="approval in facts.approvals.filter(row => row.decision)" :key="approval.id" class="assistant-log-entry"><strong>{{ approval.title }}</strong><p>{{ approval.decision }} · {{ approval.by }} · {{ relativeTime(approval.at, { now }) }}</p></article></template>
       </div>
       <div v-show="tab === 'routines'" id="assistant-pane-routines" role="tabpanel" aria-labelledby="assistant-tab-routines" class="assistant-block">
         <p v-if="facts.routines === null">{{ words.routinesUnavailable }}</p><p v-else-if="!facts.routines.length">{{ words.noRoutines }}</p>

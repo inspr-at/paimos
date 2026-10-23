@@ -18,6 +18,11 @@ export interface AssistantSnapshot {
 export interface Assistant extends AssistantSnapshot {
   kind: 'assistant'; principal_kind: 'agent'; display_name: string; vendor: 'grok' | 'unknown'; messaging_only: boolean
 }
+export const cloneAssistantPolicy = (policy: AssistantPolicy): AssistantPolicy => ({
+  allowed_projects: [...policy.allowed_projects], allowed_scopes: [...policy.allowed_scopes],
+  weekly_budget: { ...policy.weekly_budget }, outward_action_rule: policy.outward_action_rule,
+  never_ask_person_for_secrets_or_manual_steps: policy.never_ask_person_for_secrets_or_manual_steps,
+})
 export interface AssistantEvent {
   id: number; type: string; at: string; actor_principal_id: string
   before?: AssistantSnapshot; after?: AssistantSnapshot
@@ -41,13 +46,13 @@ export const unavailableAssistantFacts = (): AssistantFacts => ({ adapter: null,
 export const assistantCapabilities = Object.freeze({ adapter: false, approvals: false, routines: false, pause: false, approvers: false, resetWeekday: false })
 
 export function assistantStatus(item: Assistant, facts: AssistantFacts, now: number): AssistantStatus {
+  if (facts.paused || item.status === 'deactivated' || budgetPercent(item.policy, facts) === 100) return 'paused'
   if (facts.approvals?.some(row => !row.decision)) return 'waiting'
   if (facts.adapter?.state === 'down') return 'down'
-  if (facts.paused || item.status === 'deactivated' || budgetPercent(item.policy, facts) === 100) return 'paused'
   if (facts.adapter?.state === 'setup') return 'setup'
-  if (facts.adapter === null) return 'unavailable'
   const at = Date.parse(facts.lastActivity?.at ?? '')
-  return Number.isFinite(at) && now >= at && now - at < 15 * 60_000 ? 'working' : 'idle'
+  if (Number.isFinite(at) && now >= at && now - at < 15 * 60_000) return 'working'
+  return facts.adapter === null ? 'unavailable' : 'idle'
 }
 export const ASSISTANT_STATUS_ICON: Record<AssistantStatus, IconName> = { waiting: 'hand', down: 'alert', working: 'pulse', idle: 'circle-dot', paused: 'pause', setup: 'link', unavailable: 'ring-dashed' }
 const statusRank: Record<AssistantStatus, number> = { waiting: 0, down: 1, working: 2, idle: 3, paused: 4, setup: 5, unavailable: 6 }

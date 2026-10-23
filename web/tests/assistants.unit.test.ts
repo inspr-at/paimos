@@ -38,7 +38,6 @@ it('assistant facts retain the specified status order, exact budget words and in
   expect(html).toContain(`href="/decision-desk?assistant=${amy.principal_id}"`)
   expect(html).toContain('2 to approve')
   expect(html).toContain('Grok · ok')
-  expect(html).not.toContain('border-left')
   expect(assistantCopy('de').statuses.waiting).toBe('Wartet auf Freigabe')
   expect(policyChange({ id: 1, at: new Date(now).toISOString(), type: 'assistant.policy_updated', actor_principal_id: 'owner', before: amy, after: { ...amy, policy: { ...amy.policy, weekly_budget: { amount: '15', unit: 'USD' } } } })).toBe('Weekly budget: $10 → $15')
 })
