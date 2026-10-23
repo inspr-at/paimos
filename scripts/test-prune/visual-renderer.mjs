@@ -77,19 +77,23 @@ export function installRendererFonts(visual, directory, { run = execFileSync } =
   return path
 }
 
-export function assertFontEvidence(evidence, state) {
+export function assertFontEvidence(evidence, state, { platform = 'linux' } = {}) {
   const fail = detail => { throw new Error(`Visual font guard: ${detail}`) }
   if (!evidence || typeof evidence.body?.computedFamily !== 'string' ||
       !/(Inter|system-ui|-apple-system|sans-serif)/.test(evidence.body.computedFamily) ||
       /JetBrains|monospace/i.test(evidence.body.computedFamily) ||
-      !same(evidence.body.renderedFamilies, ['Inter Variable'])) fail('body text must resolve to Inter sans')
-  const allowed = new Set(['Inter Variable', 'JetBrains Mono', 'Source Sans 3', 'Source Serif 4 Display'])
+      !same(evidence.body.renderedFamilies, ['Inter Variable'])) fail(`body text must resolve to Inter sans: ${JSON.stringify(evidence?.body)}`)
+  const allowed = new Set(['Inter Variable', 'JetBrains Mono', 'Source Sans 3', 'Source Sans 3 Semibold', 'Source Sans 3 Bold', 'Source Serif 4 Display',
+    // Only the remote Mac quality lane has OS-rendered date-input segments.
+    // Linux candidate packaging always uses the default and rejects these.
+    ...(platform === 'darwin' ? ['.SF NS'] : [])])
   if (!Array.isArray(evidence.painted) || !evidence.painted.length ||
       evidence.painted.some(font => !allowed.has(font.family))) fail('unexpected painted font family')
   if (['public-quote', 'quote-editor'].includes(state)) {
     const faces = evidence.profile
     if (!Array.isArray(faces) || faces.length !== 7 || faces.some(face => face.status !== 'loaded' || face.checked !== true) ||
-        faces.filter(face => face.role === 'body').length !== 6 || faces.filter(face => face.role === 'display').length !== 1)
+        !same(faces.map(face => `${face.role}:${face.weight}:${face.style}`).sort(),
+          ['body:400:normal', 'body:400:italic', 'body:600:normal', 'body:600:italic', 'body:700:normal', 'body:700:italic', 'display:400:normal'].sort()))
       fail('quote profile faces must all be loaded')
     if (evidence.document?.body?.computedFamily !== faces.find(face => face.role === 'body').family ||
         !same(evidence.document?.body?.renderedFamilies, ['Source Sans 3']) ||

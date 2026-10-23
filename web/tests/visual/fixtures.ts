@@ -245,7 +245,6 @@ export const hours: VisualSetup = async (page, _profile, theme) => {
   await expect(page.getByRole('form', { name: 'Edit entry' })).toBeVisible()
 }
 
-
 // Use the actual bundled INSPR profile and serve only its allowlisted assets.
 async function visualQuoteProfile(page: Page): Promise<QuoteProfileSnapshot> {
   const root = new URL('../../../internal/business/quotes/profiles/inspr/', import.meta.url)
@@ -296,8 +295,8 @@ export const agentRules: VisualSetup = async (page, _profile, theme) => {
 }
 
 export const capacity: VisualSetup = async (page, _profile, theme) => {
-  await page.clock.setFixedTime(CAPACITY_NOW)
   await work(page, theme)
+  await page.clock.setFixedTime(CAPACITY_NOW)
   const data = agentsData(CAPACITY_NOW), capacity = capacityWorld()
   data.accounts = capacity.accounts as unknown as typeof data.accounts
   await mockAgents(page, data, { capacity, now: () => CAPACITY_NOW })
@@ -361,8 +360,8 @@ export const ticketWorkspace: VisualSetup = async (page, _profile, theme) => {
 
 // A real revision-checked cell save exposes Undo while other cells remain mixed.
 export const accountUseMatrix: VisualSetup = async (page, _profile, theme) => {
-  await page.clock.setFixedTime(CAPACITY_NOW)
   await work(page, theme)
+  await page.clock.setFixedTime(CAPACITY_NOW)
   const data = agentsData(CAPACITY_NOW), capacity = capacityWorld()
   data.accounts = capacity.accounts as unknown as typeof data.accounts
   await mockAgents(page, data, { capacity, now: () => CAPACITY_NOW })

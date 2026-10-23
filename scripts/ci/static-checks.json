@@ -55,7 +55,7 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "77dcf1cfb9c2567f3d2f2d979540373d772024db8989527578cb5ddb578071cf"
+      "runs_sha256": "fb02d496844bc0a4ca5fe952727cd1d4315d5326a5571113ee934139a9fa03a1"
     },
     "web": {
       "kind": "not-static",
@@ -91,7 +91,7 @@
     "visual-reference-capture": {
       "kind": "not-static",
       "reason": "AEON-1674 manual hosted browser capture and artifact-only review packaging; never a local static check or reference publication.",
-      "runs_sha256": "fa0c0d663cc4f3fe1b8ac4f7c2373a4fd07cfdc738b4bb4ea5dd04fabb0abe5f"
+      "runs_sha256": "6af9aa36e727ba93c583260b122e56bee498ca892b874cdafe5bb4a1122c784a"
     }
   },
   "exclusions": [

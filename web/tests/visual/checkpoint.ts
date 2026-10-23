@@ -196,7 +196,8 @@ export async function renderedFonts(page: Page) {
       const { nodeId } = await client.send('DOM.requestNode', { objectId: object.value!.objectId! })
       const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
       for (const font of fonts) if (font.glyphCount > 0) {
-        if (!['Inter Variable', 'JetBrains Mono', 'Source Sans 3', 'Source Serif 4 Display'].includes(font.familyName)) {
+        if (!['Inter Variable', 'JetBrains Mono', 'Source Sans 3', 'Source Sans 3 Semibold', 'Source Sans 3 Bold', 'Source Serif 4 Display',
+          ...(process.platform === 'darwin' ? ['.SF NS'] : [])].includes(font.familyName)) {
           const { node } = await client.send('DOM.describeNode', { nodeId, depth: 0 })
           const { outerHTML } = await client.send('DOM.getOuterHTML', { nodeId })
           throw new Error(`Visual font guard: unexpected painted font ${font.familyName} at ${node.nodeName}: ${outerHTML.slice(0, 200)}`)
@@ -229,6 +230,15 @@ export async function fontEvidence(page: Page, state: string) {
       return getComputedStyle(element).fontFamily.replaceAll('"', '')
     })
     try {
+      // Reading computed styles can be the first use of an injected face. Wait
+      // after that read, before resolving its glyphs, even on the Mac lane.
+      await page.evaluate(async () => {
+        const probe = document.getElementById('visual-font-probe')!
+        const style = getComputedStyle(probe)
+        await document.fonts.load(`${style.fontSize} ${style.fontFamily}`)
+        await document.fonts.ready
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      })
       const { root } = await client.send('DOM.getDocument')
       const { nodeId } = await client.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#visual-font-probe' })
       const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
@@ -244,7 +254,7 @@ export async function fontEvidence(page: Page, state: string) {
     })))
     const quoteDocument = quote ? { body: await sample('.quote-document'), display: await sample('.quote-document .quote-title') } : undefined
     const evidence = { body, profile, document: quoteDocument, painted: await renderedFonts(page) }
-    assertFontEvidence(evidence, state)
+    assertFontEvidence(evidence, state, { platform: process.platform })
     return evidence
   } finally { await client.detach() }
 }

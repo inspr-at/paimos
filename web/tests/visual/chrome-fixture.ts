@@ -51,4 +51,7 @@ export async function visualChrome(page: Page, data: Fixtures, now: number, opti
     if (path === '/api/me/leaving-at') return json({ deadline_at: null, request_id: null, stop_in_flight: false, hosts: 'all', items: [] })
     return route.fallback()
   })
+  // mockBusiness installs its own fixture date. Chrome belongs to the caller's
+  // clock: otherwise a chat's Today separator silently becomes Yesterday.
+  await page.clock.setFixedTime(now)
 }

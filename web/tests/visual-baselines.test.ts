@@ -8,7 +8,7 @@ import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGates, referenceReport, materializeBaseline } from '../../scripts/test-prune/visual-baselines.mjs'
 import { packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 
-import { assertRenderer, assertFontEvidence, verifyFontAssets, installRendererFonts, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, verifyFontAssets, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
 import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
