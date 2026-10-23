@@ -1,0 +1,235 @@
+{
+  "ticket": "AEON-1708",
+  "risk": "Optimizing shard planning could omit or duplicate a spec, lose an improving multi-spec exchange, or narrow OPS-257/essential/full-suite browser coverage.",
+  "baseline_commit": "21815206bef5777ba47f192de32afb96865c9ad3",
+  "implementation_commit": "90a2b89fa",
+  "cause": {
+    "source_specs": 397,
+    "visual_specs_added_on_2026_10_23": 19,
+    "twelve_shard_subset_pairs_per_refinement_pass": 20996652,
+    "without_new_visual_specs_subset_pairs_per_pass": 17299968,
+    "description": "The bounded refinement still forms a Cartesian product of subset exchanges. It repeatedly summed those subsets and allocated/sorted the entire shard-load vector even when the exchanged pair could not improve. Native regression planning also collected unrelated unit registrations, and selectors spawned separate native lists for compatible groups.",
+    "cpu_profile_top_functions_by_samples": {
+      "descending": 115337,
+      "spawnSync": 109501,
+      "anonymous_in_ci_web_shard": 73404,
+      "lowerMakespan": 48069,
+      "balanceShards": 8380,
+      "specSum": 5724
+    }
+  },
+  "changes": [
+    "Build deterministic subset lists and their weights once per refinement pass.",
+    "Index subset weights and binary-search the only delta window that can improve a pair; restore the original enumeration order for candidate ties and retain the exact comparison, subset bounds and pass count.",
+    "Reuse each computed coverage plan and index declared spec paths.",
+    "Share one uncached native browser snapshot across browser-gate regressions; strict web-tier checks independently retain full unit registration reconciliation.",
+    "Use the unchanged production browserBatches policy coalescer for native selector checks, retaining independent complete identity assertions for every group and mode."
+  ],
+  "preserved": {
+    "coverage_shard_counts": [
+      1,
+      12,
+      24,
+      256
+    ],
+    "nested_specs": true,
+    "source_specs_excluded_or_reduced": false,
+    "ops_257_gate_and_essential_promotions": true,
+    "native_browser_modes": [
+      "essential",
+      "full",
+      "all"
+    ],
+    "timeouts_increased_or_tests_skipped": false,
+    "new_source_files_or_test_names": false
+  },
+  "timings_seconds": {
+    "nightly_run_39972789770_from_brief": {
+      "suite": 627,
+      "real_manifest_coverage": 402,
+      "native_full_planning": 85,
+      "native_browser_selectors": 57
+    },
+    "remote_static_before": {
+      "suite": 271.01,
+      "web_shard_spec_tests": "timeout at 120.02",
+      "static_total": 369.52,
+      "passed_checks": 42,
+      "optional_skips": 0,
+      "other_failure": "releaseworkflow-tests exceeded timeout_seconds=120 after 120s"
+    },
+    "linux_remote_before_cpu_profile": {
+      "suite_and_check": 403.588,
+      "real_manifest_coverage": 245.351246719,
+      "native_full_planning": 58.951665235,
+      "native_browser_selectors": 36.505239361,
+      "registered_test_results": 48
+    },
+    "focused_local_after_capacity_refusal": {
+      "real_manifest_coverage": 3.950837667,
+      "passed_tests": 6,
+      "browsers_launched": false
+    },
+    "linux_remote_after": {
+      "suite_and_check": 44.647,
+      "real_manifest_coverage": 1.756434533,
+      "native_full_planning": 4.074971036,
+      "native_browser_selectors": 11.236770053,
+      "registered_test_results": 48,
+      "passed_results": 48,
+      "skipped_results": 0,
+      "unchanged_120_second_static_wrapper": 7.16,
+      "wrapper_passed_results": 35,
+      "wrapper_skipped_results": 0,
+      "validated_after_main_merge": true
+    },
+    "linux_remote_intermediate_after": {
+      "suite_and_check": 82.292,
+      "real_manifest_coverage": 7.453149784,
+      "native_full_planning": 4.431704569,
+      "native_browser_selectors": 23.178362178,
+      "registered_test_results": 48,
+      "note": "All tests passed; still above the requested full-suite target, so refinement was subsequently improved with indexed weight windows and production selector batching."
+    },
+    "remote_static_intermediate_after": {
+      "suite": 64.7,
+      "web_shard_spec_tests": 16.38,
+      "static_total": 187.48,
+      "passed_checks": 43,
+      "optional_skips": 0,
+      "exit_code": 1,
+      "only_failure": "releaseworkflow-tests exceeded timeout_seconds=120 after 120s (also failed before this change)",
+      "tested_implementation_commit": "8a76fd206"
+    },
+    "remote_static_after": {
+      "result": "full-static attempt refused; no complete final static-green claim",
+      "exit_code": 3,
+      "exact_refusal_line": "remote busy: 2/2 remote runs (CI pool 0/4)",
+      "same_wrapper_proved_independently": {
+        "entry": "approved Linux remote-test entry point",
+        "unchanged_deadline_seconds": 120,
+        "passed_seconds": 7.16,
+        "passed_results": 35
+      },
+      "other_static_evidence": "Intermediate static validation passed 43 checks with zero optional skips; its sole failure was the unchanged releaseworkflow-tests 120-second timeout. The final full-static attempt was refused.",
+      "requested_implementation_commit": "90a2b89fa"
+    },
+    "linux_remote_after_pre_merge": {
+      "suite_and_check": 45.162,
+      "real_manifest_coverage": 2.011973953,
+      "native_full_planning": 3.386052733,
+      "native_browser_selectors": 12.212890187,
+      "registered_test_results": 48,
+      "passed_results": 48,
+      "skipped_results": 0,
+      "unchanged_120_second_static_wrapper": 7.431,
+      "wrapper_passed_results": 35,
+      "wrapper_skipped_results": 0
+    }
+  },
+  "validation_entry_points": {
+    "static": "~/.aeon/lead/aeon/ci-static-locked.sh",
+    "linux_before": "~/.aeon/lead/aeon/remote-test.sh \"$WORKTREE\" ./scripts/releaseworkflow -run ^TestAEON1708RemoteShardEvidence$ -count=1 -v",
+    "baseline_scratch_commit": "f2ecaf601",
+    "after_scratch_commit": "b63e98f06",
+    "scratch_harness_in_work_branch": false,
+    "native_discovery_cache": "AEON_TEST_TIER_CACHE=0; optimized browser snapshot also explicitly uses cache:false",
+    "intermediate_after_scratch_commit": "73209449e",
+    "linux_after": "~/.aeon/lead/aeon/remote-test.sh \"$WORKTREE\" ./scripts/releaseworkflow -run ^TestAEON1708RemoteShardEvidence$ -count=1 -v",
+    "baseline_node_command": "node --cpu-prof --cpu-prof-dir=\"$SCRATCH\" --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs scripts/aeon-681-ci.test.mjs; npm run ci:web:shard:check",
+    "after_node_command": "npm run ci:web:shard:test",
+    "wrapper_node_command": "node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs; guarded by the unchanged 120-second static deadline",
+    "pre_merge_after_scratch_commit": "18a70b43a",
+    "tested_merged_work_commit": "68a0f127d"
+  },
+  "negative_controls": {
+    "before": [
+      {
+        "mutation": "drop one balanced spec assignment",
+        "coverage_test": "failed as required",
+        "diagnostic": "Spec missing from shards: tests/workspace-activity.spec.ts"
+      },
+      {
+        "mutation": "duplicate one balanced spec assignment",
+        "coverage_test": "failed as required",
+        "diagnostic": "Spec appears in two shards: tests/a11y.spec.ts"
+      }
+    ],
+    "after": [
+      {
+        "mutation": "drop one balanced spec assignment",
+        "coverage_test": "failed as required",
+        "exit_code": 1,
+        "diagnostic": "Spec missing from shards: tests/workspace-activity.spec.ts"
+      },
+      {
+        "mutation": "duplicate one balanced spec assignment",
+        "coverage_test": "failed as required",
+        "exit_code": 1,
+        "diagnostic": "Spec appears in two shards: tests/a11y.spec.ts"
+      }
+    ],
+    "permanent_coverage_regression": "At each of 1/12/24/256 shards, assert coverage rejects both a missing assignment and a duplicated assignment with the matching error reason."
+  },
+  "original_planner_parity": {
+    "fixture_count": 60,
+    "shard_counts": [
+      1,
+      2,
+      3,
+      4,
+      8
+    ],
+    "complete_assignment_comparisons": 300,
+    "result": "pass; identical complete structured shard values against the original 21815206b implementation, including deterministic assignment, groups and weights"
+  },
+  "latest_main_merge": {
+    "origin_main": "6ee19143dca94ef71280a6273ae7449884596ec7",
+    "merge_commit": "0c60d9ecb",
+    "result": "Merged six upstream files without conflicts. The subsequent full Linux acceptance, wrapper, original-planner parity and mutation controls all passed. The final diff against this main revision contains only the three intended source/test files and this evidence file."
+  },
+  "environment_entry_3": "The shard-manifest/planning timeout waiver can be retired: after merging main, the complete uncached suite passes in 44.647s and the unchanged 120s wrapper in 7.160s on the approved Linux test worker. This does not retire the generic loaded-runner rule for unrelated checks; releaseworkflow-tests exceeded the same 120s budget before and after the initial change.",
+  "safety": {
+    "origin_push": false,
+    "deployment": false,
+    "model_review_gate": false,
+    "other_model_cli_calls": false,
+    "other_worktrees_modified": false
+  },
+  "initial_implementation_commit": "8a76fd206",
+  "additional_unchanged_releaseworkflow_probe": {
+    "entry": "~/.aeon/lead/aeon/remote-test.sh \"$WORKTREE\" ./scripts/releaseworkflow -count=1 -v",
+    "tested_commit": "90a2b89fa",
+    "elapsed_seconds": 80.963,
+    "result": "failed on the Linux test worker; this package is unchanged by AEON-1708",
+    "direct_environment_error": "fork/exec /bin/bash: no such file or directory",
+    "additional_environment_error": "/bin/bash: bad interpreter: No such file or directory",
+    "additional_path_error": "bash: line 1: bash: command not found",
+    "not_all_failures_classified": "Some existing fixtures only report exit status 126, exit status 1, or a missing docker.log. These are recorded without claiming the known-environment waiver covers their error output.",
+    "failed_top_level_tests": [
+      "TestBuilderVersionAssertionFailsClosed",
+      "TestBuilderChecksumAndPluginPathFailClosed",
+      "TestReleaseBinariesRefuseWarmOrUnverifiedGo",
+      "TestNixVendorHashGate",
+      "TestTagMatchesVersionFailsClosed",
+      "TestRehearsalPlatformDigestHandoff",
+      "TestRehearsalIndexDigestValidation",
+      "TestDarwinRestoreGateRequiresExactReleaseVersion",
+      "TestLoadedImageResolverFailsClosed",
+      "TestPublishedRuntimeMustMatchSmokedRuntime",
+      "TestExportsShareSourceEpoch",
+      "TestAnnotatedTagGuardFailsClosed",
+      "TestImmutabilityGuardsFailClosed",
+      "TestSmokeImageOwnership",
+      "TestNativePlatformsAndIndexPublication"
+    ]
+  },
+  "handoff": {
+    "pct": 95,
+    "status": "BLOCKED: complete final ci-static --merge-main green is unproven; shared-runner capacity refused the final attempt, and the unchanged releaseworkflow package also has unclassified fixture failures on the Linux worker.",
+    "ticket_acceptance": "All shard performance, coverage, OPS-257/full-gate, selector, original-assignment parity and mutation-control acceptance checks passed.",
+    "remaining": "Coordinator-run hosted full static validation and disposition of unchanged releaseworkflow fixture failures; no work-branch changes to that package.",
+    "worker_common_environment_rule": "Direct missing /bin/bash errors match known entry 1. Exit status 126/1 and missing docker.log diagnostics are listed without applying a known-environment waiver to those outputs.",
+    "shard_timeout_waiver": "Retire the shard-manifest/planning case under known environment entry 3; the generic rule for unrelated runner budgets is separate."
+  }
+}

@@ -363,7 +363,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	}
 	statusAuto := statusautopilot.New(pool).WithPublication(publication, version.Version, cfg.ReviewAppTenantID, cfg.ReviewAppRepository)
 	startWorker(func() { statusAuto.Run(workerCtx) })
-	recurringWork := recurrences.New(pool)
+	recurringWork := recurrences.New(pool).WithAgentResultWriter(routineactions.WriteAgentResultTx)
 	publishedHistory, err := releasehistory.Embedded()
 	if err != nil {
 		return err

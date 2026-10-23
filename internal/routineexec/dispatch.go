@@ -301,7 +301,7 @@ func loadIntent(ctx context.Context, tx pgx.Tx, id string) (intent, error) {
 	err := tx.QueryRow(ctx, `SELECT id::text,recurrence_id::text,output_project_id::text,owner_principal_id::text,
  coalesce(execution_principal_id::text,''),work_node_id::text,coalesce(agent_run_id::text,''),assignment_digest,
  definition_revision,consent_revision,execute_consent,state,
- CASE WHEN octet_length(assignment::text)<=131072 THEN assignment END FROM routine_runs WHERE id=$1 FOR NO KEY UPDATE`, id).Scan(&r.id, &r.recurrence, &r.project, &r.owner, &r.principal, &r.work, &r.run, &r.digest, &r.revision, &r.consentRevision, &r.consent, &r.state, &r.assignment)
+ CASE WHEN octet_length(assignment::text)<=131072 THEN assignment END FROM routine_runs WHERE id=$1 AND agent_owner_config IS NULL FOR NO KEY UPDATE`, id).Scan(&r.id, &r.recurrence, &r.project, &r.owner, &r.principal, &r.work, &r.run, &r.digest, &r.revision, &r.consentRevision, &r.consent, &r.state, &r.assignment)
 	return r, err
 }
 

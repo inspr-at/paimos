@@ -82,7 +82,7 @@ func (m *Module) runAll(ctx context.Context) error {
 	}
 	failures := []error{}
 	for _, id := range ids {
-		if err = m.RunTenant(ctx, id); err != nil {
+		if err = errors.Join(m.RunTenant(ctx, id), m.DispatchAgentRuns(ctx, id)); err != nil {
 			failures = append(failures, fmt.Errorf("tenant %s: %w", id, err))
 		}
 	}

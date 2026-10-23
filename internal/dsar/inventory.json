@@ -164,11 +164,11 @@
     {
       "classification": "metadata",
       "columns": {
+        "content_capability_epoch": "metadata",
+        "content_daemon_generation": "metadata",
         "install_method": "metadata",
         "ledger_enrolled_at": "metadata",
-        "ledger_generation": "metadata",
-        "content_daemon_generation": "metadata",
-        "content_capability_epoch": "metadata"
+        "ledger_generation": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -178,17 +178,17 @@
     {
       "classification": "personal",
       "columns": {
-        "routine_launch_id": "metadata",
-        "trace": "personal",
         "acting_person_id": "personal",
-        "content_capability_digest": "secret",
-        "content_capability_person_id": "personal",
-        "content_capability_computer_id": "metadata",
         "content_capability_account_id": "personal",
+        "content_capability_computer_id": "metadata",
         "content_capability_daemon_id": "metadata",
-        "content_capability_generation": "metadata",
+        "content_capability_digest": "secret",
+        "content_capability_epoch": "metadata",
         "content_capability_expires_at": "metadata",
-        "content_capability_epoch": "metadata"
+        "content_capability_generation": "metadata",
+        "content_capability_person_id": "personal",
+        "routine_launch_id": "metadata",
+        "trace": "personal"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -209,12 +209,12 @@
     {
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
-        "target_id": "metadata",
-        "vendor": "metadata",
-        "last_success_at": "metadata",
         "last_failure_at": "metadata",
-        "last_failure_code": "metadata"
+        "last_failure_code": "metadata",
+        "last_success_at": "metadata",
+        "target_id": "metadata",
+        "tenant_id": "metadata",
+        "vendor": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -234,8 +234,8 @@
         "vendor": "metadata"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "owner_person_id"
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
       },
       "table": "assistant_profiles"
     },
@@ -925,35 +925,35 @@
       "table": "desk_notification_claims"
     },
     {
-      "table": "desk_question_reminders",
       "classification": "personal",
       "columns": {
-        "tenant_id": "metadata",
+        "after_seconds": "metadata",
+        "last_at": "personal",
+        "next_at": "personal",
         "project_id": "metadata",
         "question_id": "metadata",
-        "after_seconds": "metadata",
-        "next_at": "personal",
-        "last_at": "personal",
-        "reminder_count": "personal"
+        "reminder_count": "personal",
+        "tenant_id": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
-      }
+      },
+      "table": "desk_question_reminders"
     },
     {
-      "table": "desk_reminder_settings",
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
         "default_after_seconds": "metadata",
-        "time_zone": "metadata",
-        "quiet_start": "metadata",
         "quiet_end": "metadata",
-        "revision": "metadata"
+        "quiet_start": "metadata",
+        "revision": "metadata",
+        "tenant_id": "metadata",
+        "time_zone": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
-      }
+      },
+      "table": "desk_reminder_settings"
     },
     {
       "classification": "metadata",
@@ -1123,36 +1123,36 @@
       "table": "import_project_drafts"
     },
     {
-      "table": "import_project_retention",
       "classification": "personal",
       "columns": {
-        "tenant_id": "metadata",
-        "project_id": "metadata",
-        "source": "metadata",
-        "imported_at": "personal",
+        "deleted_at": "metadata",
+        "deleted_node_ids": "metadata",
         "engaged_at": "personal",
         "engaged_by": "personal",
+        "imported_at": "personal",
         "last_checked_at": "metadata",
-        "deleted_at": "metadata",
-        "deleted_node_ids": "metadata"
+        "project_id": "metadata",
+        "source": "metadata",
+        "tenant_id": "metadata"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "engaged_by"
-      }
+        "person_column": "engaged_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "import_project_retention"
     },
     {
-      "table": "import_retention_settings",
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
-        "enabled": "metadata",
         "dry_run": "metadata",
-        "revision": "metadata"
+        "enabled": "metadata",
+        "revision": "metadata",
+        "tenant_id": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
-      }
+      },
+      "table": "import_retention_settings"
     },
     {
       "classification": "personal",
@@ -1888,6 +1888,7 @@
     {
       "classification": "personal",
       "columns": {
+        "agent_owner_config": "personal",
         "assignment": "personal",
         "consent_policy_digest": "metadata",
         "consent_qualification_id": "metadata",
@@ -1985,8 +1986,8 @@
         "computer_id": "metadata"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "principal_id"
+        "person_column": "principal_id",
+        "tenant_column": "tenant_id"
       },
       "table": "role_bindings"
     },
@@ -2255,6 +2256,8 @@
     {
       "classification": "personal",
       "columns": {
+        "agent_owner_config": "personal",
+        "agent_result": "personal",
         "agent_run_id": "metadata",
         "assignment": "personal",
         "assignment_digest": "personal",
