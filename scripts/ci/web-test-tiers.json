@@ -8644,11 +8644,15 @@
     ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"every signed-in person can connect and unknown coverage never claims an empty Desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"explicit sign-out clears only the departing person’s grants and pending proof","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"long German account names and hosts remain readable at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"long German account names and hosts remain readable at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"long German account names and hosts remain readable at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"only newly created sibling items notify and the recorded payload opens their home item","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"phone status and project keys expose their full copy with text spacing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

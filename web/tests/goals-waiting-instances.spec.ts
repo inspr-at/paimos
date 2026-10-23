@@ -3,6 +3,7 @@
 // grant silently looks empty, counts differ between surfaces, bearer reads
 // send cookies, callback fragments survive routing, or state changes move controls.
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockDecisionDesk } from './decision-desk-fixtures'
@@ -29,7 +30,8 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
   const reads = { sibling: 0, origins: [] as string[], cookie: false, bearer: false }
   let state = options.sibling
   let instances: Sibling = options.instances ?? 'ok'
-  let lines = options.lines ?? 1
+  let lines = options.lines ?? 1, asOf = NOW
+  const created = new Map<number, number>()
   const deskItems = options.desk === 'empty' ? [] : [
     { id: '00000000-0000-4000-8000-000000000001', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: false, href: '', source: '', ticket_key: 'AEON-1394', asked_by: { id: 'p-lead', name: 'AEON-LEAD' } },
     { id: '00000000-0000-4000-8000-000000000002', kind: 'question', project_id: 'p-pharos', revision: 1, title: 'Run the 60-minute voice soak test on the Aithema test host?', created_at: iso(NOW - 2 * HOUR), held: true, href: '', source: '', asked_by: { id: 'p-ops', name: 'OPS' } },
@@ -61,9 +63,9 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
     reads.bearer ||= /^Bearer desk_/.test(request.headers().authorization ?? '')
     if (state !== 'ok') return route.fulfill({ status: state === 'ended' ? 401 : state === 'throttled' ? 429 : 503, json: { error: state }, headers: cors })
     return route.fulfill({ headers: cors, json: {
-      instance: 'pma', counts: { open: lines, held: 0 }, as_of: iso(NOW),
+      instance: 'pma', counts: { open: lines, held: 0 }, as_of: iso(asOf),
       items: Array.from({ length: lines }, (_, index) => ({
-        id: `00000000-0000-4000-8000-0000000000a${index + 1}`, kind: 'question', project_key: options.projectKey ?? 'PORTAL', asked_by: 'PORTAL', held: false, created_at: iso(NOW - HOUR),
+        id: `00000000-0000-4000-8000-0000000000a${index + 1}`, kind: 'question', project_key: options.projectKey ?? 'PORTAL', asked_by: 'PORTAL', held: false, created_at: iso(created.get(index) ?? NOW - HOUR),
         title: index === 0 ? 'Deploy the new sign-in flow to the second test host?' : 'Confirm the second host’s backup before the window?',
         href: `/decision-desk?item=q:00000000-0000-4000-8000-0000000000a${index + 1}`,
       })),
@@ -71,7 +73,7 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
   })
   }
   await mount()
-  return { reads, mount, set: (next: Sibling) => { state = next }, setLines: (next: number) => { lines = next }, setInstances: (next: Sibling) => { instances = next } }
+  return { reads, mount, set: (next: Sibling) => { state = next }, setLines: (next: number) => { lines = next }, setAsOf: (next: number) => { asOf = next }, setCreated: (index: number, at: number) => { created.set(index, at) }, setInstances: (next: Sibling) => { instances = next } }
 }
 async function openBand(page: Page) {
   await page.goto('/?view=goals')
@@ -493,4 +495,72 @@ test('Desk coverage matrix, header tooltip and preview evidence in both themes',
       }
     }
   }
+})
+
+// Risk: a newly observed old item becomes a browser notification, or explicit
+// sign-out leaves browser credentials available to the next signed-in person.
+test('only newly created sibling items notify and the recorded payload opens their home item', async ({ page }, info) => {
+  const mock = await mockBand(page, { sibling: 'ok', lines: 0 })
+  await page.addInitScript(() => {
+    const notices: { title: string; options?: NotificationOptions; onclick?: () => void }[] = [], opened: string[] = []
+    Object.assign(window, { __deskNotices: notices, __deskOpened: opened })
+    Object.defineProperty(window, 'Notification', { configurable: true, value: class {
+      static permission = 'granted'
+      constructor(public title: string, public options?: NotificationOptions) { notices.push(this) }
+      close() {}
+    } })
+    window.open = ((url: string) => { opened.push(String(url)); return null }) as typeof window.open
+  })
+  await openBand(page)
+  await expect(page.getByTestId('instance-pma')).toContainText('nothing waits for you')
+  const refresh = async (notify = true) => page.evaluate(async enabled => {
+    // @ts-expect-error Vite serves the actual person-bound store.
+    const { useDeskConnections } = await import('/src/stores/deskConnections.ts')
+    const store = useDeskConnections(); store.noticeEnabled = true; store.setNotify('pma', enabled); await store.refresh(true)
+  }, notify)
+  const notices = () => page.evaluate(() => (window as unknown as { __deskNotices: { title: string; options: NotificationOptions }[] }).__deskNotices.map(({ title, options }) => ({ title, options })))
+  await refresh() // Complete the empty baseline, including its notification claim.
+  mock.setLines(1); mock.setCreated(0, NOW + 500); mock.setAsOf(NOW + 1000)
+  await page.clock.fastForward(1000); await refresh()
+  expect(await notices()).toHaveLength(1)
+  // A second identity enters the first five, but it existed before the last read.
+  mock.setLines(2); mock.setCreated(1, NOW - HOUR); mock.setAsOf(NOW + 2000)
+  await page.clock.fastForward(1000); await refresh()
+  expect(await notices()).toHaveLength(1)
+  mock.setLines(3); mock.setCreated(2, NOW + 2500); mock.setAsOf(NOW + 3000)
+  await page.clock.fastForward(1000); await refresh()
+  const payload = await notices()
+  expect(payload).toHaveLength(2)
+  expect(payload[0]).toMatchObject({ title: 'New on pma: Deploy the new sign-in flow to the second test host?', options: { body: 'PORTAL · decide on pma' } })
+  await page.evaluate(() => (window as unknown as { __deskNotices: { onclick?: () => void }[] }).__deskNotices[0].onclick?.())
+  const opened = await page.evaluate(() => (window as unknown as { __deskOpened: string[] }).__deskOpened)
+  expect(opened).toEqual([`${SIBLING}/decision-desk?item=q:00000000-0000-4000-8000-0000000000a1`])
+  mock.setLines(4); mock.setCreated(3, NOW + 3500); mock.setAsOf(NOW + 4000)
+  await page.clock.fastForward(1000); await refresh(false); await refresh(true)
+  expect(await notices()).toHaveLength(2)
+  await page.reload(); await expect(page.getByTestId('instance-pma')).toContainText('4 wait for you'); await refresh()
+  expect(await notices()).toHaveLength(0)
+  await writeFile(info.outputPath('notifications.json'), JSON.stringify({ payload, opened, oldItemsEnteringTopFiveNotify: false, optedOutItemNotifiesLater: false, noticesAfterReload: 0 }, null, 2))
+})
+
+test('explicit sign-out clears only the departing person’s grants and pending proof', async ({ page }) => {
+  await mockBand(page, { sibling: 'ok' })
+  await page.addInitScript(() => { window.open = (() => null) as typeof window.open })
+  await page.route('**/api/auth/logout', route => route.fulfill({ status: 204 }))
+  await openBand(page)
+  await expect(page.getByTestId('instance-pma')).toContainText('1 waits for you')
+  const key = `aeon.desk-connections.t1:${me.id}.pma`, other = 'aeon.desk-connections.t1:other-person.pma'
+  await page.evaluate(async ({ other }) => {
+    localStorage.setItem(other, 'other person connection')
+    // @ts-expect-error Vite serves the actual person-bound store.
+    const { useDeskConnections } = await import('/src/stores/deskConnections.ts')
+    await useDeskConnections().connect('pma')
+  }, { other })
+  expect(await page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith('aeon.desk-connections.pending.')))).toBe(true)
+  await page.evaluate(async () => {
+    // @ts-expect-error Vite serves the actual sign-out boundary.
+    const { useSession } = await import('/src/stores/session.ts')
+    await useSession().signOut()
+  })
+  expect(await page.evaluate(({ key, other }) => ({ grant: localStorage.getItem(key), pending: Object.keys(localStorage).some(key => key.startsWith('aeon.desk-connections.pending.')), other: localStorage.getItem(other) }), { key, other })).toEqual({ grant: null, pending: false, other: 'other person connection' })
 })

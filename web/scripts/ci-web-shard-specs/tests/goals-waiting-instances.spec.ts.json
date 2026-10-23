@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/goals-waiting-instances.spec.ts",
-    "listedTests": 18,
+    "listedTests": 20,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.093,
