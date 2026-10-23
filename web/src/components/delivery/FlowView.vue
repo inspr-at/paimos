@@ -108,6 +108,10 @@ const retainBar = computed(() => !props.data && props.mode !== 'live' && props.c
 const at = (m: number) => props.data ? timeLabel(props.data, m) : ''
 const history = computed(() => live.value && !atNow(timeline))
 const chip = computed(() => history.value ? text.value.viewing.replace('{t}', at(timeline.T)) : text.value.live.replace('{t}', at(props.data?.now ?? 0)))
+// Reserve every digit's advance: Linux font hinting can differ by a pixel even
+// with tabular figures. Only the shown label changes while moving the time.
+const chipSizes = computed(() => [text.value.live, text.value.viewing].flatMap(label =>
+  Array.from({ length: 10 }, (_, digit) => label.replace('{t}', `${digit}${digit}:${digit}${digit}`))))
 const clock = computed(() => {
   const t = text.value, data = props.data
   if (!data) return ''
@@ -228,7 +232,7 @@ const emptyText = computed(() => {
         <template v-if="live">
           <span class="fl-livechip" :class="{ hist: history }" data-testid="flow-chip">
             <AppIcon :name="history ? 'history' : 'pulse'" :size="14" />
-            <span class="stack"><span class="shown">{{ chip }}</span><span aria-hidden="true">{{ text.live.replace('{t}', '00:00') }}</span><span aria-hidden="true">{{ text.viewing.replace('{t}', '00:00') }}</span></span>
+            <span class="stack"><span class="shown">{{ chip }}</span><span v-for="label in chipSizes" :key="label" aria-hidden="true">{{ label }}</span></span>
           </span>
         </template>
         <template v-else>

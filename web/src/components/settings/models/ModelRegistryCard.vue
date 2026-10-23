@@ -509,6 +509,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
           <span :aria-hidden="checkState !== 'now'"><AppIcon name="refresh" :size="14" />Check now</span>
           <span :aria-hidden="checkState !== 'checking'"><AppIcon name="refresh" :size="14" class="spin" />Checking…</span>
           <span :aria-hidden="checkState !== 'cooling'"><AppIcon name="check" :size="14" />Checked · {{ cooldownText }}</span>
+          <span v-for="minutes in 5" :key="minutes" aria-hidden="true"><AppIcon name="check" :size="14" />Checked · {{ cooldownLabel(minutes * 60) }}</span>
         </span>
       </button>
     </div>
@@ -589,7 +590,7 @@ h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); 
 .reg-check[aria-disabled="true"] { cursor: default; color: var(--ink-3); }
 .reg-check[aria-disabled="true"]:hover { background: transparent; }
 
-/* Tabular figures: "again in 1 min" and "again in 5 min" take one width, so the shared box never changes size. */
+/* Reserve every countdown label, including the hinted digit widths on Linux. */
 .reg-check-label { justify-items: end; font-variant-numeric: tabular-nums; font-kerning: none; }
 .reg-check-label > span { display: inline-flex; align-items: center; gap: 6px; }
 .reg-check .spin { animation: reg-spin 1s linear infinite; }
