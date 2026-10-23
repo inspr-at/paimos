@@ -144,8 +144,9 @@ test('customer → quote → inspector save → issue → public acceptance race
     expect(publicRequests.every(request => request.credentials === '')).toBe(true)
   } finally { await a.close(); await b.close() }
   await page.reload()
-  await page.getByRole('button', { name: 'Details', exact: true }).click()
+  await expect(page.getByRole('complementary', { name: 'Details', exact: true })).toBeVisible()
   const receipt = page.getByRole('complementary', { name: 'Details', exact: true }).locator('#receipt-title').locator('..').locator('..')
   await expect(receipt).toContainText('aeon-quote-document-1')
   await expect(receipt.getByRole('link', { name: 'Download receipt (PDF)' })).toHaveAttribute('href', `/api/quotes/${quoteId}/versions/1/confirmation/receipt`)
+  expect(calls.filter(call => call.method === 'PATCH' && call.path.endsWith('/draft'))).toHaveLength(1)
 })
