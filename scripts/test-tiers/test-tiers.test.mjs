@@ -1486,6 +1486,34 @@ test('AEON-1619 hosted shards 2, 13 and 14 keep launch-wall timings from run 395
   }
 })
 
+test('AEON-1696 refreshed browser costs charge the measured launch wall and scheduling reserve',()=>{
+  // Risk: scaling an old all-case average after pruning undercharges the
+  // expensive retained cases and lets an apparently balanced shard time out.
+  // Historical timing assertions above retain their own immutable inputs;
+  // this live regression rejects stale costs for every refreshed owner.
+  const proof=JSON.parse(readFileSync(new URL('../test-prune/wave-a-execution.json',import.meta.url))).fix4
+  const policy=loadWebPolicy()
+  const records=new Map(policy.groups.flatMap(group=>group.specs).map(spec=>[spec.file,spec]))
+  assert.equal(proof.safetyFactor,1.15)
+  assert.equal(proof.estimates.length,306)
+  for(const recorded of proof.estimates) {
+    const timing=records.get(recorded.file)?.tierTiming
+    assert.ok(recorded.measuredSeconds>0,recorded.file)
+    assert.equal(recorded.seconds,Number((recorded.measuredSeconds*proof.safetyFactor).toFixed(6)),recorded.file)
+    assert.deepEqual(timing,{caseSeconds:recorded.caseSeconds,seconds:recorded.seconds,
+      selectedTests:recorded.selectedTests},recorded.file)
+  }
+  assert.ok(proof.maxMeasuredOverheadSeconds<=120,'source job setup, collection and reporting fit the retained reserve')
+  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const plan=webShardPlan(gate,policy,{mode:'full'})
+  assert.deepEqual(plan.shards,fullWebShards)
+  assert.equal(plan.overheadSeconds,120)
+  assert.equal(plan.timeoutSeconds,1200)
+  assert.equal(plan.budgetSeconds,900)
+  assert.ok(plan.projectedMaxSeconds<=860)
+  assertWebShardBudget(plan)
+})
+
 const assignWebShards=(rows,policy,plan)=>{
   const weights=tierWeights(policy,rows)
   return plan.shards.map(index=>shard(rows,index,plan.shards.length,weights))
