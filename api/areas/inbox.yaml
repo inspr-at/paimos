@@ -100,7 +100,7 @@ paths:
     get:
       operationId: getInboxReceipt
       summary: Read the sender's hand-off receipt
-      description: Sender principal only, with inbox.receipt permission in the workspace or the message's project; agents also require the inbox.receipt key scope. Every authenticated caller without access receives the same 404 as a missing message. Messages created before receipt recording have no receipt and return 404; their historical delivery state is not inferred. New receipts are queued on acceptance. Direct inbox acknowledgement by the recipient, or explicit confirmation by a managed receiver adapter, advances a receipt to handed_off. Acceptance and wake hints do not confirm hand-off. handed_off and failed are terminal; handed_off_at is RFC3339 and is set once at confirmation. An exact idempotent send replay retains its message_id and receipt.
+      description: "Sender principal only, with inbox.receipt permission in the workspace or the message's project; agents also require the inbox.receipt key scope. Every authenticated caller without access receives the same 404 as a missing message. Messages created before receipt recording have no receipt and return 404; their historical delivery state is not inferred. New receipts are queued on acceptance. Direct inbox acknowledgement by the recipient, or explicit confirmation by a managed receiver adapter, advances a receipt to handed_off. Acceptance and wake hints do not confirm hand-off. handed_off and failed are terminal; handed_off_at is RFC3339 and is set once at confirmation. An exact idempotent send replay retains its message_id and receipt. Pull assistants remain queued while waiting for pickup, with an empty failure_reason. Separate seven-day retention fails with pickup_expired and a sender notice saying not picked up within 7 days. Disabled assistants fail with assistant_disabled; loss of all usable inbox keys fails with assistant_revoked. Direct inbox receipts retain null target_id and target_version and empty adapter/address; any internal pull-mode binding is not exposed."
       security: *auth
       parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
@@ -274,14 +274,14 @@ components:
         tenant: {type: string, description: Tenant slug}
         sender_principal_id: {type: string, format: uuid}
         recipient_principal_id: {type: string, format: uuid}
-        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target; direct pull assistant messages retain their pull target binding when available, otherwise null for direct inbox messages.'}
+        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target, null for direct inbox messages'}
         target_version: {type: [integer, 'null'], minimum: 1}
         adapter: {type: string, description: 'Receiver adapter, for example grok_bot_routine'}
         address: {type: string}
         effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
         state: {type: string, enum: [queued, handed_off, failed]}
         handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
-        failure_reason: {type: string, description: "Terminal failure reason. Pull retention uses pickup_expired (not picked up within 7 days); disabled or revoked assistants use assistant_disabled or assistant_revoked. An enabled assistant waiting for pickup remains queued with an empty failure reason."}
+        failure_reason: {type: string}
     InboxReceiptResponse:
       oneOf:
         - {$ref: '#/components/schemas/InboxReceipt'}

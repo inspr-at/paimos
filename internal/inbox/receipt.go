@@ -67,12 +67,14 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 		var mode string
 		var evidence AttachedStatus
 		var outcome, generation *string
+		var direct bool
 		err := tx.QueryRow(ctx, `
 			SELECT m.id::text, m.idempotency_key, t.slug,
 			       m.sender_principal_id::text, m.recipient_principal_id::text,
 			       r.target_id::text, r.target_version, COALESCE(r.adapter, ''),
 			       COALESCE(r.address, ''), COALESCE(r.effective_level, ''),
-			       r.state, r.handed_off_at, r.failure_reason,m.content_mode,m.attached_outcome,m.recipient_message_generation::text,d.leased_at,d.shown_at,d.completed_at,d.offer_deadline
+			       r.state, r.handed_off_at, r.failure_reason,m.content_mode,m.attached_outcome,m.recipient_message_generation::text,d.leased_at,d.shown_at,d.completed_at,d.offer_deadline,
+ NOT EXISTS(SELECT 1 FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id)
 			FROM inbox_messages m
 			JOIN tenants t ON t.id = m.tenant_id
 			JOIN inbox_receipts r ON r.tenant_id = m.tenant_id AND r.message_id = m.id
@@ -81,12 +83,18 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 			&out.MessageID, &out.IdempotencyKey, &out.Tenant,
 			&out.SenderPrincipalID, &out.RecipientPrincipalID,
 			&out.TargetID, &out.TargetVersion, &out.Adapter, &out.Address, &out.EffectiveLevel,
-			&out.State, &at, &out.FailureReason, &mode, &outcome, &generation, &evidence.OfferedAt, &evidence.ShownAt, &evidence.CompletedAt, &evidence.OfferDeadline)
+			&out.State, &at, &out.FailureReason, &mode, &outcome, &generation, &evidence.OfferedAt, &evidence.ShownAt, &evidence.CompletedAt, &evidence.OfferDeadline, &direct)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
 		if err != nil {
 			return err
+		}
+		if direct {
+			// A pull mode snapshot is internal. Preserve the released direct
+			// receipt and do not reveal an implicitly selected project address.
+			out.TargetID, out.TargetVersion = nil, nil
+			out.Adapter, out.Address = "", ""
 		}
 		if at != nil {
 			s := at.UTC().Format(time.RFC3339)

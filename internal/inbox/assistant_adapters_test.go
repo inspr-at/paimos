@@ -710,7 +710,7 @@ func TestPullAssistantPickupRetention(t *testing.T) {
 			if got := status(msg.ID); got.Status != "sent" || !got.WaitingForPickup || got.Reason != "" {
 				t.Fatalf("sender does not see waiting for pickup: %+v", got)
 			}
-			if got := receipt(msg.ID); got.State != "queued" || got.FailureReason != "" {
+			if got := receipt(msg.ID); got.State != "queued" || got.FailureReason != "" || got.TargetID != nil || got.TargetVersion != nil || got.Adapter != "" || got.Address != "" {
 				t.Fatalf("sleeping host failed: %+v", got)
 			}
 			page := mustJSON[Page](t, request(credential, "GET", "/api/inbox/messages?wait_ms=0", "", 200))
