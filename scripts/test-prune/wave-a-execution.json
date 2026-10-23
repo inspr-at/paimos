@@ -1533,5 +1533,229 @@
     "otherModelCLIsCalled": false,
     "productionPerformanceConfigPreserved": true,
     "visualAuthorityAndHistoricalEvidencePreserved": true
+  },
+  "tick1": {
+    "brief": "aeon-1696-prune-wave-a-tick1.md",
+    "status": "all-requested-acceptance-passed-final-static-timing-retry",
+    "testedBrowserHead": "8a03e3c442d0f613fc3abd7abee5f568a72fb09b",
+    "main": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+    "mergedExactFixHeads": [
+      {
+        "package": "P04",
+        "head": "769d2e95026a4f1e8b65a0b4a2e3e2666b85e52e",
+        "mergeCommit": "00b438dbf0ae8fc4d7d37c681afe348f0c0b0d03"
+      },
+      {
+        "package": "P05",
+        "head": "b4dac2dbf15f76c56324fc708bbc52a2b06d9dc2",
+        "mergeCommit": "f9cef6043ef73c33359071857646fc509607a82c"
+      },
+      {
+        "package": "P06",
+        "head": "2644b8cba3a76c4cd23c7e5a828033d2389b7fbb",
+        "mergeCommit": "c0b4e79313999a3fa42f9268404d27cc341c3b13"
+      },
+      {
+        "package": "P10",
+        "head": "43912d93dd2ff6f58c5426743475007afc3e1eea",
+        "mergeCommit": "aa4ed9116f55be03cb4b0571ea2be4adc4146803"
+      },
+      {
+        "package": "P11",
+        "head": "5f0e619a5822b69ae666bb1926da5c78f916c65d",
+        "mergeCommit": "274b8031180263e13f6af675f2b3b48b32195871"
+      }
+    ],
+    "newBrowserCases": 0,
+    "catalogue": {
+      "mainBefore": 5360,
+      "after": 4622,
+      "netBrowserCut": 738,
+      "removedBrowserIdentities": 748,
+      "addedBrowserIdentities": 10,
+      "sumLatestPackageCuts": 738,
+      "restoredG7EssentialProfiles": 6
+    },
+    "regeneration": {
+      "method": "Regenerate from origin/main by replaying all nine latest exact package deltas with mergeManifests and formatManifest; byte-equal to current manifests. Run cli.mjs manifests --write. Derive drift costs from the consolidated catalogue and canonical fullGateTests, rather than isolated package counts.",
+      "canonicalManifestUnionVerified": true,
+      "existingJourneyRegistrationsPreserved": true,
+      "nightlyCasesInDriftFiles": 1435,
+      "fullExtraNightlyCases": 501,
+      "protectedBaselineAndVisualManifestUnchanged": true
+    },
+    "heading": {
+      "owner": "tests/ticket-panel.spec.ts",
+      "case": "s, p and a open status, priority and assignee from the panel",
+      "tier": "GATED-FULL",
+      "dimensions": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "tolerancePx": 0.5,
+      "positive": "Capture a positive-size visible heading before e; compare after e while permissions are held; compare again after the read-only answer renders. Refresh to member permissions and retain the original edit/status/priority/assignee/focus assertions.",
+      "readOnlyResponseRationale": "Writable permissions intentionally replace the heading with the queued editor. The read-only answer preserves the heading for all four dimension comparisons after permissions settle; a later grant must not revive the spent e.",
+      "faultControl": "Translate the actual heading 4 CSS pixels. Require the identical boundingBox assertion to reject specifically ticket heading.x; restore its style in finally and require it to pass again.",
+      "faultControlPassed": true
+    },
+    "phoneType": {
+      "owner": "tests/aeon-974-typefilter.spec.ts",
+      "case": "with Type applied, the Filters sheet waits for its unfiltered counts; a later new value never moves the sections below",
+      "tier": "ESSENTIAL",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "positive": "Wait for level=leaf and require documentElement.scrollWidth - clientWidth <= 1 before opening Filters.",
+      "faultControl": "Append an actual 20px absolute element at left:100% to the document. Require the identical named page-overflow assertion to reject; remove and dispose the element in finally, then require the assertion to pass again.",
+      "faultControlPassed": true
+    },
+    "checks": {
+      "defaultPrune": {
+        "passed": true,
+        "protectedRisks": 647,
+        "cuts": false
+      },
+      "canonicalManifests": {
+        "passed": true
+      },
+      "pickerRegression": {
+        "entryPoint": "remote-test.sh",
+        "host": "agm2-ci",
+        "head": "274b803118",
+        "command": "go test ./internal/nodes -run TestPickerSearchAnswersWithoutWorkAggregates -count=1",
+        "passed": true,
+        "packageSeconds": 13.765
+      },
+      "requiredBrowser": {
+        "entryPoint": "remote-spec.sh",
+        "host": "agm2-ci",
+        "run": "spec-8a03e3c442-91106",
+        "specs": [
+          "tests/ticket-panel.spec.ts",
+          "tests/aeon-974-typefilter.spec.ts"
+        ],
+        "passed": 54,
+        "failed": 0,
+        "skipped": 0,
+        "reportedTime": "1.8m",
+        "exitCode": 0,
+        "artifactDirectory": "web/test-results/aeon-1696-tick1-required",
+        "runnerCleanupComplete": true,
+        "suiteExitCode": 0
+      },
+      "mergedHeadsBrowser": {
+        "entryPoint": "remote-spec.sh",
+        "host": "agm2-ci",
+        "run": "spec-8a03e3c442-26238",
+        "specs": [
+          "tests/aeon-1209-agents-head.spec.ts",
+          "tests/delivery-flow-lanes.spec.ts",
+          "tests/aeon-1028-projheader.spec.ts"
+        ],
+        "passed": 77,
+        "failed": 0,
+        "skipped": 0,
+        "reportedTime": "2.4m",
+        "exitCode": 0,
+        "artifactDirectory": "web/test-results/aeon-1696-tick1-merged-heads",
+        "runnerCleanupComplete": true,
+        "suiteExitCode": 0
+      },
+      "firstRemoteStatic": {
+        "entryPoint": "ci-static-remote.sh",
+        "head": "8a03e3c442d0f613fc3abd7abee5f568a72fb09b",
+        "passed": 42,
+        "optionalSkipped": 0,
+        "exitCode": 1,
+        "tierSuite": {
+          "passed": 364,
+          "failed": 1,
+          "seconds": 156.55,
+          "failure": "AEON-1336 retained phone and desktop G7 read-state cases stay essential on every PR expected only two profiles; latest P06 head restores eight. Corrected expected matrix, preserving all ESSENTIAL and selection assertions."
+        },
+        "webShardSpecTests": {
+          "passed": true,
+          "seconds": 119.45
+        },
+        "webShardTests": {
+          "passed": true,
+          "seconds": 199.77
+        },
+        "unrelatedTimeout": "apt-step-bounds exceeded timeout_seconds=60 after 60.02s; first fifteen behavior tests passed, last parent was cancelled. No change to apt code, tests or budgets."
+      },
+      "p04RuntimeAndLedger": {
+        "status": "passed",
+        "transportBranch": "scratch/aeon-1696-tick1-runtime",
+        "transportCommit": "2661c7fb7",
+        "entryPoint": "remote-spec.sh",
+        "deliveryContainsLauncher": false,
+        "host": "agm2-ci",
+        "run": "spec-2661c7fb7c-67954",
+        "p04RuntimePassed": 13,
+        "ledgerPassed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "reportedNodeSeconds": 3.916793639,
+        "transportCasesPassed": 1,
+        "exitCode": 0,
+        "artifactDirectory": "web/test-results/aeon-1696-tick1-runtime",
+        "runnerCleanupComplete": true,
+        "suiteExitCode": 0
+      },
+      "finalRemoteStatic": {
+        "status": "retry-running",
+        "requiredTierCommand": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "head": "c2841fed8",
+        "requiredTierCommandPassed": true
+      },
+      "staticRetrySetupFailure": {
+        "entryPoint": "ci-static-remote.sh",
+        "head": "c2841fed8",
+        "exitCode": 2,
+        "cause": "Latest published release lookup failed: command exceeded timeout_seconds=15 after 15.01s. No tests executed; retrying unchanged committed source."
+      },
+      "secondRemoteStatic": {
+        "entryPoint": "ci-static-remote.sh",
+        "head": "c2841fed8",
+        "exitCode": 1,
+        "seconds": 305.7,
+        "passed": 43,
+        "optionalSkipped": 0,
+        "requiredTierCommand": {
+          "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+          "passed": true,
+          "seconds": 148.42
+        },
+        "webShardTests": {
+          "passed": true,
+          "seconds": 201.72
+        },
+        "aptStepBounds": {
+          "passed": true,
+          "seconds": 44.31
+        },
+        "remainingCheck": "web-shard-spec-tests",
+        "error": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested)",
+        "context": "The unchanged real-manifest 1/12/24/256-shard inventory check took 83.782s. This shorter wrapper passed at the identical web-shard source in the first run (119.45s); the larger suite passes the same assertions. The 120-second deadline is unchanged."
+      }
+    },
+    "constraints": {
+      "originPush": false,
+      "deployment": false,
+      "reviewGate": false,
+      "otherModelCLI": false,
+      "otherWorktreeAccess": false,
+      "credentialsReadOrDisplayed": false
+    },
+    "additionalConsolidationAlignment": {
+      "file": "scripts/test-tiers/browser-areas.test.mjs",
+      "reason": "The first required-tier rerun rejected the six G7 profiles restored by the exact requested P06 head because the consolidation had narrowed its expected set to two. Restore an exact eight-name expectation, retaining every ESSENTIAL and PR/merge-group selection assertion. No test identity, selector behavior or scheduling limit changes."
+    },
+    "outsideWriteSet": [
+      "scripts/test-tiers/browser-areas.test.mjs \u2014 align the consolidated inventory assertion with all eight G7 profiles restored by the requested P06 head."
+    ]
   }
 }
