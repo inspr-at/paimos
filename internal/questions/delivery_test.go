@@ -492,6 +492,7 @@ func TestDeliveryConcurrentEditAndReplicaClaims(t *testing.T) {
 	}
 }
 func TestDeliveryFanoutFailureAndReceiptVisibility(t *testing.T) {
+	t.Run("related scope and memo delivery truth", exerciseRelatedDeliveryTruth)
 	f := deliveryFixtureFor(t)
 	in := input()
 	in.SessionID = f.session
@@ -576,6 +577,11 @@ func TestDeliveryPausedSuccessorAndCorrection(t *testing.T) {
 	f.expectEffects(t, q, "delivered")
 	if n := f.count(t, `SELECT count(*) FROM inbox_messages WHERE recipient_session_id=$1 AND body::jsonb->>'answer'='latest for successor'`, successor); n != 1 {
 		t.Fatal("verified successor did not receive latest")
+	}
+	for _, e := range f.status(t, q.ID).Pending {
+		if e.Kind == "inbox" && (e.Delivery == nil || !e.Delivery.Successor || e.Delivery.SessionID != successor || e.Delivery.State != "successor" || e.Delivery.DeliveredAt != nil) {
+			t.Fatal("successor routing claimed an unproven live delivery", e.Delivery)
+		}
 	}
 	if n := f.count(t, `SELECT count(*) FROM inbox_messages WHERE recipient_session_id=$1`, f.session); n != 0 {
 		t.Fatal("old process resurrected")

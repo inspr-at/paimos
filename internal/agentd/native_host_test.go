@@ -252,6 +252,7 @@ type nativeHostProvider struct {
 	inputs                     []string
 	closes                     int
 	exited                     bool
+	writeError                 error
 	now                        time.Time
 	closeEntered, closeRelease chan struct{}
 }
@@ -261,6 +262,9 @@ func (p *nativeHostProvider) Send(_ context.Context, in nativecontract.Input) (n
 	defer p.mu.Unlock()
 	p.sequence++
 	p.inputs = append(p.inputs, in.InputID)
+	if p.writeError != nil {
+		return nativecontract.NativeEvidence{}, p.writeError
+	}
 	return nativecontract.NativeEvidence{Stage: "write_acknowledged", InputID: in.InputID, RequestID: in.RequestID, SourceSequence: p.sequence, ObservedAt: p.now}, nil
 }
 func (*nativeHostProvider) Interrupt(context.Context, nativecontract.Interrupt) (nativecontract.NativeEvidence, error) {
@@ -561,6 +565,38 @@ func TestNativeHostLimitsCountOnlyLiveWork(t *testing.T) {
 			t.Fatal("exited owners were not bounded", entries)
 		}
 	})
+}
+
+// Risk: an unfinished native turn prevents a person's later input from ever
+// reaching the provider. Only inbox admission waits for a safe turn boundary.
+func TestNativeHostPersonInputSurvivesUnfinishedTurn(t *testing.T) {
+	for _, state := range []string{"write_acknowledged", "uncertain"} {
+		t.Run(state, func(t *testing.T) {
+			f := newNativeHostFixture(t, 1)
+			b, p := f.start(t, 0)
+			first := f.input(b)
+			var writeError error
+			if state == "uncertain" {
+				writeError = errors.New("fixture lost native acknowledgement")
+			}
+			p.mu.Lock()
+			p.writeError = writeError
+			p.mu.Unlock()
+			if out, err := f.h.Input(t.Context(), first); !errors.Is(err, writeError) || out.Receipt.State != state {
+				t.Fatal("unfinished turn was not established", out, err)
+			}
+			p.mu.Lock()
+			p.writeError = nil
+			p.mu.Unlock()
+			second := f.input(b)
+			if err := f.h.Poll(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if !p.received(second.InputID) {
+				t.Fatal("person input was withheld behind an unfinished turn")
+			}
+		})
+	}
 }
 
 // nativeC0Recorder acknowledges writes through the transport's own observer,

@@ -596,7 +596,9 @@ func TestChatRelayTimingRespectsActiveTurnAndInputEvidence(t *testing.T) {
 // or a public control borrows the relay's private managed-input authority.
 func TestChatSteerJournalRejectsLostAcknowledgementReplay(t *testing.T) {
 	s, _, entry, process := managedServiceFixture(t)
+	entry.mu.Lock()
 	entry.inboxCapable, entry.chatTiming = true, true
+	entry.mu.Unlock()
 	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: entry.record.RunID,
 		Generation: s.generation, CorrelationID: "chat:message", Operation: "steer", Text: chatInputText("message", "correction"), chatInputID: "message"}
 	if _, err := s.Control(t.Context(), req); !errors.Is(err, ErrUnsupported) {

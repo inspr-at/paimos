@@ -18,6 +18,7 @@ import (
 func (rt *runtime) cmdMessagingTell() *Command {
 	var project, message, messageFile, level, reply, thread, key, recipientSession, senderSession, sessionCookieFile string
 	var expectsReply, action, principalInbox bool
+	var laneStatus laneStatusFlags
 	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <peer-name|session:UUID> -m TEXT | tell <principal-uuid> --inbox -m TEXT | tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
 		subs: []*Command{{Name: "status", Short: "Read your message's push receipt", Use: "tell status <message-uuid>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
 			if !validUUID(args[0]) {
@@ -34,6 +35,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			return err
 		}}},
 		addFlags: func(fs *flagSet) {
+			laneStatus.addFlags(fs)
 			fs.bool(&principalInbox, "inbox", 0, "send directly to a principal UUID without project or harness discovery")
 			fs.string(&project, "project", 0, "recipient project key (optional peer filter; required for a principal or harness address)")
 			fs.string(&message, "message", 'm', "message text (required)")
@@ -49,6 +51,12 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			fs.bool(&action, "action-request", 0, "hold for human inspection; never deliver")
 		}, run: func(args []string) error {
 			address := strings.TrimSpace(args[0])
+			if laneStatus.present() {
+				if message != "" || messageFile != "" || reply != "" || thread != "" || sessionCookieFile != "" || level != "" || expectsReply || action {
+					return usagef("structured status uses --done, --blocker, --blocker-owner, --next and --eta; message, reply, thread, person session and action flags cannot be combined")
+				}
+				return rt.tellLaneStatus(address, project, senderSession, recipientSession, key, principalInbox, laneStatus)
+			}
 			if principalInbox {
 				if !validUUID(address) {
 					return usagef("--inbox requires a recipient principal UUID")

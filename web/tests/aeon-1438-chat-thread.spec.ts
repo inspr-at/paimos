@@ -9,6 +9,7 @@
 // Copy/Reply take a click meant for a link on the message's last line; a
 // touch-opened menu shows the keyboard focus ring.
 import { test, expect, type Locator, type Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fixtures, me, mockWork } from './work-fixtures'
@@ -187,7 +188,8 @@ async function contrast(locator: Locator) {
 
 for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1438 thread ${width} ${theme}: Desk cards, quiet meta, latest receipt, calm composer`, async ({ page }, testInfo) => {
-    const { worker, latest } = await setup(page, { theme })
+    const { worker, latest, data } = await setup(page, { theme })
+    data.messages.find(message => message.body.includes(longWord))!.body = `Die vollständige Freigabeprüfung einschließlich sämtlicher Abrechnungseinstellungen ist abgeschlossen. Der geprüfte Dateischlüssel lautet ${longWord}.`
     await page.setViewportSize({ width, height: width === 320 ? 568 : width <= 390 ? 844 : 900 })
     await page.goto(`/agents/${worker.id}?tab=messages`)
     const panel = panelOf(page)
@@ -209,7 +211,7 @@ for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'
     await expect(thread.getByRole('separator', { name: 'Yesterday', exact: true })).toHaveCount(1)
     await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toHaveCount(1)
     // Each day opens with its separator: the thread's first item, and right above today's first post.
-    await expect(thread.locator(':scope > li').first()).toHaveAttribute('aria-label', 'Yesterday')
+    await expect(thread.locator(':scope > li').first().getByRole('separator')).toHaveAccessibleName('Yesterday')
     await expect(thread.locator(':scope > li.day + li.msg').last()).toContainText('Morning, Markus.')
 
     // Receipts only on the latest own message.
@@ -248,6 +250,12 @@ for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'
       ['desk state', desk.locator('.desk-state')], ['desk open', desk.locator('.desk-open')], ['desk time', desk.locator('time')],
       ['receipt', own.last().locator('.delivery')], ['own time', own.last().locator('.msg-time')],
     ] as const) expect(await contrast(target), `${name} contrast`).toBeGreaterThanOrEqual(4.5)
+    // AEON-1687: separators retain their own semantics without replacing the
+    // list's items; inactive phone state words retain readable theme ink.
+    const axe = await new AxeBuilder({ page }).include('.session-panel')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+    expect(axe.violations, 'chat thread and phone state pass WCAG A/AA').toEqual([])
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1687-chat-${width}-${theme}.png`) })
     await page.screenshot({ path: testInfo.outputPath(`AEON-1438/thread-${width}-${theme}.png`) })
 
     // The composer never moves: not on focus, not when a turn starts or ends, not on send.
@@ -257,10 +265,12 @@ for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'
       ? { send, plus: panel.getByRole('button', { name: 'Add a ticket or session' }), field: composer, frame: panel }
       : { send, row: panel.locator('.compose-row'), slot: panel.locator('.compose-row .choice'), field: composer, frame: panel }
     const guard = await controlStability(page, controls)
+    const actionBoxes = await Promise.all([send, composer].map(control => control.boundingBox()))
     await guard.check(async () => {
       await composer.focus()
       if (!phone) await expect(panel.locator('.compose-hint')).toHaveCSS('opacity', '1')
     })
+    expect(await Promise.all([send, composer].map(control => control.boundingBox())), 'chat focus moves controls by 0 px').toEqual(actionBoxes)
     await guard.check(async () => {
       await turn(page, 1, 'running')
       await expect(panel.locator('.live-turn')).toBeVisible()
@@ -421,8 +431,8 @@ for (const width of [1440, 390]) test(`AEON-1438 the thread starts with its day 
   await page.mouse.wheel(0, -20000)
   await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBe(0)
   const first = thread.locator(':scope > li').first()
-  await expect(first).toHaveAttribute('role', 'separator')
-  await expect(first).toHaveAttribute('aria-label', 'Today')
+  await expect(first).toHaveRole('listitem')
+  await expect(first.getByRole('separator')).toHaveAccessibleName('Today')
   await expect(first).toBeInViewport()
   await expect(thread.locator('.day')).toHaveCount(1)
   await page.screenshot({ path: testInfo.outputPath(`AEON-1438/thread-start-${width}-light.png`) })

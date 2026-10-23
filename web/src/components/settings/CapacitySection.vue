@@ -309,7 +309,7 @@ watch([paceHash, harnesses], async ([harness]) => {
 .r { width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-2); }
 [aria-checked="true"] > .r { box-shadow: inset 0 0 0 4px var(--teal); }
 .t { font-size: 13.5px; font-weight: 600; }
-.d { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+.d { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
 .d .field.n { box-sizing: border-box; width: 52px; height: 30px; margin: 0 4px; padding: 0 4px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
 .pp-note { min-height: 18px; margin: 0; padding: 0 10px; font-size: 12px; color: var(--danger); }
 .pp-foot { margin: 4px 4px 2px; padding: 8px 6px 4px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
