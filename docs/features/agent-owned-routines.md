@@ -34,6 +34,8 @@ including admitted runs and unknown costs. Missing policy holds the run with
 AEON-754 package F supplies the package A policy integration. Production dispatch
 therefore remains closed until that integration is installed.
 
+The server wires `routineactions.WriteAgentResultTx` through
+`Module.WithAgentResultWriter`, sharing the ordinary result mutation guards.
 The dispatched owner submits `status`, `title`, `body` and optional integral
 `cost_microusd` to
 `POST /api/recurrences/{id}/runs/{run}/agent-result`. Only `succeeded` and `failed`

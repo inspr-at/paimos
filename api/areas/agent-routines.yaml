@@ -36,7 +36,7 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
     post:
       operationId: completeRoutineAgentResult
-      description: 'Only the dispatched agent owner can submit a bounded terminal result. Live person grant, owner authority, definition identity and result destination are rechecked under the final tenant/tree fence. The configured result becomes one ordinary ticket comment, new ticket or proposed Knowledge entry. Exact retries return the same receipt; changed results conflict. Cost is agent-reported micro-USD, never independently measured billing. An omitted cost remains unknown. No completion status, acceptance, outward action, merge or deployment is authorized.'
+      description: 'Only the dispatched agent owner can submit a bounded terminal result. Live person grant, owner authority, definition identity and result destination are rechecked under the final tenant/tree fence. The configured result becomes one ordinary ticket comment, new ticket or proposed Knowledge entry. Exact retries return the same receipt; changed results conflict. Cost is agent-reported micro-USD, never independently measured billing. An omitted cost remains unknown. No ticket completion, acceptance, outward action, merge or deployment is authorized.'
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/RoutineAgentResultInput'}}}
