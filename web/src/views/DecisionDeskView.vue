@@ -6,7 +6,7 @@ import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import DeskSyncLine from '../components/agents/DeskSyncLine.vue'
-import { deskClock, deskSyncAnnouncement, deskSyncCopy, deskSyncLine } from '../lib/deskSync'
+import { deskClock, deskClockMoved, deskSyncAnnouncement, deskSyncCopy, deskSyncLine } from '../lib/deskSync'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
 import { arrivals, deskAutoRetry, deskEmptyState, deskFailedWords, deskItemID, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, retainDecidedLessons, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskRetryPhase, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
@@ -735,7 +735,15 @@ let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }
 onMounted(() => {
   window.addEventListener('focus', focus)
-  poll = setInterval(() => { desk.notePoll(viewPoll, Date.now() + VIEW_POLL_MS); if (!document.hidden && !loading.value) void refresh() }, VIEW_POLL_MS)
+  // A frozen capture clock leaves Date.now() unchanged, so this poll must not start "Checking now…". Focus still reads.
+  let viewPollAt = Date.now()
+  poll = setInterval(() => {
+    const at = Date.now()
+    desk.notePoll(viewPoll, at + VIEW_POLL_MS)
+    if (!deskClockMoved(viewPollAt, at)) return
+    viewPollAt = at
+    if (!document.hidden && !loading.value) void refresh()
+  }, VIEW_POLL_MS)
   desk.notePoll(viewPoll, Date.now() + VIEW_POLL_MS)
   clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
   document.addEventListener('visibilitychange', readPage); window.addEventListener('online', readPage); window.addEventListener('offline', readPage)

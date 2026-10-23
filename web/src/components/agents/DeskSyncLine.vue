@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
-import { deskSyncCopy, type DeskSyncLine } from '../../lib/deskSync'
+import { deskSyncCopy, deskSyncMotion, type DeskSyncLine } from '../../lib/deskSync'
 
 // AEON-1700 (Tick UI spec v1): the Decision Desk's one sync line, [icon 12] state · next check. The words are
 // not a live region (the Desk announces state changes on its own); the focusable text reads the full sentence,
@@ -11,16 +11,25 @@ const props = defineProps<{ line: DeskSyncLine; pulse: number; busy: boolean }>(
 const emit = defineEmits<{ retry: [] }>()
 const words = deskSyncCopy()
 const mark = ref<HTMLElement>()
-let reduced: MediaQueryList | undefined
+// Read at setup, not only after mount: a pulse on the first tick must already see capture's reduced motion.
+const motion = matchMedia('(prefers-reduced-motion: reduce)')
+const reduced = ref(motion.matches)
+const readMotion = () => {
+  reduced.value = motion.matches
+  if (motion.matches) mark.value?.getAnimations().forEach(animation => animation.cancel())
+}
 // ≤ 520 px the line takes its short forms (§3). Only the form on screen is in the DOM.
 const phone = matchMedia('(max-width: 520px)'), short = ref(phone.matches)
 const readPhone = () => { short.value = phone.matches }
-onMounted(() => { reduced = matchMedia('(prefers-reduced-motion: reduce)'); phone.addEventListener('change', readPhone) })
-onBeforeUnmount(() => phone.removeEventListener('change', readPhone))
+onMounted(() => { readMotion(); motion.addEventListener('change', readMotion); phone.addEventListener('change', readPhone) })
+onBeforeUnmount(() => { motion.removeEventListener('change', readMotion); phone.removeEventListener('change', readPhone) })
 // Each live event pulses the icon slot once. The slot outlives the swap from the Live dot to "Change arrived"'s
 // refresh icon, which the same event causes, so the pulse is seen. Reduced motion keeps it still; the words carry it.
 watch(() => props.pulse, () => {
-  if (reduced?.matches || typeof mark.value?.animate !== 'function') return
+  if (!deskSyncMotion({ reducedMotion: motion.matches, spin: false }).pulse || typeof mark.value?.animate !== 'function') {
+    mark.value?.getAnimations().forEach(animation => animation.cancel())
+    return
+  }
   mark.value.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(1.6)', opacity: 0.35 }, { transform: 'scale(1)', opacity: 1 }], { duration: 600, easing: 'ease-out' })
 })
 </script>
@@ -28,7 +37,7 @@ watch(() => props.pulse, () => {
 <template>
   <p class="desk-sync" :class="{ warn: line.warn }" :data-state="line.state" data-testid="desk-sync">
     <span class="sync-text" tabindex="0" :data-tip="line.tip || undefined">
-      <span v-if="line.icon" ref="mark" class="sync-mark"><span v-if="line.icon === 'dot'" class="sync-dot" role="img" :aria-label="words.live" data-testid="desk-sync-dot" /><AppIcon v-else class="sync-icon" :class="{ spin: line.spin }" :name="line.icon" :size="12" /></span>
+      <span v-if="line.icon" ref="mark" class="sync-mark"><span v-if="line.icon === 'dot'" class="sync-dot" role="img" :aria-label="words.live" data-testid="desk-sync-dot" /><AppIcon v-else class="sync-icon" :class="{ spin: deskSyncMotion({ reducedMotion: reduced, spin: line.spin }).spin }" :name="line.icon" :size="12" /></span>
       <span class="sync-words" aria-hidden="true"><template v-for="(part, index) in line.parts" :key="index"><span v-if="'n' in part" class="sync-n"><span>{{ part.n }}</span></span><template v-else>{{ short && part.short !== undefined ? part.short : part.text }}</template></template></span>
       <span class="sr-only">{{ line.sentence }}</span>
     </span>

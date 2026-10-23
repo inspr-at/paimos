@@ -129,6 +129,15 @@ export function deskNextRead(input: Pick<DeskSyncInput, 'online' | 'visible' | '
   const due = [input.pollAt, input.retryAt].filter((at): at is number => at !== null)
   return due.length ? Math.min(...due) : null
 }
+/** Reduced motion keeps the dot still and the refresh icon from turning. Capture sets reduce. */
+export function deskSyncMotion(input: { reducedMotion: boolean; spin: boolean }): { spin: boolean; pulse: boolean } {
+  if (input.reducedMotion) return { spin: false, pulse: false }
+  return { spin: input.spin, pulse: true }
+}
+/** A scheduled poll reads again only after the clock moves. A frozen test clock keeps the countdown and does not start a check. */
+export function deskClockMoved(last: number, now: number): boolean {
+  return now !== last
+}
 
 export function deskSyncLine(input: DeskSyncInput, lang: DisplayLanguage = displayLanguage()): DeskSyncLine {
   const copy = DESK_SYNC_COPY[lang], state = deskSyncState(input), health = deskSyncHealth(input)

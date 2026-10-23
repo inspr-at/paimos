@@ -24,6 +24,9 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   // The real timers that read the Desk report when they fire next; the line counts down to the earliest.
   const pollsDue = ref(new Map<symbol, number>())
   function notePoll(poll: symbol, at: number | null) {
+    // The same due time again is not a change. A frozen clock would otherwise replace the map on every tick.
+    if (at === null) { if (!pollsDue.value.has(poll)) return }
+    else if (pollsDue.value.get(poll) === at) return
     const next = new Map(pollsDue.value)
     if (at === null) next.delete(poll); else next.set(poll, at)
     pollsDue.value = next

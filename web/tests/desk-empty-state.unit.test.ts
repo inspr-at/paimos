@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { DESK_RETRY_MS, deskAutoRetry, deskEmptyState, deskFailedWords, deskUnansweredLine, type DeskProjection, type DeskRetryPhase } from '../src/lib/decisionDesk'
 import { loadDesk, nativeTierAdapter, tierSessionsFromRefresh } from '../src/lib/decisionDeskApi'
-import { deskClock, deskSyncAnnouncement, deskSyncLine, type DeskSyncInput, type DeskSyncLine } from '../src/lib/deskSync'
+import { deskClock, deskClockMoved, deskSyncAnnouncement, deskSyncLine, deskSyncMotion, type DeskSyncInput, type DeskSyncLine } from '../src/lib/deskSync'
 import type { HarnessSession } from '../src/lib/agents'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -139,6 +139,16 @@ describe('Decision Desk empty state', () => {
     expect(line({ checkedAt: null })).toMatchObject({ state: 'never', icon: 'refresh', spin: false, tip: '' })
     expect(words(line({ checkedAt: null }))).toBe('Checking now…')
     expect(words(line({ checkedAt: null }, 'de'))).toBe('Wird geprüft…')
+    // Capture freezes one instant and sets reduced motion. The same instant twice is the same settled sentence.
+    const frozen = line({ now: at, checkedAt: at, pollAt: at + 30_000 })
+    expect(words(frozen)).toBe(words(line({ now: at, checkedAt: at, pollAt: at + 30_000 })))
+    expect(words(frozen)).toBe('Live · checked just now · next check in 30 s')
+    expect(frozen.spin, 'a settled line does not turn').toBe(false)
+    expect(words(frozen)).not.toBe('Checking now…')
+    expect(deskSyncMotion({ reducedMotion: true, spin: true })).toEqual({ spin: false, pulse: false })
+    expect(deskSyncMotion({ reducedMotion: false, spin: true })).toEqual({ spin: true, pulse: true })
+    expect(deskClockMoved(at, at), 'a frozen clock does not make the poll due').toBe(false)
+    expect(deskClockMoved(at, at + 30_000)).toBe(true)
     // §5: failures, escalation and recovery speak once per transition; nothing else does.
     expect(deskSyncAnnouncement('ok', 'ok', shown)).toBeNull()
     expect(deskSyncAnnouncement('ok', 'quiet', shown)).toBe('Couldn’t check the Desk. Trying again.')
