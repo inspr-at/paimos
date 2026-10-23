@@ -2,7 +2,8 @@
 
 Hosted assistants appear between capacity and Sessions on the existing Agents page.
 Opening an assistant uses the same right-hand dock as session details; phones use
-a full-height sheet. Assistants are excluded from Sessions when their principal
+a full-height sheet. In split view, Sessions scrolls in the space below the
+Assistants card so selecting a row preserves its position. Assistants are excluded from Sessions when their principal
 identity is known. Lists show five rows initially, with a browser-local expansion
 preference scoped to the current person and workspace. Live reads preserve row
 order; closing the panel or focusing the page permits a new status/name sort when
