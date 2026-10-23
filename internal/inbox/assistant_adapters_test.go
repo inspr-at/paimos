@@ -595,7 +595,7 @@ func testAssistantPullMigration(t *testing.T) {
 // Risk: a sleeping pull assistant loses unread work after the online deadline,
 // retention silently lasts forever, or a revoked assistant still looks healthy.
 // One DB-derived clock drives sweep boundaries; no calendar pins or sleeps.
-func testAssistantPickupRetention(t *testing.T) {
+func TestPullAssistantPickupRetention(t *testing.T) {
 	for _, implicit := range []bool{false, true} {
 		name := "configured pull adapter"
 		if implicit {

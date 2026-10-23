@@ -32,7 +32,6 @@ func TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion(t *testing.T) {
 	t.Run("assistant registration revocation", testAssistantAdapterRevocation)
 	t.Run("legacy assistant migration", testAssistantAdapterMigration)
 	t.Run("pull assistant round trip", testAssistantPullRoundTrip)
-	t.Run("pull pickup retention and lifecycle", testAssistantPickupRetention)
 	t.Run("existing messaging assistant pull migration", testAssistantPullMigration)
 	w, m, project, _ := messagingWorld(t)
 	const senderKey = "fixture-routine-sender-key"

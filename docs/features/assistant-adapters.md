@@ -148,9 +148,9 @@ The existing `TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion`
 behaviour test now includes production-authenticated round-trip, exact injected
 retry boundaries, signature/redaction, dry-run, target version, authorization
 revocation, pull polling/receipts/health without outbound attempts, frozen-host
-retention, and pre-expansion Amy-shaped provisioning/rotation subtests. The
-pickup-retention subtest covers the expired legacy online deadline, both
-configured and implicit assistants, the exact retention boundary, one-time
-sender notices, key rotation/revocation, disabling and replacement with push. Its
-existing test tier is retained; no browser case or coordinator-owned tier record
-is added.
+retention, and pre-expansion Amy-shaped provisioning/rotation subtests. Its
+existing tier is retained. `TestPullAssistantPickupRetention` is registered as
+ESSENTIAL and covers the expired legacy online deadline, both configured and
+implicit assistants, the exact retention boundary, one-time sender notices, key
+rotation/revocation, disabling and replacement with push. No browser case is
+added.
