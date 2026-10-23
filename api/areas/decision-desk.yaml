@@ -69,9 +69,12 @@ paths:
     get:
       operationId: decisionDeskOwnerSummary
       security: [{deskSummary: []}]
-      description: "AEON-1709. The route name is retained for compatibility. Accepts ONLY a read-only person-summary bearer credential, never cookies or agent keys. Origin must be an exact configured sibling and match the connection. Reads the connected person's own current Desk, rechecking active status and source visibility. At most five first lines, exact counts, as-of, and first upcoming step. Credentials expire after 90 days or explicit revocation. No decision authority."
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 5}, description: "First lines to display. The shared browser store requests more only after Show all, with a hard cap of 100; the home Desk holds the rest."}
+      description: "AEON-1709. The route name is retained for compatibility. Accepts ONLY a read-only person-summary bearer credential, never cookies or agent keys. Origin must be an exact configured sibling and match the connection. Reads the connected person's own current Desk, rechecking active status and source visibility. At most five first lines by default, up to 100 after Show all, exact counts, as-of, and first upcoming step. Credentials expire after 90 days or explicit revocation. No decision authority."
       responses:
         '200': {description: "The connected person's summary", content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskOwnerSummary'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
@@ -210,7 +213,7 @@ components:
         kind: {type: string}
         project_key: {type: string}
         title: {type: string, maxLength: 200}
-        asked_by: {type: string}
+        asked_by: {type: string, maxLength: 120}
         created_at: {type: string, format: date-time}
         held: {type: boolean}
         href: {type: string, description: "App path on the answering instance, starting with a single slash."}
@@ -219,7 +222,7 @@ components:
       required: [instance, items, counts, as_of]
       properties:
         instance: {type: string}
-        items: {type: array, maxItems: 5, items: {$ref: '#/components/schemas/DecisionDeskOwnerSummaryItem'}}
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DecisionDeskOwnerSummaryItem'}}
         counts:
           type: object
           required: [open, held]

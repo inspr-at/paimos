@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -217,6 +218,15 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 401, "summary connection required")
 		return
 	}
+	limit := maxSummaryItems
+	if r.URL.Query().Has("limit") {
+		n, err := strconv.Atoi(r.URL.Query().Get("limit"))
+		if err != nil || n < 1 || n > 100 {
+			httpapi.WriteError(w, 400, "invalid summary limit")
+			return
+		}
+		limit = n
+	}
 	// The parsed identity has no authority until the exact hash, origin, expiry
 	// and live person permission are verified inside this transaction.
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(r.Context(), p), 8*time.Second)
@@ -250,7 +260,7 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
 			return err
 		}
-		page, err := ReadTx(ctx, tx, p, maxSummaryItems, nil, m.routineRuntime)
+		page, err := ReadTx(ctx, tx, p, limit, nil, m.routineRuntime)
 		if err != nil {
 			return err
 		}
@@ -272,7 +282,7 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 		for _, item := range page.Items {
 			line := SummaryItem{ID: item.ID, Kind: item.Kind, ProjectKey: keys[item.ProjectID], Title: clip(item.Title, maxSummaryTitle), CreatedAt: item.CreatedAt, Held: item.Held, Href: item.Href}
 			if item.AskedBy != nil {
-				line.AskedBy = item.AskedBy.Name
+				line.AskedBy = clip(item.AskedBy.Name, 120)
 			}
 			if !strings.HasPrefix(line.Href, "/") || strings.HasPrefix(line.Href, "//") {
 				line.Href = "/decision-desk"

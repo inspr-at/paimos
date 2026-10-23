@@ -4,11 +4,14 @@ import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { ConnectionEnded, readInstances, readSibling, type DeskSibling, type ElsewhereDiscovery, type ElsewhereSummary } from '../lib/deskElsewhere'
 import { deviceSubscriptionHash, phoneSettings } from '../lib/phoneApprovals'
+import { displayLanguage } from '../lib/displayLanguage'
 
 export type ConnectionState = 'not connected' | 'connecting' | 'reading' | 'ok' | 'unreachable' | 'ended'
 export interface InstanceRead extends DeskSibling {
   state: ConnectionState; summary: ElsewhereSummary | null; account: string; connectedAt: string; expiresAt: string
   expanded: boolean; hiddenUntil: number; slots: number
+  notify: boolean; allItems: boolean
+  lastReadAt: number
 }
 interface BrowserGrant { token: string; origin: string; account: string; createdAt: string; expiresAt: string }
 interface Pending { owner: string; tag: string; origin: string; until: number; returnTo: string }
@@ -18,7 +21,7 @@ const STATE = /^[A-Za-z0-9_-]{43}$/
 const storageGet = (key: string) => { try { return localStorage.getItem(key) } catch { return null } }
 const storagePut = (key: string, value: string | null) => { try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value) } catch { /* This tab still works without persistent storage. */ } }
 function readJSON<T>(key: string): T | null { try { return JSON.parse(storageGet(key) ?? 'null') as T | null } catch { return null } }
-const emptyRead = (s: DeskSibling): InstanceRead => ({ ...s, state: 'not connected', summary: null, account: '', connectedAt: '', expiresAt: '', expanded: false, hiddenUntil: 0, slots: 0 })
+const emptyRead = (s: DeskSibling): InstanceRead => ({ ...s, state: 'not connected', summary: null, account: '', connectedAt: '', expiresAt: '', expanded: false, hiddenUntil: 0, slots: 0, notify: true, allItems: false, lastReadAt: 0 })
 
 // One store per signed-in person, shared by every Desk surface. Raw credentials
 // are private browser data: never returned by this store or written via api().
@@ -27,6 +30,7 @@ export const useDeskConnections = defineStore('deskConnections', () => {
   const owner = computed(() => session.identity?.principal.kind === 'person' ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
   const here = ref(''), reads = ref<InstanceRead[]>([]), discovery = ref<ElsewhereDiscovery>('pending')
   const noticeEnabled = ref(false)
+  const checkedAt = ref(Date.now())
   let generation = 0, noticeTurn = 0, abort = new AbortController(), discoveryFlight: Promise<void> | undefined
   const grants = new Map<string, BrowserGrant>(), flights = new Map<string, Promise<void>>(), attempted = new Map<string, number>()
   const pending = new Map<string, string>()
@@ -36,8 +40,9 @@ export const useDeskConnections = defineStore('deskConnections', () => {
   function save(tag: string) { const grant = grants.get(tag); storagePut(key(tag), grant ? JSON.stringify(grant) : null) }
   function restore(row: InstanceRead) {
     const grant = readJSON<BrowserGrant>(key(row.tag))
-    const prefs = readJSON<{ expanded?: boolean; hiddenUntil?: number; slots?: number; ended?: boolean }>(key(row.tag, '.view'))
+    const prefs = readJSON<{ expanded?: boolean; hiddenUntil?: number; slots?: number; ended?: boolean; notify?: boolean; allItems?: boolean }>(key(row.tag, '.view'))
     row.expanded = prefs?.expanded === true; row.hiddenUntil = Number(prefs?.hiddenUntil) || 0; row.slots = Math.min(5, Math.max(0, Number(prefs?.slots) || 0))
+    row.notify = prefs?.notify !== false; row.allItems = prefs?.allItems === true
     if (!grant || grant.origin !== row.origin || !TOKEN.test(grant.token) || !Number.isFinite(Date.parse(grant.expiresAt))) { if (prefs?.ended) row.state = 'ended'; return }
     row.account = typeof grant.account === 'string' ? grant.account.slice(0, 120) : ''; row.connectedAt = grant.createdAt; row.expiresAt = grant.expiresAt
     if (Date.parse(grant.expiresAt) <= Date.now()) { row.state = 'ended'; row.slots = 0; storagePut(key(row.tag), null); storagePut(key(row.tag, '.view'), JSON.stringify({ ...prefs, ended: true, slots: 0 })); return }
@@ -45,10 +50,17 @@ export const useDeskConnections = defineStore('deskConnections', () => {
   }
   function view(tag: string) {
     const row = reads.value.find(r => r.tag === tag)
-    if (row) storagePut(key(tag, '.view'), JSON.stringify({ expanded: row.expanded, hiddenUntil: row.hiddenUntil, slots: row.slots, ended: row.state === 'ended' }))
+    if (row) storagePut(key(tag, '.view'), JSON.stringify({ expanded: row.expanded, hiddenUntil: row.hiddenUntil, slots: row.slots, ended: row.state === 'ended', notify: row.notify, allItems: row.allItems }))
   }
   function expand(tag: string) { const row = reads.value.find(r => r.tag === tag); if (row) { patch(tag, { expanded: !row.expanded }); view(tag) } }
   function dismiss(tag: string) { patch(tag, { hiddenUntil: Date.now() + 30 * 86400_000 }); view(tag) }
+  function setNotify(tag: string, notify: boolean) { patch(tag, { notify }); view(tag) }
+  async function showAll(tag: string) {
+    const who = owner.value, turn = generation
+    patch(tag, { allItems: true }); view(tag)
+    if (flights.has(tag)) await flights.get(tag)
+    if (current(who, turn)) await readOne(tag, true, true)
+  }
   function ended(tag: string) { grants.delete(tag); flights.delete(tag); save(tag); patch(tag, { state: 'ended', summary: null, slots: 0 }); view(tag) }
 
   async function notificationPreference() {
@@ -66,15 +78,21 @@ export const useDeskConnections = defineStore('deskConnections', () => {
   async function notify(tag: string, summary: ElsewhereSummary, baseline: boolean, who: string, turn: number, grant: BrowserGrant) {
     const run = async () => {
       if (!current(who, turn) || grants.get(tag) !== grant) return
-      const seenKey = `${PREFIX}${who}.${tag}.seen`, saved = readJSON<unknown>(seenKey)
-      const seen = new Set(Array.isArray(saved) ? saved.filter((value): value is string => typeof value === 'string').slice(0, 5000) : [])
+      // One bounded lookup/claim per item, without loading an ever-growing
+      // ledger. Prime even an empty Desk so its first arrival can notify.
+      const seenKey = `${PREFIX}${who}.${tag}.seen`
+      storagePut(seenKey, '1')
       for (const line of summary.lines) {
         const id = `${line.kind}:${line.id}`
-        if (seen.has(id) || seen.size >= 5000) continue
-        seen.add(id); storagePut(seenKey, JSON.stringify([...seen]))
-        if (baseline || !noticeEnabled.value || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue
+        const claim = `${PREFIX}${who}.${tag}.notice.${encodeURIComponent(id)}`
+        if (storageGet(claim)) continue
+        storagePut(claim, '1')
+        if (storageGet(claim) !== '1') continue // No repeatable delivery without a durable claim.
+        if (baseline || !noticeEnabled.value || reads.value.find(r => r.tag === tag)?.notify === false || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue
+        const de = displayLanguage() === 'de', title = de ? `Neu auf ${tag}: ${line.title}` : `New on ${tag}: ${line.title}`
+        const body = [line.projectKey, de ? `auf ${tag} entscheiden` : `decide on ${tag}`].filter(Boolean).join(' · ')
         try {
-          const notice = new Notification(`PAIMOS · ${tag} · Decision waiting`, { body: line.title, tag: `desk-${tag}-${id}` })
+          const notice = new Notification(title, { body, tag: `desk-${tag}-${id}` })
           notice.onclick = () => { notice.close(); if (current(who, turn) && grants.get(tag) === grant) window.open(line.url, '_blank', 'noopener,noreferrer') }
         } catch {
           // iOS and some installed browsers require service-worker delivery.
@@ -83,7 +101,7 @@ export const useDeskConnections = defineStore('deskConnections', () => {
             const registration = await navigator.serviceWorker?.getRegistration('/')
             if (!current(who, turn) || grants.get(tag) !== grant) return
             const fragment = new URLSearchParams({ instance: tag, url: line.url, owner: who })
-            await registration?.showNotification(`PAIMOS · ${tag} · Decision waiting`, { body: line.title, tag: `desk-${tag}-${id}`, data: { path: `/instances/open#${fragment}` } })
+            await registration?.showNotification(title, { body, tag: `desk-${tag}-${id}`, data: { path: `/instances/open#${fragment}` } })
           } catch { /* A failed delivery never affects the in-app count. */ }
         }
       }
@@ -92,7 +110,7 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     if (typeof navigator !== 'undefined' && navigator.locks) await navigator.locks.request(`${PREFIX}${who}.notify`, run)
     else run()
   }
-  function readOne(tag: string, force = false): Promise<void> {
+  function readOne(tag: string, force = false, silent = false): Promise<void> {
     if (flights.has(tag)) return flights.get(tag)!
     const row = reads.value.find(r => r.tag === tag), grant = grants.get(tag)
     if (!row || !grant || !owner.value || !session.authenticationCurrent()) return Promise.resolve()
@@ -105,11 +123,11 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     let flight!: Promise<void>
     flight = (async () => {
       try {
-        const summary = await readSibling(row, grant.token, signal)
+        const summary = await readSibling(row, grant.token, signal, row.allItems ? 100 : 5)
         if (!valid()) return
         if (Date.parse(grant.expiresAt) <= Date.now()) { ended(tag); return }
-        patch(tag, { state: 'ok', summary, slots: summary.lines.length }); view(tag)
-        await notify(tag, summary, baseline, who, turn, grant)
+        patch(tag, { state: 'ok', summary, slots: Math.min(5, summary.lines.length), lastReadAt: Date.now() }); view(tag)
+        await notify(tag, summary, baseline || silent, who, turn, grant)
       } catch (error) {
         if (!valid()) return
         if (error instanceof ConnectionEnded) ended(tag)
@@ -137,6 +155,7 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     discoveryFlight = flight; return flight
   }
   async function refresh(force = false) {
+    checkedAt.value = Date.now()
     if (discovery.value !== 'known') return discover()
     for (const [tag, state] of pending) {
       const p = readJSON<Pending>(PENDING + state)
@@ -195,7 +214,7 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     const row = reads.value.find(r => r.tag === tag), grant = grants.get(tag), who = owner.value, turn = generation
     if (!row || !grant) return
     cancel(tag); grants.delete(tag); flights.delete(tag); attempted.delete(tag); save(tag)
-    patch(tag, { ...emptyRead(row), expanded: row.expanded })
+    patch(tag, { ...emptyRead(row), expanded: row.expanded, notify: row.notify })
     view(tag)
     return () => {
       if (!current(who, turn) || grants.has(tag) || Date.parse(grant.expiresAt) <= Date.now()) return
@@ -210,7 +229,7 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     here.value = ''; reads.value = []; discovery.value = owner.value ? 'pending' : 'known'; noticeEnabled.value = false
   }
   watch(owner, () => { reset(); void notificationPreference(); void discover() }, { immediate: true, flush: 'sync' })
-  const focus = async () => { await notificationPreference(); void refresh(true) }
+  const focus = async () => { checkedAt.value = Date.now(); await notificationPreference(); void refresh(true) }
   const storage = (event: StorageEvent) => {
     if (event.key?.startsWith(PREFIX) && owner.value) {
       // Callback/disconnect in another tab: restore only this person's configured rows.
@@ -226,8 +245,14 @@ export const useDeskConnections = defineStore('deskConnections', () => {
   if (typeof window !== 'undefined') { window.addEventListener('focus', focus); window.addEventListener('storage', storage); window.addEventListener(NOTICES, notificationPreference) }
   onScopeDispose(() => { reset(); if (typeof window !== 'undefined') { window.removeEventListener('focus', focus); window.removeEventListener('storage', storage); window.removeEventListener(NOTICES, notificationPreference) } })
   const count = computed(() => reads.value.reduce((n, r) => n + (r.summary?.open ?? 0), 0))
-  const complete = computed(() => discovery.value === 'known' && reads.value.every(r => r.state === 'ok'))
+  const complete = computed(() => discovery.value === 'known' && reads.value.every(r => r.state === 'ok' && checkedAt.value - r.lastReadAt < 60_000))
   const allClear = computed(() => complete.value && count.value === 0)
-  const breakdown = computed(() => reads.value.map(r => r.state === 'ok' ? `${r.summary?.open ?? 0} on ${r.tag}` : `${r.tag}: ${r.state}${r.summary ? ` (as of ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}`))
-  return { here, reads, discovery, count, complete, allClear, breakdown, noticeEnabled, refresh, connect, cancel, acceptFragment, disconnect, expand, dismiss }
+  const breakdown = computed(() => reads.value.flatMap(r => {
+    if (r.state === 'not connected') return []
+    if (r.state === 'ended') return [`${r.tag}: connection ended`]
+    if (r.summary) return [`${r.summary.open} on ${r.tag}${r.state === 'unreachable' ? ` (as of ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}`]
+    return [`${r.tag}: ${r.state === 'unreachable' ? "couldn't be reached" : r.state}`]
+  }))
+  const syncTooltip = (now: number) => reads.value.filter(r => r.state !== 'not connected').map(r => `${r.tag}: ${r.state === 'unreachable' ? "couldn't be reached" : r.state === 'ended' ? 'connection ended' : r.summary ? `checked ${Math.max(0, Math.floor((now - r.lastReadAt) / 1000))} s ago` : r.state}${r.state === 'unreachable' && r.summary ? ` · showing ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`).join('\n')
+  return { here, reads, discovery, count, complete, allClear, breakdown, syncTooltip, noticeEnabled, refresh, connect, cancel, acceptFragment, disconnect, expand, dismiss, setNotify, showAll }
 })

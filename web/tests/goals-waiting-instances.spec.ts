@@ -5,6 +5,7 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { mockDecisionDesk } from './decision-desk-fixtures'
 
 test.use({ timezoneId: 'Europe/Vienna', locale: 'en-GB' })
 const NOW = Date.parse('2026-10-21T17:00:00Z')
@@ -45,11 +46,12 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
     counts: options.desk === 'empty' ? { open: 0, held: 0, chores: 0 } : { open: 3, held: 1, chores: 0 }, has_more: false, as_of: iso(NOW),
     upcoming: [{ node_id: 'n-ait', check_id: 'human', project_id: 'p-aeon', ticket_key: 'AIT-140', label: 'Your Aithema test session (~20 min, whenever you like)' }],
   } }))
+  const mount = async () => {
   await page.route(/\/api\/decision-desk\/instances$/, route => {
     if (instances === 'down') return route.fulfill({ status: 503, json: { error: 'unavailable' } })
     return route.fulfill({ json: { here: 'ppm', siblings: [{ tag: 'pma', origin: SIBLING }] } })
   })
-  await page.route(SUMMARY, route => {
+  await page.route(SUMMARY + '*', route => {
     const request = route.request(), origin = request.headers().origin ?? ''
     const cors = { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET', 'access-control-allow-headers': 'Authorization, Accept', vary: 'Origin' }
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
@@ -66,7 +68,9 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
       })),
     } })
   })
-  return { reads, set: (next: Sibling) => { state = next }, setInstances: (next: Sibling) => { instances = next } }
+  }
+  await mount()
+  return { reads, mount, set: (next: Sibling) => { state = next }, setInstances: (next: Sibling) => { instances = next } }
 }
 async function openBand(page: Page) {
   await page.goto('/?view=goals')
@@ -102,6 +106,27 @@ for (const width of [1440, 1024, 390] as const) {
     const header = page.locator('header .needs-badge').first()
     await expect(header).toHaveText('5')
     expect(errors).toEqual([])
+    if (width < 720) { await page.getByRole('button', { name: /^Account for / }).click(); await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Preview the Decision Desk' }).click() }
+    else await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()
+    const preview = page.getByRole('dialog', { name: 'Decision Desk preview', exact: true })
+    await expect(preview.getByTestId('instance-pma')).toContainText('On pma · 2')
+    await expect(preview.getByTestId('instance-pma').locator('.instance-tag')).toHaveText(['pma', 'pma'])
+    await expect(preview.getByRole('link', { name: 'Open pma Desk' })).toHaveAttribute('href', `${SIBLING}/decision-desk`)
+    await shot(page, info, `preview-${width}-dark`)
+    await page.keyboard.press('Escape')
+    await mockDecisionDesk(page, { emptyDesk: true })
+    await mock.mount()
+    await page.emulateMedia({ colorScheme: 'light' })
+    await page.goto('/decision-desk')
+    await expect(page.getByTestId('desk-tab-open')).toContainText('2')
+    await expect(page.getByTestId('desk-clear')).toHaveCount(0)
+    await expect(page.getByTestId('desk-empty')).toHaveText('Nothing waits here')
+    await expect(page.getByTestId('instance-pma').locator('.instance-item')).toHaveCount(2)
+    await expect(page.getByTestId('instance-pma').getByRole('button')).toHaveCount(0)
+    await shot(page, info, `desk-${width}-light`)
+    await page.getByRole('radio', { name: /^Decided/ }).click()
+    await expect(page.getByRole('link', { name: 'Decisions made on pma are listed there' })).toHaveAttribute('href', `${SIBLING}/decision-desk?view=decided`)
+    await shot(page, info, `decided-${width}-light`)
   })
 }
 
@@ -134,7 +159,8 @@ test('connect opens a top-level confirmation and a single-use callback clears th
   await page.setViewportSize({ width: 1440, height: 950 })
   const mock = await mockBand(page, { connected: false, sibling: 'ok' })
   await page.addInitScript(() => {
-    Object.assign(window, { __connectOpened: '' })
+    Object.assign(window, { __connectOpened: '', __connectClosed: false })
+    window.close = () => { (window as unknown as { __connectClosed: boolean }).__connectClosed = true }
     window.open = ((url: string) => { (window as unknown as { __connectOpened: string }).__connectOpened = String(url); return null }) as typeof window.open
   })
   const band = await openBand(page), row = band.getByTestId('instance-pma')
@@ -152,6 +178,7 @@ test('connect opens a top-level confirmation and a single-use callback clears th
   await page.goto(`/instances/connected#${fragment}`)
   await expect(page.getByText('Connected. You can close this tab.')).toBeVisible()
   expect(new URL(page.url()).hash).toBe('')
+  expect(await page.evaluate(() => (window as unknown as { __connectClosed: boolean }).__connectClosed)).toBe(true)
   expect(sent.some(url => url.includes(token))).toBe(false)
   expect(await page.content()).not.toContain(token)
   await shot(page, info, 'connected-1440')

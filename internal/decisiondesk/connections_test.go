@@ -130,6 +130,23 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 			t.Fatalf("summary disclosed %s", forbidden)
 		}
 	}
+
+	// Show all expands first lines only and retains exactly the home Desk's scope.
+	for range 6 {
+		f.ask(t, f.project, "carries_on", nil)
+	}
+	full := f.page(t, member, 100, nil)
+	w = request(tenant.Principal{}, "GET", "/api/decision-desk/owner-summary?limit=100", nil, sibling.Origin, token)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &summary) != nil || len(summary.Items) != len(full.Items) || summary.Counts.Open != full.Counts.Open {
+		t.Fatal("expanded summary differs from home Desk")
+	}
+	w = request(tenant.Principal{}, "GET", "/api/decision-desk/owner-summary", nil, sibling.Origin, token)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &summary) != nil || len(summary.Items) != 5 || summary.Counts.Open != full.Counts.Open {
+		t.Fatal("default summary is not bounded to five first lines")
+	}
+	if w = request(tenant.Principal{}, "GET", "/api/decision-desk/owner-summary?limit=101", nil, sibling.Origin, token); w.Code != 400 {
+		t.Fatal("summary limit was not bounded before work")
+	}
 	for _, origin := range []string{"", "https://evil.example"} {
 		w = request(tenant.Principal{}, "GET", "/api/decision-desk/owner-summary", nil, origin, token)
 		if w.Code != 403 || w.Header().Get("Access-Control-Allow-Origin") != "" {

@@ -159,6 +159,10 @@ const emptyCopy = computed(() => {
   if (scopeActive.value && scopeKind.value === 'lesson') return place ? `No lessons wait in ${place}.` : 'No lessons are waiting.'
   if (scopeActive.value && place) return `Nothing waits for you in ${place}`
   if (scopeActive.value) return 'Nothing in this view is waiting.'
+  if (!desk.allClear) {
+    const unavailable = elsewhere.reads.filter(row => row.state === 'unreachable').map(row => row.tag).join(', ')
+    return unavailable ? `Nothing waits here · ${unavailable} couldn't be reached` : 'Nothing waits here'
+  }
   return 'Nothing is waiting in the available sources.'
 })
 const showAllTo = computed(() => {
@@ -316,13 +320,13 @@ const silent = computed<DeskSource[]>(() => !desk.projection && desk.error && !u
 // AEON-1406: the empty Open tab. A minor source that did not answer gives B, never A. AEON-1631: the desk, its
 // questions or its approvals not answering, or a badge count beside an empty list, is never all clear.
 const emptyState = computed(() => filter.value === 'open' ? deskEmptyState({ reading: reading.value, open: visible.value.length, scoped: scopeActive.value, unanswered: silent.value, failed: failedLines.value.length > 0,
-  waiting: desk.count, checking: (loading.value || desk.loading) && retryPhase.value === 'idle' }) : null)
+  waiting: desk.hereCount, checking: (loading.value || desk.loading) && retryPhase.value === 'idle' }) : null)
 // Reading, all clear and a silent source share one frame, so switching between them moves nothing.
-const clearFrame = computed(() => !scopeActive.value && (emptyState.value === 'reading' || emptyState.value === 'clear' || emptyState.value === 'incomplete'))
+const clearFrame = computed(() => !scopeActive.value && (emptyState.value === 'reading' || desk.allClear && (emptyState.value === 'clear' || emptyState.value === 'incomplete')))
 const unansweredLine = computed(() => deskUnansweredLine(unanswered.value))
 // AEON-1631 (Tick): a desk that did not answer takes the list's first-row slot with the count the badge knows.
 const failedPanel = computed(() => (!desk.projection && !!desk.error) || emptyState.value === 'failed')
-const failedWords = computed(() => deskFailedWords(scopeActive.value ? null : desk.count, noticeDe.value))
+const failedWords = computed(() => deskFailedWords(scopeActive.value ? null : desk.hereCount, noticeDe.value))
 // In that frame the quiet line names the failed sources once; truncation and link lines stay listed below.
 // The failed panel already says the list did not load, so it lists nothing more.
 const listedLines = computed(() => failedPanel.value ? [] : clearFrame.value ? sourceLines.value.filter(line => !failedLines.value.some(failed => failed.text === line.text)) : sourceLines.value)
@@ -348,6 +352,9 @@ const refreshHint = computed(() => {
 })
 const refreshEscalated = computed(() => refreshHint.value === 'escalated')
 const lastGoodTime = computed(() => lastGoodAt.value === null ? '' : new Date(lastGoodAt.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }))
+// AEON-1700 is a separate slice. Keep the existing local sync words intact;
+// its current refresh slot already supplies the shared per-instance tooltip.
+const instanceSyncTip = computed(() => [`Here: ${lastGoodAt.value === null ? 'not checked yet' : `checked ${Math.max(0, Math.floor((now.value - lastGoodAt.value) / 1000))} s ago`}`, elsewhere.syncTooltip(now.value)].filter(Boolean).join('\n'))
 async function refresh() {
   if (!session.authenticationCurrent()) return
   const read = await desk.refresh()
@@ -757,7 +764,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
         </div>
         <!-- A narrow row sends feedback above the footer, outside the container's fixed-position containing block. -->
         <Teleport to="#app" :disabled="!narrowTabRow">
-          <div class="refresh-slot" :class="{ floating: narrowTabRow }" :style="{ '--toast-obstacle-bottom': `${refreshObstacleBottom}px` }" data-testid="desk-refresh-slot">
+          <div class="refresh-slot" :class="{ floating: narrowTabRow }" :style="{ '--toast-obstacle-bottom': `${refreshObstacleBottom}px` }" :data-tip="instanceSyncTip" data-testid="desk-refresh-slot">
             <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed\u00a0· retrying\u00a0· showing ${lastGoodTime}` }}</span>&nbsp;<span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
             <p v-else-if="stale" class="refresh-hint" role="status" data-testid="desk-stale"><span class="refresh-copy"><AppIcon name="history" :size="12" /><span>{{ failedWords.stale(lastGoodTime) }}</span>&nbsp;<span class="refresh-retry shown"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="tryAgain">{{ failedWords.retry }}</button></span></span></p>
           </div>
@@ -789,7 +796,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
       <div v-else-if="clearFrame" class="all-clear" :class="{ reading: emptyState === 'reading' }" :data-state="emptyState" data-testid="desk-clear">
         <span class="art" aria-hidden="true"><template v-if="emptyState !== 'reading'"><img class="light" :src="deskLight" alt="" width="840" height="560" decoding="async" loading="lazy"><img class="dark" :src="deskDark" alt="" width="840" height="560" decoding="async" loading="lazy"></template></span>
         <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />{{ desk.allClear ? 'Nothing waits for you' : 'Nothing waits here · other instances are shown below' }}</template></p>
-        <p class="quiet" role="status" data-testid="desk-unanswered"><template v-if="emptyState === 'incomplete'"><AppIcon name="clock" :size="14" /><span>{{ unansweredLine }}</span><span class="sep" aria-hidden="true">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
+        <p class="quiet" role="status" :data-tip="instanceSyncTip" data-testid="desk-unanswered"><template v-if="emptyState === 'incomplete'"><AppIcon name="clock" :size="14" /><span>{{ unansweredLine }}</span><span class="sep" aria-hidden="true">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
         <p v-if="emptyState === 'reading'" class="reading-note" role="status">Reading the desk…</p>
       </div>
       <p v-else-if="reading" class="empty-line" role="status"><AppIcon name="clock" :size="16" /><span>Reading the desk…</span></p>
@@ -852,14 +859,19 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
     <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :undo="undoLesson" :who="who" :ticket="ticketOf" :run-pending="runPending" :change="changeId || undefined" @recorded="recorded" @close="closed" />
     <DoctrineProposalDialog v-if="ruleEdit" :key="owner" :source="ruleEdit.source" :file="ruleEdit.file" :rule="ruleEdit.rule" :draft="ruleEdit.draft" @close="ruleEdit = undefined" @saved="editedRule" />
     <div v-if="filter === 'open'" class="desk-instances">
-      <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" />
+      <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" :variant="read.state === 'not connected' ? 'goals' : 'desk'" />
       <p v-if="elsewhere.discovery === 'unknown'">Other instances could not be read. <button type="button" class="linkish" @click="elsewhere.refresh(true)">Try again</button></p>
+    </div>
+    <div v-else class="desk-instance-history">
+      <a v-for="read in elsewhere.reads.filter(row => ['ok', 'reading', 'unreachable'].includes(row.state))" :key="read.tag" :href="`${read.origin}/decision-desk?view=decided`" target="_blank" rel="noopener noreferrer">Decisions made on {{ read.tag }} are listed there<AppIcon name="external" :size="13" /></a>
     </div>
   </main>
 </template>
 
 <style scoped>
 .definition-project-key { white-space: nowrap; overflow-wrap: normal; }
+.desk-instance-history { display: grid; }
+.desk-instance-history a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--ink-3); font-size: 13px; text-decoration: none; }
 /* AEON-1339: the Desk page as the approved rev 11 artifact draws it. */
 .scope-line { display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; min-height: 44px; margin: 0; font-size: 12px; color: var(--ink-3); }.scope-line a { color: var(--teal-ink); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }.scope-line a:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .desk-page { width: 100%; max-width: 1060px; margin: 0 auto; padding: 34px max(16px, min(4vw, 40px)) 72px; color: var(--ink); }

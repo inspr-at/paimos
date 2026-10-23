@@ -34,12 +34,12 @@ export async function readInstances(signal?: AbortSignal): Promise<DeskInstances
 }
 
 /** A sibling's answer, checked strictly: first lines only, links only into that sibling. */
-export function parseSummary(sibling: DeskSibling, body: unknown): ElsewhereSummary | null {
+export function parseSummary(sibling: DeskSibling, body: unknown, limit = SUMMARY_LINES): ElsewhereSummary | null {
   const raw = body as { instance?: unknown; items?: unknown; counts?: { open?: unknown; held?: unknown }; upcoming?: { label?: unknown } } | null
   if (!raw || raw.instance !== sibling.tag || !Array.isArray(raw.items)) return null
   const open = raw.counts?.open, held = raw.counts?.held
   if (!Number.isSafeInteger(open) || !Number.isSafeInteger(held) || (open as number) < 0 || (held as number) < 0 || (held as number) > (open as number)) return null
-  const lines = raw.items.slice(0, SUMMARY_LINES).flatMap((item: Record<string, unknown>) => {
+  const lines = raw.items.slice(0, Math.min(100, Math.max(1, limit))).flatMap((item: Record<string, unknown>) => {
     const id = text(item?.id, 64), title = text(item?.title, TITLE_MAX), href = typeof item?.href === 'string' ? item.href : ''
     if (!id || !title || !href.startsWith('/') || href.startsWith('//') || /[\\\r\n\t]/.test(href)) return []
     const link = new URL(href, sibling.origin)
@@ -78,21 +78,22 @@ async function boundedJSON(response: Response, limit: number): Promise<unknown> 
 
 export class ConnectionEnded extends Error {}
 /** This fetch bypasses api(): a sibling credential must never reach this server. */
-export async function readSibling(sibling: DeskSibling, token: string, signal?: AbortSignal): Promise<ElsewhereSummary> {
+export async function readSibling(sibling: DeskSibling, token: string, signal?: AbortSignal, limit = SUMMARY_LINES): Promise<ElsewhereSummary> {
   const timeout = AbortSignal.timeout(READ_TIMEOUT)
-  const response = await fetch(`${sibling.origin}/api/decision-desk/owner-summary`, {
+  const all = limit > SUMMARY_LINES
+  const response = await fetch(`${sibling.origin}/api/decision-desk/owner-summary${all ? '?limit=100' : ''}`, {
     credentials: 'omit', mode: 'cors', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
     headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   })
   if (response.status === 401 || response.status === 403) throw new ConnectionEnded('Connection ended')
   if (!response.ok) throw new Error(`${sibling.tag} answered ${response.status}`)
   let body: unknown
-  try { body = await boundedJSON(response, SIBLING_BODY_MAX) }
+  try { body = await boundedJSON(response, all ? 256_000 : SIBLING_BODY_MAX) }
   catch (error) {
     if (error instanceof Error && error.message === 'too much') throw new Error(`${sibling.tag} answered too much`)
     throw new Error(`${sibling.tag} answered an unknown shape`)
   }
-  const summary = parseSummary(sibling, body)
+  const summary = parseSummary(sibling, body, all ? 100 : SUMMARY_LINES)
   if (!summary) throw new Error(`${sibling.tag} answered an unknown shape`)
   return summary
 }

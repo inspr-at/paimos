@@ -28,8 +28,9 @@ The retired peek cookie is never accepted or issued; login/logout clear old copi
 
 The summary rechecks the active person's current authority and each native
 source's visibility, using the same Desk projection as the home page. It exposes
-at most five first lines (title, project key, asker, creation time and exact app
-link), total open/held counts, the first upcoming step and an as-of timestamp.
+five first lines by default (title, project key, asker, creation time and exact
+app link), expanding on request to at most 100 first lines with explicit partial
+coverage and a home-Desk link for larger sets, total open/held counts, the first upcoming step and an as-of timestamp.
 There is no context, answer, option, decision or write authority. Exact configured
 origins receive CORS for GET with Authorization, including preflight, without
 Access-Control-Allow-Credentials. A credential is also bound to its receiving origin.
@@ -58,6 +59,8 @@ handoff with the home URL in a fragment; the app rechecks the local person and
 configured origin before navigating. Sibling polling/notification discovery runs
 while the app is open; no server polls other instances in the background.
 
-The Goals line, confirmation and personal settings follow Tick spec v1, with
-the brief's explicit consolidated-count override. Other Desk surfaces reuse
-existing components pending the extended design round if no v2 arrives.
+The Goals line, confirmation and personal settings follow Tick spec v1. Tick
+v2 supplies consolidated count breakdowns, remote Desk/preview groups, the
+Decided-tab home links, notification copy and per-instance notification switches.
+The current local refresh tooltip includes each sibling; the separate AEON-1700
+sync-line slice must preserve that tooltip when combined by the coordinator.

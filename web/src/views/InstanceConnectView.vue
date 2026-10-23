@@ -40,7 +40,9 @@ watch(() => [owner.value, route.fullPath], async () => {
       if (turn !== generation) return
       if (!back) throw new Error('Connection could not be completed. Return and connect again.')
       returnTo.value = back; result.value = text('Connected. You can close this tab.', 'Verbunden. Dieser Tab kann geschlossen werden.')
-      if (window.opener) window.close()
+      // A script-opened top-level tab is closable even with noopener. A tab
+      // opened directly keeps the confirmation and its explicit return link.
+      window.close()
     } else {
       const origin = typeof route.query.origin === 'string' ? route.query.origin : '', state = typeof route.query.state === 'string' ? route.query.state : ''
       if (!/^[A-Za-z0-9_-]{43}$/.test(state)) throw new Error('Invalid connection request.')

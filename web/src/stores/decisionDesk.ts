@@ -120,7 +120,7 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   onScopeDispose(() => { stopWakes(); stopAccess(); invalidate() })
   const hereCount = computed(() => projection.value?.counts.open ?? null)
   const count = computed(() => hereCount.value === null ? null : hereCount.value + connections.count)
-  const countTip = computed(() => [hereCount.value === null ? 'Reading here' : `${hereCount.value} here`, ...connections.breakdown, ...(connections.discovery === 'unknown' ? ['Other instances could not be read'] : [])].join(' · '))
-  const allClear = computed(() => hereCount.value === 0 && connections.allClear)
+  const countTip = computed(() => [count.value === null ? 'Reading Decision Desk' : `${count.value} wait for you`, hereCount.value === null ? 'Reading here' : `${hereCount.value} here`, ...connections.breakdown, ...(connections.discovery === 'unknown' ? ['Other instances could not be read'] : [])].join(' · '))
+  const allClear = computed(() => hereCount.value === 0 && failures.value === 0 && connections.allClear)
   return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, hereCount, count, countTip, allClear }
 })

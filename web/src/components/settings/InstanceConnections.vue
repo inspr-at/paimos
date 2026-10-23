@@ -16,6 +16,7 @@ const issued = ref<IssuedConnection[]>([]), failed = ref(false), busy = ref('')
 const owner = computed(() => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
 let generation = 0, abort = new AbortController()
 const date = (value: string) => new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+const connectionState = (state: string) => ({ ok: 'Connected', reading: 'Checking', connecting: 'Confirm in the tab that opened', ended: 'Connection ended', unreachable: "Couldn't be reached", 'not connected': 'Not connected' } as Record<string, string>)[state] ?? ''
 async function load() {
   const who = owner.value, turn = generation
   try { const rows = await issuedConnections(abort.signal); if (turn === generation && who === owner.value) { issued.value = rows; failed.value = false } }
@@ -43,7 +44,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
   <SettingsCard :title="text('Other instances', 'Andere Instanzen')" icon="link" anchor="other-instances">
     <template #lead>{{ text('Read your waiting decisions here. Each decision opens on its home instance.', 'Wartende Entscheidungen werden hier angezeigt. Jede Entscheidung öffnet sich auf ihrer eigenen Instanz.') }}</template>
     <div v-for="row in store.reads" :key="row.tag" class="connection-row">
-      <span><b>{{ row.tag }}</b> · {{ host(row.origin) }}<small v-if="row.account">{{ text('connected as', 'verbunden als') }} {{ row.account }} · {{ text('since', 'seit') }} {{ date(row.connectedAt) }}<template v-if="row.summary"> · {{ text('last read', 'zuletzt gelesen') }} {{ date(row.summary.asOf) }}</template></small><small>{{ row.state }}</small></span>
+      <span><b>{{ row.tag }}</b> · {{ host(row.origin) }}<small v-if="row.account">{{ text('connected as', 'verbunden als') }} {{ row.account }} · {{ text('since', 'seit') }} {{ date(row.connectedAt) }}<template v-if="row.summary"> · {{ text('last read', 'zuletzt gelesen') }} {{ date(row.summary.asOf) }}</template></small><small>{{ connectionState(row.state) }}</small><label v-if="['ok', 'reading', 'unreachable'].includes(row.state)" class="instance-notify"><input type="checkbox" :checked="row.notify" @change="store.setNotify(row.tag, ($event.target as HTMLInputElement).checked)"><span>{{ text(`Notify me about ${row.tag}`, `Über ${row.tag} benachrichtigen`) }}</span></label></span>
       <button v-if="row.state === 'connecting'" type="button" class="btn sm" @click="store.cancel(row.tag)">{{ text('Cancel', 'Abbrechen') }}</button>
       <button v-else-if="row.state === 'not connected' || row.state === 'ended'" type="button" class="btn sm" @click="store.connect(row.tag)">{{ row.state === 'ended' ? text('Reconnect', 'Neu verbinden') : text('Connect', 'Verbinden') }}</button>
       <button v-else type="button" class="btn sm" @click="disconnect(row.tag)">{{ text('Disconnect', 'Trennen') }}</button>
@@ -67,5 +68,6 @@ onBeforeUnmount(() => { generation++; abort.abort() })
 .connection-row > span { min-width: 0; overflow-wrap: anywhere; }
 small { display: block; margin-top: 3px; color: var(--ink-3); font-size: 12px; }
 button { flex: none; min-height: 44px; }
+.instance-notify { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; }
 p { font-size: 13px; color: var(--ink-2); }
 </style>

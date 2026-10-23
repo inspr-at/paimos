@@ -31,7 +31,7 @@ const prefix = 'aeon.desk-connections.', grantKey = `${prefix}tenant:A.pma`
 const summary = (id = 'first', open = 1): ElsewhereSummary => ({ open, held: 0, upcoming: '', asOf: new Date().toISOString(), lines: open ? [{ id, kind: 'question', title: `Waiting ${id}`, projectKey: 'PRJ', askedBy: 'Agent', held: false, createdAt: new Date().toISOString(), url: `${sibling.origin}/decision-desk?item=q:${id}` }] : [] })
 let pinia: Pinia
 const storage = new Map<string, string>()
-let opened: ReturnType<typeof vi.fn>, notices: { title: string; onclick?: () => void; close: ReturnType<typeof vi.fn> }[]
+let opened: ReturnType<typeof vi.fn>, notices: { title: string; options?: NotificationOptions; onclick?: () => void; close: ReturnType<typeof vi.fn> }[]
 beforeEach(() => {
   storage.clear(); notices = []; session.identity = null
   vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) })
@@ -42,7 +42,7 @@ beforeEach(() => {
   vi.stubGlobal('Notification', class {
     static permission = 'granted'
     close = vi.fn()
-    constructor(public title: string) { notices.push(this) }
+    constructor(public title: string, public options?: NotificationOptions) { notices.push(this) }
   })
   pinia = createPinia(); setActivePinia(pinia)
   vi.mocked(readInstances).mockResolvedValue({ here: 'ppm', siblings: [sibling] })
@@ -105,7 +105,7 @@ it('shares one read, consolidated counts and home links across Goals, preview an
   await Promise.all([desk.refresh(), store.refresh(), store.refresh()])
   expect(readSibling).toHaveBeenCalledTimes(1)
   expect(desk.hereCount).toBe(2); expect(desk.count).toBe(3)
-  expect(desk.countTip).toBe('2 here · 1 on pma')
+  expect(desk.countTip).toBe('3 wait for you · 2 here · 1 on pma')
   expect(titlePrefix(desk.count)).toBe('(3) ')
   expect(await html(DeskPreview, {})).toContain('3 things for you')
   const goal = await html(GoalWaiting, { goals: [] })
@@ -149,19 +149,33 @@ it('retains dated unreachable results, clears ended results and drops late reads
 })
 
 it('notifies each newly observed sibling item once with the existing opt-in and opens its home instance', async () => {
+  vi.mocked(readSibling).mockImplementation(async () => summary('none', 0))
   const store = await start()
   store.noticeEnabled = true
   expect(notices).toHaveLength(0) // The first read establishes the baseline.
   vi.mocked(readSibling).mockImplementation(async () => summary('new'))
   await store.refresh(true); await store.refresh(true)
   expect(notices).toHaveLength(1)
+  expect(notices[0].title).toBe('New on pma: Waiting new')
+  expect(notices[0].options?.body).toBe('PRJ · decide on pma')
   notices[0].onclick?.()
   expect(opened).toHaveBeenCalledWith('https://pma.example/decision-desk?item=q:new', '_blank', 'noopener,noreferrer')
+  store.setNotify('pma', false)
+  vi.mocked(readSibling).mockImplementation(async () => summary('instance-opted-out'))
+  await store.refresh(true)
+  expect(notices).toHaveLength(1)
+  store.setNotify('pma', true)
   store.noticeEnabled = false
   vi.mocked(readSibling).mockImplementation(async () => summary('opted-out'))
   await store.refresh(true)
   expect(notices).toHaveLength(1)
   store.noticeEnabled = true; await store.refresh(true)
+  expect(notices).toHaveLength(1)
+  // Reload/reconnect retains the durable item claims.
+  session.identity = null; await settle(); session.identity = person('A'); await settle()
+  store.noticeEnabled = true
+  vi.mocked(readSibling).mockImplementation(async () => summary('new'))
+  await store.refresh(true)
   expect(notices).toHaveLength(1)
 })
 
