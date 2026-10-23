@@ -6,7 +6,7 @@
     "reviewer": "Tick",
     "status": "pending-linux-capture",
     "approvedAt": null,
-    "evidence": "LEAD-M AEON-1674 round-6 brief (2026-10-23)",
+    "evidence": "LEAD-M AEON-1674 round-8 brief (2026-10-23); Linux renderer/font and sixteen-state capture corrections",
     "states": [],
     "scope": "No current comparison authority and no cuts. Linux capture requires Tick review, LEAD publication as test-references-2, and explicit pins in the next round."
   },
@@ -329,7 +329,7 @@
       "id": "session-chat",
       "label": "Session Chat",
       "owner": "tests/visual/session-chat.spec.ts",
-      "fixture": "AEON-1438/1687 shared conversation: answered and waiting Desk cards; Today separator; latest sent message and receipt",
+      "fixture": "AEON-1438/1687 shared conversation subset: answered and waiting Desk cards; Today separator; latest sent message and receipt, all fully in the viewport",
       "profiles": [
         "phone",
         "desktop"
