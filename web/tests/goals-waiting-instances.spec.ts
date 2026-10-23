@@ -25,7 +25,7 @@ const keptGoal = {
   eta: { source: 'none', partial: false }, passed: false, states: { moving: 1, queued: 0, paused: 0, done: 0 }, done: false,
   stall: { stalled: false, since: iso(NOW) }, read_through: 1, generation: 1,
 }
-async function mockBand(page: Page, options: { connected?: boolean; sibling: Sibling; lines?: number; goal?: boolean; instances?: Sibling; desk?: 'items' | 'empty' }) {
+async function mockBand(page: Page, options: { connected?: boolean; sibling: Sibling; lines?: number; goal?: boolean; instances?: Sibling; desk?: 'items' | 'empty'; projectKey?: string }) {
   const reads = { sibling: 0, origins: [] as string[], cookie: false, bearer: false }
   let state = options.sibling
   let instances: Sibling = options.instances ?? 'ok'
@@ -63,7 +63,7 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
     return route.fulfill({ headers: cors, json: {
       instance: 'pma', counts: { open: lines, held: 0 }, as_of: iso(NOW),
       items: Array.from({ length: lines }, (_, index) => ({
-        id: `00000000-0000-4000-8000-0000000000a${index + 1}`, kind: 'question', project_key: 'PORTAL', asked_by: 'PORTAL', held: false, created_at: iso(NOW - HOUR),
+        id: `00000000-0000-4000-8000-0000000000a${index + 1}`, kind: 'question', project_key: options.projectKey ?? 'PORTAL', asked_by: 'PORTAL', held: false, created_at: iso(NOW - HOUR),
         title: index === 0 ? 'Deploy the new sign-in flow to the second test host?' : 'Confirm the second host’s backup before the window?',
         href: `/decision-desk?item=q:00000000-0000-4000-8000-0000000000a${index + 1}`,
       })),
@@ -178,12 +178,53 @@ test('unreachable results remain dated, ended results disappear, and connection 
   await shot(page, info, 'goals-390-ended')
 })
 
-test('every signed-in person can connect and unknown or disconnected coverage never claims an empty Desk', async ({ page }) => {
+test('every signed-in person can connect and unknown coverage never claims an empty Desk', async ({ page }) => {
   await mockBand(page, { connected: false, sibling: 'ok', instances: 'down', desk: 'empty' })
   await page.goto('/?view=goals')
   const band = page.getByRole('region', { name: 'Waiting on you' })
   await expect(band).toContainText('Other instances couldn’t be read')
   await expect(band).not.toContainText('Nothing waits on you')
+})
+
+test('an unconnected sibling contributes nothing to the empty Desk, Goals and preview', async ({ page }) => {
+  await mockBand(page, { connected: false, sibling: 'ok', desk: 'empty' })
+  await page.goto('/?view=goals')
+  const band = page.getByRole('region', { name: 'Waiting on you' })
+  await expect(band).toHaveClass(/is-clear/)
+  await expect(band).toContainText('Nothing waits on you')
+  await band.getByRole('button', { name: 'Not now', exact: true }).click()
+  await expect(band.getByTestId('instance-pma')).toHaveCount(0)
+  await expect(band).toContainText('Nothing waits on you')
+  await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()
+  const preview = page.getByRole('dialog', { name: 'Decision Desk preview', exact: true })
+  await expect(preview.locator('.dp-count')).toHaveText('Nothing for you')
+  await expect(preview).toContainText('Nothing waits on you.')
+  await page.keyboard.press('Escape')
+  await mockDecisionDesk(page, { emptyDesk: true })
+  await page.goto('/decision-desk')
+  await expect(page.getByTestId('desk-clear')).toBeVisible()
+  await expect(page.getByTestId('desk-empty')).toHaveCount(0)
+})
+
+test('phone status and project keys expose their full copy with text spacing', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 950 })
+  const projectKey = 'DATENSCHUTZGRUNDVERORDNUNG-VERANTWORTLICHKEITEN'
+  const mock = await mockBand(page, { sibling: 'ok', projectKey })
+  const band = await openBand(page), row = band.getByTestId('instance-pma')
+  await row.locator('.instance-action').click()
+  const project = row.locator('.instance-project')
+  await expect(project).toHaveCSS('white-space', 'nowrap')
+  await expect(project).toHaveAttribute('data-tip', projectKey)
+  await expect(project).toHaveAttribute('tabindex', '0')
+  await page.addStyleTag({ content: '.instance-copy { line-height: 2 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }' })
+  mock.set('down'); await page.clock.fastForward(30_000)
+  const copy = row.locator('.instance-copy')
+  await expect(copy).toContainText("couldn't be reached")
+  // Two-line clamping must retain a keyboard-accessible complete status.
+  expect(await copy.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+  await expect(copy).toHaveAttribute('tabindex', '0')
+  await expect(copy).toHaveAttribute('data-tip', /pma.*couldn't be reached.*showing/)
+  await copy.focus(); await expect(copy).toBeFocused()
 })
 
 // A browser proof is necessary for the handshake: unit tests cannot show that
@@ -221,7 +262,7 @@ test('connect opens a top-level confirmation and a single-use callback clears th
   expect(mock.reads.cookie).toBe(false)
 })
 
-for (const width of [1440, 390] as const) {
+for (const width of [1440, 1024, 390] as const) {
   test(`confirmation shows the account, keeps actions stable and Cancel shares nothing at ${width}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 950 })
     await mockBand(page, { connected: false, sibling: 'ok' })
@@ -230,13 +271,69 @@ for (const width of [1440, 390] as const) {
     await page.goto(`/instances/connect?origin=${encodeURIComponent(SIBLING)}&state=${'a'.repeat(43)}`)
     await expect(page.getByRole('heading', { name: 'Show your waiting decisions on pma?' })).toBeVisible()
     await expect(page.locator('.connect-account')).toContainText(me.name)
+    const switchAccount = page.getByRole('button', { name: 'Not you? Switch account', exact: true })
+    await expect(switchAccount).toHaveCSS('border-top-width', '0px')
+    await expect(switchAccount).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    const linkColor = await switchAccount.evaluate(el => {
+      const probe = document.createElement('span'); probe.style.color = 'var(--teal-ink)'; el.append(probe)
+      const color = getComputedStyle(probe).color; probe.remove(); return color
+    })
+    await expect(switchAccount).toHaveCSS('color', linkColor)
     const connect = page.getByRole('button', { name: 'Connect', exact: true }), cancel = page.getByRole('button', { name: 'Cancel', exact: true })
-    await expectStableControls({ controls: { connect, cancel }, scrollAreas: { card: page.locator('.connect-card') }, interactions: [
+    await expectStableControls({ controls: { connect, cancel, switchAccount }, scrollAreas: { card: page.locator('.connect-card') }, interactions: [
       { name: 'failed connect preserves actions', run: async () => { await connect.click(); await expect(page.getByRole('alert')).toBeVisible() } },
     ] })
     await shot(page, info, `confirm-${width}-light`)
     await page.emulateMedia({ colorScheme: 'dark' }); await shot(page, info, `confirm-${width}-dark`)
     await cancel.click(); await expect(page.getByText('Nothing was shared.')).toBeVisible()
     expect(writes).toBe(1)
+  })
+}
+
+for (const width of [1440, 1024, 390] as const) {
+  test(`long German account names and hosts remain readable at ${width}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 950 })
+    const account = 'Datenschutzbeauftragte für grenzüberschreitende Unternehmenszusammenarbeit', email = `${'datenschutz'.repeat(5)}@example.test`
+    const origin = `https://${'unternehmenszusammenarbeit'.repeat(2)}.example`
+    await mockBand(page, { connected: false, sibling: 'ok' })
+    await page.route('**/api/me', route => route.fulfill({ json: { principal: { ...me, name: account, email, kind: 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
+    await page.route('**/api/decision-desk/instances', route => route.fulfill({ json: { here: 'ppm', siblings: [{ tag: 'pma', origin }] } }))
+    await page.goto(`/instances/connect?origin=${encodeURIComponent(origin)}&state=${'a'.repeat(43)}`)
+    const card = page.locator('.connect-card'), name = page.locator('.connect-account b'), address = page.locator('.connect-account small')
+    await expect(name).toHaveText(account)
+    await expect(name).toHaveCSS('hyphens', 'auto')
+    await expect(name).toHaveCSS('white-space', 'nowrap')
+    await expect(name).toHaveAttribute('data-tip', account)
+    await expect(address).toHaveAttribute('data-tip', email)
+    await expect(page.locator('.connect-host')).toHaveAttribute('data-tip', new URL(origin).host)
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCSS('hyphens', 'auto')
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme })
+      expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      await name.focus(); await expect(name).toBeFocused()
+      await shot(page, info, `confirm-long-${width}-${theme}`)
+    }
+    await mockSettings(page, settingsData())
+    await page.route('**/api/decision-desk/connections', route => route.fulfill({ json: { connections: [{ id: 'c1', instance: 'pma', origin, created_at: iso(NOW), expires_at: iso(NOW + 90 * 86400_000) }] } }))
+    await page.addInitScript(({ key, origin, account, now }) => localStorage.setItem(key, JSON.stringify({ token: `desk_${'a'.repeat(8)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(12)}_${'b'.repeat(8)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(12)}_${'c'.repeat(43)}`, origin, account, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 90 * 86400_000).toISOString() })), { key: `aeon.desk-connections.t1:${me.id}.pma`, origin, account, now: NOW })
+    await page.goto('/settings?tab=personal')
+    const receiving = page.locator('#other-instances'), issuing = page.locator('#connected-instances')
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme })
+      for (const section of [receiving, issuing]) {
+        const host = section.locator('.connection-host')
+        await expect(host).toHaveCSS('white-space', 'nowrap')
+        await expect(host).toHaveAttribute('data-tip', new URL(origin).host)
+        await expect(host).toHaveAttribute('tabindex', '0')
+        await host.focus(); await expect(host).toBeFocused()
+        expect(await section.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      }
+      await expect(receiving.locator('.connection-account')).toHaveAttribute('data-tip', `connected as ${account}`)
+      await receiving.screenshot({ path: info.outputPath(`connections-long-${width}-${theme}.png`) })
+    }
+    const notice = receiving.getByRole('checkbox', { name: 'Notify me about pma' })
+    await expectStableControls({ controls: { notice: receiving.locator('.instance-notify'), disconnect: receiving.getByRole('button', { name: 'Disconnect', exact: true }) }, scrollAreas: { receiving }, interactions: [
+      { name: 'mute without moving actions', run: async () => { await notice.uncheck(); await expect(notice).not.toBeChecked() } },
+    ] })
   })
 }

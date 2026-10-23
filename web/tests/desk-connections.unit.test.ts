@@ -185,14 +185,38 @@ it('notifies each newly observed sibling item once with the existing opt-in and 
   expect(notices).toHaveLength(1)
 })
 
-it('treats undiscovered, disconnected and unreachable siblings as incomplete, and retries failed discovery', async () => {
+it('blocks unknown or unread grants but excludes disconnected siblings from all-clear', async () => {
   vi.mocked(readInstances).mockRejectedValueOnce(new Error('offline'))
   const store = await start(false)
   expect(store.discovery).toBe('unknown'); expect(store.allClear).toBe(false)
   await store.refresh()
-  expect(store.discovery).toBe('known'); expect(store.reads[0].state).toBe('not connected'); expect(store.allClear).toBe(false)
+  expect(store.discovery).toBe('known'); expect(store.reads[0].state).toBe('not connected'); expect(store.allClear).toBe(true)
+  store.connect('pma')
+  expect(store.reads[0].state).toBe('connecting'); expect(store.allClear).toBe(true)
+  store.cancel('pma')
+  storage.set(grantKey, JSON.stringify(grant()))
+  session.identity = null; await settle()
+  let finish!: (value: ElsewhereSummary) => void
+  vi.mocked(readSibling).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  session.identity = person('A'); await settle()
+  expect(store.reads[0].state).toBe('reading'); expect(store.allClear).toBe(false)
+  finish(summary('empty', 0)); await settle()
+  expect(store.allClear).toBe(true)
+  store.connect('pma')
+  expect(store.allClear).toBe(false) // Replacing an existing grant still needs a successful read.
+  store.cancel('pma'); expect(store.allClear).toBe(true)
+  vi.mocked(readSibling).mockRejectedValueOnce(new Error('offline'))
+  await store.refresh(true); expect(store.allClear).toBe(false)
+  vi.mocked(readSibling).mockRejectedValueOnce(new ConnectionEnded())
+  await store.refresh(true)
+  expect(store.reads[0].state).toBe('ended'); expect(store.allClear).toBe(true)
   session.identity = null; await settle()
   vi.mocked(readInstances).mockResolvedValue({ here: 'ppm', siblings: [] })
   session.identity = person('A'); await settle()
   expect(store.allClear).toBe(true)
+})
+
+it('keeps the checked age and its seconds unit together', async () => {
+  const store = await start()
+  expect(store.syncTooltip(store.reads[0].lastReadAt + 12_000)).toBe('pma: checked 12\u00a0s ago')
 })

@@ -29,6 +29,34 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 	f.m.WithInstances(config.Instances{Here: "ppm", Siblings: []config.Sibling{sibling}})
 	owner, member := f.person, f.reader
 	owner.BrowserSession, member.BrowserSession = true, true
+	// Risk: an unauthenticated summary request queues behind the tenant's
+	// writers (or turns an unknown tenant into a 500). Acquiring the fence is
+	// the barrier: it stays held until each response has completed. The request
+	// timeout only prevents a broken implementation from hanging the test.
+	t.Run("invalid credentials never wait for the tenant fence", func(t *testing.T) {
+		holder, err := f.d.Admin.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer holder.Rollback(t.Context())
+		if err := db.LockTenant(t.Context(), holder, owner.TenantID); err != nil {
+			t.Fatal(err)
+		}
+		for _, tid := range []string{owner.TenantID, "00000000-0000-4000-8000-000000000001"} {
+			t.Run(tid, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+				defer cancel()
+				r := httptest.NewRequest("GET", "/api/decision-desk/owner-summary", nil).WithContext(ctx)
+				r.Header.Set("Origin", sibling.Origin)
+				r.Header.Set("Authorization", "Bearer desk_"+tid+"_"+owner.ID+"_"+strings.Repeat("a", 43))
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "connection ended") {
+					t.Fatalf("invalid credential behind held fence: %d %s", w.Code, w.Body.String())
+				}
+			})
+		}
+	})
 	q := f.ask(t, f.project, "carries_on", nil)
 	other := f.ask(t, f.otherProject, "carries_on", nil)
 	// The member can read only one project. Own-person manual steps make the
@@ -196,6 +224,39 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 		t.Fatalf("expired grant: %d", w.Code)
 	}
 	token, _ = issue(member, strings.Repeat("e", 43))
+	// A new read transaction starts only after last_used_at has committed. Hold
+	// the tenant fence from that boundary through the response: a legitimate
+	// summary must read without reacquiring it. NOWAIT rejects a retained fence
+	// for the exact lock reason rather than relying on elapsed time.
+	t.Run("summary snapshot releases the write fence", func(t *testing.T) {
+		var holder pgx.Tx
+		defer func() {
+			if holder != nil {
+				_ = holder.Rollback(t.Context())
+			}
+		}()
+		ctx := db.WithTenantGuard(t.Context(), func(ctx context.Context, tx pgx.Tx, tid string) error {
+			var used bool
+			err := f.d.Admin.QueryRow(ctx, `SELECT last_used_at IS NOT NULL FROM desk_instance_connections WHERE tenant_id=$1 AND token_hash=$2`, tid, func() []byte { h := sha256.Sum256([]byte(token)); return h[:] }()).Scan(&used)
+			if err != nil || !used || holder != nil {
+				return err
+			}
+			holder, err = f.d.Admin.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			_, err = holder.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, tid)
+			return err
+		})
+		r := httptest.NewRequest("GET", "/api/decision-desk/owner-summary", nil).WithContext(ctx)
+		r.Header.Set("Origin", sibling.Origin)
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		if w.Code != http.StatusOK || holder == nil {
+			t.Fatalf("summary did not read independently of its write fence: %d %s (read barrier reached: %t)", w.Code, w.Body.String(), holder != nil)
+		}
+	})
 	// Commit an access change exactly between initial visibility setup and the
 	// handler's fence. This proves a pre-fence repeatable-read snapshot cannot
 	// keep old authority alive, without sleeps or a wall-clock interleaving.
