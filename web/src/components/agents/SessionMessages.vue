@@ -216,6 +216,9 @@ onBeforeUnmount(() => {
 .session-messages { min-width: 0; }
 /* One gap between every two items, whatever their kind (20 px, 16 px on phones). */
 .thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--thread-gap, 20px); margin: 0; padding: 0; list-style: none; }
+/* Keep markdown's markers as they were under the native outer list. */
+.thread :deep(ul) { list-style-type: circle; }
+.thread :deep(:is(ul, ol) ul) { list-style-type: square; }
 .day { justify-self: center; font-size: 12px; font-weight: 600; color: var(--ink-3); }
 /* Each message paints on its own: its actions sit above its hover strip, and the next item stays on top of both. */
 .msg { position: relative; isolation: isolate; min-width: 0; width: 100%; padding: 0; }
