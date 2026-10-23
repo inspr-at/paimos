@@ -24,16 +24,20 @@ import (
 // delivery goes dead, the receipt fails, the message leaves every read path and
 // one system notice reaches the sender (plus the recipient session's
 // coordinator). A late acknowledgement cannot move a failed receipt back.
-// Desk replies (AEON-1432) and person-to-session chat (AEON-1487) wait
-// through no_listener/deadline, including a crash before confirmation.
+// Desk replies (AEON-1432), person-to-session chat (AEON-1487) and enabled
+// pull assistants (AEON-1702) wait through online no_listener/deadline failures,
+// including a crash before confirmation. Pull retention is bounded separately.
 
 // Failure reasons written by the delivery guarantee. Adapter reasons written by
 // the routine dispatcher (http_error, transport_error, ...) remain valid too.
 const (
-	ReasonDeadline     = "deadline"
-	ReasonAttempts     = "attempts"
-	ReasonSessionEnded = "session_ended"
-	ReasonNoListener   = "no_listener"
+	ReasonDeadline          = "deadline"
+	ReasonAttempts          = "attempts"
+	ReasonSessionEnded      = "session_ended"
+	ReasonNoListener        = "no_listener"
+	ReasonPickupExpired     = "pickup_expired"
+	ReasonAssistantDisabled = "assistant_disabled"
+	ReasonAssistantRevoked  = "assistant_revoked"
 	// Managed hand-off failures (AEON-282), mapped by managedFailureReason.
 	ReasonUnavailable    = "unavailable"
 	ReasonTransportError = "transport_error"
@@ -88,7 +92,43 @@ func loadDeliverySettings(ctx context.Context, tx pgx.Tx) (DeliverySettings, err
 // receiptDeadlineSQL computes deliver_by for message $2. Only agents have a
 // delivery path to guarantee; a person reads messages in the app, so a message
 // to a person has no deadline. A sender's expires_at shortens the deadline.
-const receiptDeadlineSQL = `(SELECT CASE WHEN rp.kind<>'agent' THEN NULL ELSE LEAST(m.expires_at, m.created_at + make_interval(secs => CASE WHEN m.recipient_session_id IS NOT NULL THEN coalesce(s.session_deadline_seconds,300) ELSE coalesce(s.unbound_deadline_seconds,1800) END)) END
+// Pull assistants wait durably across suspended routine runs; only an explicit
+// sender expiry applies to deliver_by. Unacknowledged pull messages also have
+// a separate seven-day retention bound, independent of tenant online deadlines.
+// Binding-specific mode stays fixed across replacements.
+const pullRetentionDays = 7
+
+const pullInboxMessageSQL = `(m.recipient_session_id IS NULL AND (
+ EXISTS(SELECT 1 FROM principals ap WHERE ap.tenant_id=m.tenant_id AND ap.id=m.recipient_principal_id AND ap.messaging_only IS TRUE)
+ OR EXISTS(SELECT 1 FROM inbox_receipts ar JOIN inbox_message_targets at ON at.tenant_id=ar.tenant_id AND at.id=ar.target_id
+ WHERE ar.tenant_id=m.tenant_id AND ar.message_id=m.id AND at.target_kind='pull')
+ OR EXISTS(SELECT 1 FROM inbox_compat_messages ac JOIN inbox_message_deliveries ad ON ad.tenant_id=ac.tenant_id AND ad.message_id=ac.id
+ JOIN inbox_message_targets at ON at.tenant_id=ad.tenant_id AND at.id=COALESCE(ad.effective_target_id,ad.target_id)
+	WHERE ac.tenant_id=m.tenant_id AND ac.inbox_message_id=m.id AND at.target_kind='pull')
+	OR (NOT EXISTS(SELECT 1 FROM inbox_compat_messages ac WHERE ac.tenant_id=m.tenant_id AND ac.inbox_message_id=m.id)
+	AND EXISTS(SELECT 1 FROM inbox_message_targets at WHERE at.tenant_id=m.tenant_id AND at.principal_id=m.recipient_principal_id
+	AND at.target_kind='pull' AND (at.enabled OR NOT EXISTS(SELECT 1 FROM inbox_message_targets active
+ WHERE active.tenant_id=m.tenant_id AND active.principal_id=m.recipient_principal_id AND active.enabled))))))`
+
+// m is the message, pn.now is the injected/server clock. Rotation is healthy
+// while another usable inbox key exists. A retired target version stays valid
+// while its address has an enabled successor; disabling the address fails fast.
+const pullFailureReasonSQL = `(SELECT CASE
+ WHEN ap.status<>'active' OR ap.linked_to IS NOT NULL THEN 'assistant_disabled'
+ WHEN NOT coalesce(ap.messaging_only,false) AND NOT EXISTS(SELECT 1 FROM inbox_message_targets active
+ WHERE active.tenant_id=m.tenant_id AND active.principal_id=m.recipient_principal_id AND active.enabled
+ AND (NOT EXISTS(SELECT 1 FROM inbox_compat_messages ac WHERE ac.tenant_id=m.tenant_id AND ac.inbox_message_id=m.id)
+ OR EXISTS(SELECT 1 FROM inbox_receipts ar JOIN inbox_message_targets bound ON bound.tenant_id=ar.tenant_id AND bound.id=ar.target_id
+ WHERE ar.tenant_id=m.tenant_id AND ar.message_id=m.id AND bound.project_id=active.project_id AND bound.address=active.address AND bound.role=active.role))) THEN 'assistant_disabled'
+ WHEN EXISTS(SELECT 1 FROM agent_keys k WHERE k.tenant_id=m.tenant_id AND k.principal_id=ap.id)
+ AND NOT EXISTS(SELECT 1 FROM agent_keys k WHERE k.tenant_id=m.tenant_id AND k.principal_id=ap.id
+ AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>pn.now)
+ AND (coalesce(k.full_access,false) OR 'inbox.read'=ANY(k.scopes))) THEN 'assistant_revoked'
+ WHEN m.expires_at<=pn.now THEN 'deadline'
+ WHEN m.created_at+interval '168 hours'<=pn.now THEN 'pickup_expired'
+ ELSE '' END FROM principals ap WHERE ap.tenant_id=m.tenant_id AND ap.id=m.recipient_principal_id)`
+
+const receiptDeadlineSQL = `(SELECT CASE WHEN rp.kind<>'agent' THEN NULL WHEN ` + pullInboxMessageSQL + ` THEN m.expires_at ELSE LEAST(m.expires_at, m.created_at + make_interval(secs => CASE WHEN m.recipient_session_id IS NOT NULL THEN coalesce(s.session_deadline_seconds,300) ELSE coalesce(s.unbound_deadline_seconds,1800) END)) END
  FROM inbox_messages m JOIN principals rp ON rp.tenant_id=m.tenant_id AND rp.id=m.recipient_principal_id
  LEFT JOIN inbox_delivery_settings s ON s.tenant_id=m.tenant_id WHERE m.id=$2::uuid)`
 
@@ -247,12 +287,13 @@ func FailSessionMessages(ctx context.Context, tx pgx.Tx, tenantID, sessionID str
 // FailMessage is the one terminal "not delivered" transition, for every caller
 // (the sweeper, session end, the attempt cap, managed delivery that gives up).
 // In the caller's transaction it locks the message, and when it is still
-// unacknowledged with a queued receipt that has a deadline it: marks the
+// unacknowledged with a queued receipt that has a deadline (or an expired or
+// disabled/revoked pull lifecycle) it: marks the
 // delivery dead with reason, fails the receipt, hides the message from every
 // read path, releases drain leases, appends inbox.receipt_failed and
 // inbox.delivery_failed (System), and writes the System notice to the sender
 // plus the coordinator copy. It returns false and changes nothing otherwise
-// (already terminal, acknowledged, or a legacy message without a deadline),
+// (already terminal, acknowledged, or a non-pull legacy message without a deadline),
 // so every caller is idempotent. The caller must not set acked_at first.
 // reason is deadline, attempts, session_ended, no_listener or an adapter
 // reason allowed by inbox_message_deliveries_reason_check.
@@ -276,6 +317,10 @@ const liveLeaseSQL = `SELECT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOI
  OR EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.message_id=$1::uuid AND h.completed_at IS NULL AND h.released_at IS NULL AND h.leased_at>clock_timestamp()-interval '2 minutes')`
 
 func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respectLease bool) (bool, error) {
+	return failMessageAt(ctx, tx, messageID, reason, respectLease, nil)
+}
+
+func failMessageAt(ctx context.Context, tx pgx.Tx, messageID, reason string, respectLease bool, now *time.Time) (bool, error) {
 	// Lock order (AEON-280): the bound session before the message. KEY SHARE
 	// waits only for a close (FOR UPDATE) and never blocks a pull or an ack.
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM harness_sessions WHERE id=(SELECT recipient_session_id FROM inbox_messages WHERE id=$1::uuid) FOR KEY SHARE`, messageID); err != nil {
@@ -295,13 +340,26 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
 	if err != nil || acked != nil {
 		return false, err
 	}
+	var pull bool
+	if err := tx.QueryRow(ctx, `SELECT `+pullInboxMessageSQL+` FROM inbox_messages m WHERE m.id=$1::uuid`, messageID).Scan(&pull); err != nil {
+		return false, err
+	}
+	if pull {
+		// Recheck lifecycle and retention under the final message lock. The pull
+		// sweeper also holds the tenant fence used by key/target access changes.
+		if err := tx.QueryRow(ctx, `SELECT `+pullFailureReasonSQL+` FROM inbox_messages m
+ CROSS JOIN (SELECT coalesce($2::timestamptz,clock_timestamp()) AS now) pn WHERE m.id=$1::uuid`, messageID, now).Scan(&reason); err != nil || reason == "" {
+			return false, err
+		}
+	}
 	// Desk answers wait for pickup rather than failing because the agent is
 	// offline. This marker is written only by RecordDeskReply, not by ordinary
 	// sends (whose compat keys are digests). Session-end routing and real adapter
 	// failures keep their existing terminal semantics.
-	if reason == ReasonNoListener || reason == ReasonDeadline {
+	if !pull && (reason == ReasonNoListener || reason == ReasonDeadline) {
 		var waits bool
-		if err := tx.QueryRow(ctx, `SELECT ((`+personSessionChatSQL+`) AND ($2='no_listener' OR m.expires_at IS NULL OR m.expires_at>clock_timestamp())) OR EXISTS(SELECT 1 FROM inbox_compat_messages c
+		if err := tx.QueryRow(ctx, `SELECT ((`+personSessionChatSQL+`) AND ($2='no_listener' OR m.expires_at IS NULL OR m.expires_at>clock_timestamp()))
+ OR ((`+pullInboxMessageSQL+`) AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp())) OR EXISTS(SELECT 1 FROM inbox_compat_messages c
  WHERE c.inbox_message_id=m.id AND c.key_digest='desk/'||c.id::text) FROM inbox_messages m WHERE m.id=$1::uuid`, messageID, reason).Scan(&waits); err != nil || waits {
 			return false, err
 		}
@@ -309,7 +367,7 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
 	var state string
 	var deadline *time.Time
 	err = tx.QueryRow(ctx, `SELECT state,deliver_by FROM inbox_receipts WHERE message_id=$1::uuid`, messageID).Scan(&state, &deadline)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (state != "queued" || deadline == nil)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (state != "queued" || deadline == nil && !pull)) {
 		return false, nil
 	}
 	if err != nil {
@@ -322,9 +380,18 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
 		}
 	}
 	var deliveryID *string
+	// Delivery rows retain their existing, strictly constrained transport
+	// reasons. The receipt, failure event and sender notice carry the precise
+	// pull lifecycle reason without changing older writers' schema contract.
+	deliveryReason := reason
+	if reason == ReasonPickupExpired {
+		deliveryReason = ReasonDeadline
+	} else if reason == ReasonAssistantDisabled || reason == ReasonAssistantRevoked {
+		deliveryReason = ReasonUnavailable
+	}
 	err = tx.QueryRow(ctx, `UPDATE inbox_message_deliveries d SET state='dead',reason=$2,lease_token=NULL,lease_until=NULL
  FROM inbox_compat_messages c WHERE c.tenant_id=d.tenant_id AND c.id=d.message_id AND c.inbox_message_id=$1::uuid AND d.state IN ('pending','blocked')
- RETURNING d.id::text`, messageID, reason).Scan(&deliveryID)
+ RETURNING d.id::text`, messageID, deliveryReason).Scan(&deliveryID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, err
 	}
@@ -445,6 +512,12 @@ func failureText(reason string) string {
 		return "the session ended before it picked the message up"
 	case ReasonNoListener:
 		return "nothing was listening for it"
+	case ReasonPickupExpired:
+		return fmt.Sprintf("not picked up within %d days", pullRetentionDays)
+	case ReasonAssistantDisabled:
+		return "the assistant is disabled"
+	case ReasonAssistantRevoked:
+		return "the assistant's inbox keys were revoked or expired"
 	case ReasonUnavailable:
 		return "the managed session could not take it"
 	case ReasonTransportError:
