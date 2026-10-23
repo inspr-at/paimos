@@ -1,0 +1,618 @@
+{
+  "version": 1,
+  "ticket": "AEON-1683",
+  "package": "P11",
+  "status": "replacements-proven-cuts-planned",
+  "baseline": "scripts/test-prune/baseline.json",
+  "baselineSha256": "e017c08a8cbad7451c9c1615a98f03cb10de1f1c85bef0d561c86fec1faaafc0",
+  "before": 493,
+  "targetCeiling": 22,
+  "plannedAfter": 450,
+  "unchangedSpecs": [
+    "tests/aeon-635.spec.ts",
+    "tests/delivery-arion-v5.spec.ts",
+    "tests/delivery-building.spec.ts",
+    "tests/delivery-numbers.spec.ts",
+    "tests/delivery-polish.spec.ts",
+    "tests/delivery-rating.spec.ts",
+    "tests/delivery-simple.spec.ts",
+    "tests/delivery-tab-switch.spec.ts",
+    "tests/deploy-target.spec.ts",
+    "tests/footer-release-pill.spec.ts",
+    "tests/performance.spec.ts",
+    "tests/policies-ladders-moved.spec.ts",
+    "tests/policies-rules.spec.ts",
+    "tests/portal-public.spec.ts",
+    "tests/portal-releases.spec.ts",
+    "tests/portal-roadmap.spec.ts",
+    "tests/release-codenames.spec.ts",
+    "tests/release-groups.spec.ts",
+    "tests/release-header.spec.ts",
+    "tests/release-historic-tenant.spec.ts",
+    "tests/release-historic.spec.ts",
+    "tests/release-own-tenant.spec.ts",
+    "tests/release-picker.spec.ts",
+    "tests/release-presentation.spec.ts",
+    "tests/release-switches.spec.ts",
+    "tests/release-tenant-notes.spec.ts",
+    "tests/release-ticket-links.spec.ts",
+    "tests/release-update-notice.spec.ts",
+    "tests/releases.spec.ts",
+    "tests/reserved-versions.spec.ts",
+    "tests/status-time.spec.ts",
+    "tests/usage-accounts.spec.ts",
+    "tests/usage-dashboard.spec.ts",
+    "tests/version-reveal.spec.ts",
+    "tests/webcore-recovery.spec.ts"
+  ],
+  "unchangedMapping": "Every frozen browser identity in unchangedSpecs maps to itself, retaining its tier and assertions. No protected original identity is cut or demoted.",
+  "specs": [
+    {
+      "file": "tests/status-icons.spec.ts",
+      "before": 12,
+      "plannedAfter": 5,
+      "replacement": "browser:tests/status-icons.spec.ts:AEON-1683: live and static status icons respect native focus and reduced motion without moving controls",
+      "retainedOriginalKeys": [
+        "browser:tests/status-icons.spec.ts:AEON-1362 bar form: diagonal stripes slide only live or under the pointer; Cancelled is one slash, never stripes",
+        "browser:tests/status-icons.spec.ts:AEON-1362 every one-off in the status menu (light): timings, marks only, base never blanks, ends static, keyboard",
+        "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 390px light: diagonal slide, one-offs once per entry, no shift",
+        "browser:tests/status-icons.spec.ts:AEON-1362 slides pause off-screen and in a hidden tab"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 bar form: diagonal stripes slide only live or under the pointer; Cancelled is one slash, never stripes",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1362 bar form: diagonal stripes slide only live or under the pointer; Cancelled is one slash, never stripes"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 budget: 24 sliding icons cost at most 1 ms of main-thread time per frame",
+          "disposition": "approved-retirement",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1683: live and static status icons respect native focus and reduced motion without moving controls"
+          ],
+          "approval": "AEON-1670-2026-10-22",
+          "riskRelinquished": "No 1 ms/frame correctness guarantee on a shared runner; physical motion behavior survives."
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 every one-off in the status menu (dark): timings, marks only, base never blanks, ends static, keyboard",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1362 every one-off in the status menu (light): timings, marks only, base never blanks, ends static, keyboard"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 every one-off in the status menu (light): timings, marks only, base never blanks, ends static, keyboard",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1362 every one-off in the status menu (light): timings, marks only, base never blanks, ends static, keyboard"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 1440px dark: diagonal slide, one-offs once per entry, no shift",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1683: live and static status icons respect native focus and reduced motion without moving controls"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 1440px light: diagonal slide, one-offs once per entry, no shift",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1683: live and static status icons respect native focus and reduced motion without moving controls"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 390px dark: diagonal slide, one-offs once per entry, no shift",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1683: live and static status icons respect native focus and reduced motion without moving controls"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 390px light: diagonal slide, one-offs once per entry, no shift",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 390px light: diagonal slide, one-offs once per entry, no shift"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 960px dark: diagonal slide, one-offs once per entry, no shift",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1683: live and static status icons respect native focus and reduced motion without moving controls"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 960px light: diagonal slide, one-offs once per entry, no shift",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1683: live and static status icons respect native focus and reduced motion without moving controls"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 reduced motion: nothing slides and no one-off plays",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1683: live and static status icons respect native focus and reduced motion without moving controls"
+          ]
+        },
+        {
+          "source": "browser:tests/status-icons.spec.ts:AEON-1362 slides pause off-screen and in a hidden tab",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/status-icons.spec.ts:AEON-1362 slides pause off-screen and in a hidden tab"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "tests/portal-admin.spec.ts",
+      "before": 3,
+      "plannedAfter": 1,
+      "replacement": "browser:tests/portal-admin.spec.ts:AEON-1683: portal publishing and moderation retain the current binding after a stale write",
+      "retainedOriginalKeys": [],
+      "mappings": [
+        {
+          "source": "browser:tests/portal-admin.spec.ts:a stale release-history publish reloads the link that is there now",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/portal-admin.spec.ts:AEON-1683: portal publishing and moderation retain the current binding after a stale write"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-admin.spec.ts:portal settings publish, moderate and hide at 1600",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/portal-admin.spec.ts:AEON-1683: portal publishing and moderation retain the current binding after a stale write"
+          ]
+        },
+        {
+          "source": "browser:tests/portal-admin.spec.ts:portal settings publish, moderate and hide at 390",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/portal-admin.spec.ts:AEON-1683: portal publishing and moderation retain the current binding after a stale write"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "tests/delivery-flow-modes.spec.ts",
+      "before": 25,
+      "plannedAfter": 9,
+      "replacement": "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time",
+      "retainedOriginalKeys": [
+        "browser:tests/delivery-flow-modes.spec.ts:a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (de)",
+        "browser:tests/delivery-flow-modes.spec.ts:a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (en)",
+        "browser:tests/delivery-flow-modes.spec.ts:a release no record has reported on says \"not recorded\" in the same four rows",
+        "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data",
+        "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)",
+        "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)",
+        "browser:tests/delivery-flow-modes.spec.ts:with motion \u203a Replay opens at the start of the latest release and auto-plays once per session",
+        "browser:tests/delivery-flow-modes.spec.ts:without a recorded run every mode shows the empty state and no sample data, until the first run is recorded"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:Compare races release 126 from step a against the Arion target on one axis",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:Flow modes at 1440 dark en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:Flow modes at 1440 light de keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:Flow modes at 1440 light en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:Flow modes at 400 dark en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:Flow modes at 400 light en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:Live reads the recorded runs, follows a server hint, and keeps the time the person is viewing",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:Replay under reduced motion shows the run still; the handle and Shift+arrows move the time",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (de)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (de)"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (en)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (en)"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:a release no record has reported on says \"not recorded\" in the same four rows",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:a release no record has reported on says \"not recorded\" in the same four rows"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 1024 dark sits under the mode controls without sample data",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 1024 light sits under the mode controls without sample data",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 1440 dark sits under the mode controls without sample data",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 1440 light sits under the mode controls without sample data",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 dark sits under the mode controls without sample data",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 dark en)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)",
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 light en)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)",
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 dark en)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)",
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 dark en)",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)",
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:with motion \u203a Replay opens at the start of the latest release and auto-plays once per session",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:with motion \u203a Replay opens at the start of the latest release and auto-plays once per session"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-modes.spec.ts:without a recorded run every mode shows the empty state and no sample data, until the first run is recorded",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-modes.spec.ts:without a recorded run every mode shows the empty state and no sample data, until the first run is recorded"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "tests/delivery-ui.spec.ts",
+      "before": 17,
+      "plannedAfter": 6,
+      "replacement": "browser:tests/delivery-ui.spec.ts:AEON-1683: Delivery retains failed rows and drafts, retries, and binds policy Undo to its project",
+      "retainedOriginalKeys": [
+        "browser:tests/delivery-ui.spec.ts:a later hold on a lifted row can be lifted again",
+        "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+        "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en",
+        "browser:tests/delivery-ui.spec.ts:delivery loading, empty, unavailable and error replace one slot; readers have no management actions",
+        "browser:tests/delivery-ui.spec.ts:shadow delivery rounds show holds without moving delivery controls"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:a failed refresh keeps the delivery rows and notes the failure",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:AEON-1683: Delivery retains failed rows and drafts, retries, and binds policy Undo to its project"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:a later hold on a lifted row can be lifted again",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:a later hold on a lifted row can be lifted again"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1024 dark de",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1024 dark en",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1024 light de",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1024 light en",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 dark de",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 dark en",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light de",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 dark de",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 dark en",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light de",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 1440 light en",
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery and review card keep controls still at 390 light en"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:delivery loading, empty, unavailable and error replace one slot; readers have no management actions",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:delivery loading, empty, unavailable and error replace one slot; readers have no management actions"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:failed writes stay honest; project reset offers scope-bound Undo and uses captured revisions",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:AEON-1683: Delivery retains failed rows and drafts, retries, and binds policy Undo to its project"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-ui.spec.ts:shadow delivery rounds show holds without moving delivery controls",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-ui.spec.ts:shadow delivery rounds show holds without moving delivery controls"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "tests/delivery-flow-lanes.spec.ts",
+      "before": 11,
+      "plannedAfter": 4,
+      "replacement": "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls",
+      "retainedOriginalKeys": [
+        "browser:tests/delivery-flow-lanes.spec.ts:a 15 min window at a phone overview edge keeps both handles draggable",
+        "browser:tests/delivery-flow-lanes.spec.ts:lanes zoom, pan and move the time without moving a control, and a click never moves the time",
+        "browser:tests/delivery-flow-lanes.spec.ts:panning an incident to the right edge keeps its caption inside the lane frame"
+      ],
+      "mappings": [
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:Flow lanes at 1440 dark en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:Flow lanes at 1440 light de keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:Flow lanes at 1440 light en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:Flow lanes at 400 dark de keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:Flow lanes at 400 dark en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:Flow lanes at 400 light en keep controls still",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:a 15 min window at a phone overview edge keeps both handles draggable",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:a 15 min window at a phone overview edge keeps both handles draggable"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:lanes zoom, pan and move the time without moving a control, and a click never moves the time",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:lanes zoom, pan and move the time without moving a control, and a click never moves the time"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:panning an incident to the right edge keeps its caption inside the lane frame",
+          "disposition": "retained",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:panning an incident to the right edge keeps its caption inside the lane frame"
+          ]
+        },
+        {
+          "source": "browser:tests/delivery-flow-lanes.spec.ts:the overview brush pans and resizes the window, and its playhead moves the time",
+          "disposition": "consolidated",
+          "destinations": [
+            "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
+          ]
+        }
+      ]
+    }
+  ],
+  "evidence": "docs/features/test-prune-p11.md",
+  "blockers": [
+    "Tick visual approval and immutable reference digests remain pending; protected cuts stay closed.",
+    "Unexecuted runtime recipients keep their browser donors; the new stream-lifetime test is additive until its runtime execution and negative control pass.",
+    "Remote static checks are paused at night; performance config and affected unit suites require hosted CI or an approved remote entry point."
+  ]
+}
