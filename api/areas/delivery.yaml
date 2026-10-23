@@ -123,7 +123,7 @@ components:
         via_queue: {type: boolean}
         checks_passed: {type: boolean}
         review_ok: {type: boolean}
-        flags: {type: array, items: {type: string, enum: [no_queue, checks_missing, no_review, direct_push]}}
+        flags: {type: array, items: {type: string, enum: [no_queue, checks_missing, no_review, direct_push, before_evidence_capture]}}
         at: {type: string, format: date-time}
         alerted_at: {type: [string, 'null'], format: date-time, description: 'Null until an alert can be accepted by an authorized project lead. Unlinked merges remain visible in the workspace audit.'}
     DeliveryAuditPage:
