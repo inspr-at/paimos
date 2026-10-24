@@ -3704,8 +3704,8 @@
         ],
         "machine": {
           "runnerLabel": "agm2",
-          "cpuModel": null,
-          "cpuFlagsSHA256": null
+          "cpuModel": "AMD Ryzen 9 7950X3D 16-Core Processor",
+          "cpuFlagsSHA256": "16b827bae6f3a8de1772e04d51d251f0bb3c4207f872fddff31d25f64a16d290"
         }
       },
       "agm2-skia-runtime-disabled": {
@@ -3725,8 +3725,8 @@
         ],
         "machine": {
           "runnerLabel": "agm2",
-          "cpuModel": null,
-          "cpuFlagsSHA256": null
+          "cpuModel": "AMD Ryzen 9 7950X3D 16-Core Processor",
+          "cpuFlagsSHA256": "16b827bae6f3a8de1772e04d51d251f0bb3c4207f872fddff31d25f64a16d290"
         }
       }
     },
