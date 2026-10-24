@@ -51,6 +51,8 @@ export const listRoutineWorkKinds = (projectId: string, lang: string, signal?: A
 const routineRunsPath = (id: string, ...rest: string[]) => ['/recurrences', encodeURIComponent(id), 'runs', ...rest.map(encodeURIComponent)].join('/')
 export const listRoutineRuns = (id: string, before?: string, signal?: AbortSignal) => json<unknown>(routineRunsPath(id) + query({ before, limit: 20 }), 'GET', undefined, {}, signal)
 export const getRoutineRun = (id: string, runId: string, signal?: AbortSignal) => json<unknown>(routineRunsPath(id, runId), 'GET', undefined, {}, signal)
+export interface RoutineAgentResult { run_id: string; status: 'succeeded' | 'failed'; node_id?: string; cost_microusd?: number }
+export const getRoutineAgentResult = (id: string, runId: string, signal?: AbortSignal) => json<RoutineAgentResult | null>(routineRunsPath(id, runId, 'agent-result'), 'GET', undefined, {}, signal)
 export const resolveRoutineRoute = (role: string, projectId: string, signal?: AbortSignal) => json<{ role: string; profile: import('./modelsSimple').RegistryProfile | null; owner_required: boolean }>(`/models/resolve${query({ role, project_id: projectId })}`, 'GET', undefined, {}, signal)
 
 export class StaleRequestError extends Error {}

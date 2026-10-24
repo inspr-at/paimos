@@ -140,6 +140,9 @@ for (const width of [1440, 1024, 390]) {
       const sheet = page.getByRole('dialog', { name: 'Capacity' })
       await page.locator('.agents-page .cap-line').click()
       await expect(sheet).toBeVisible()
+      // Descendant controls do not enumerate their sheet's entry animation.
+      // Establish the open frame before measuring option-induced movement.
+      await sheet.evaluate(async element => { await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))) })
       // The sheet may be the first to show the mono face; its swap is the page loading, not a step.
       await page.evaluate(() => document.fonts.ready)
       await expectStableControls({

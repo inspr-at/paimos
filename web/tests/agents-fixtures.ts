@@ -6,6 +6,7 @@
 import type { Page, Route } from '@playwright/test'
 import { defaultSchedule, type CapacityWorld } from './capacity-fixtures'
 import type { QuotaOutlook } from '../src/lib/quotaOutlook'
+import { assistantDeskLink, unavailableAssistantFacts, type Assistant, type AssistantEvent, type AssistantFacts } from '../src/lib/assistants'
 
 export interface AgentWorld {
   me: string
@@ -130,6 +131,9 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
+    // The Agents page also reads hosted identities. A session-only world has
+    // none; a later mockAssistants route can supply its explicit identities.
+    if (path === '/api/assistants' && method === 'GET') return route.fulfill({ json: { assistants: [] } })
     if (path === '/api/agents/plan' && method === 'GET') {
       const stored = options.workingPreference?.()
       const running: Record<string, number> = {}
@@ -252,7 +256,7 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     if (path === '/api/decision-desk/projection') {
       const now = (options.now ?? Date.now)()
       const items = [
-        ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/decision-desk?item=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
+        ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, asked_by: { id: a.agent_principal_id, name: a.agent_name ?? a.agent_principal_id }, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/decision-desk?item=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
         ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/decision-desk?item=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),
       ].sort((a, b) => {
         const bucket = (i: typeof a) => i.held ? i.kind === 'approval' ? 0 : 1 : 2
@@ -370,3 +374,74 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
 // write on the page reads it again (AEON-449): compare the count before and after.
 export const sessionListReads = (calls: { path: string; method: string; query?: URLSearchParams }[]) =>
   calls.filter(call => call.method === 'GET' && call.path === '/api/harness-sessions' && call.query?.get('view') === 'current').length
+
+// Tick §10. Runtime metrics stay in test fixtures until B/C/D have real reads.
+// A-only browser captures show their unavailable state, rather than claim that
+// these future facts came from a service which has not shipped.
+export function assistantEvidence(now: number, owner: string) {
+  const amy: Assistant = { principal_id: agent(5), owner_person_id: owner, status: 'active', revision: 1, kind: 'assistant', principal_kind: 'agent', display_name: 'Amy', vendor: 'grok', messaging_only: true, policy: { allowed_projects: ['p-aeon', 'p-pharos'], allowed_scopes: ['nodes.read', 'nodes.write', 'knowledge.write', 'inbox.read', 'inbox.send', 'inbox.receipt'], weekly_budget: { amount: '10', unit: 'USD' }, outward_action_rule: 'approval_required', never_ask_person_for_secrets_or_manual_steps: true } }
+  const scout: Assistant = { ...amy, principal_id: agent(9), display_name: 'Scout', policy: { ...amy.policy, allowed_projects: ['p-aeon'] } }
+  const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
+  const facts: Record<string, AssistantFacts> = {
+    [amy.principal_id]: { ...unavailableAssistantFacts(), adapter: { state: 'ok', lastReceipt: ago(1) }, spend: { amount: '3.20', daily: Array.from({ length: 7 }, (_, n) => ({ day: String(n + 1), amount: n === 4 ? '3.20' : '0' })) }, approvals: [1, 2].map(n => ({ id: `action-${n}`, title: n === 1 ? 'Send the research summary' : 'Publish the knowledge entry', target: n === 1 ? 'PHAROS' : 'AEON', at: ago(n * 3), href: assistantDeskLink(amy.principal_id) })), routines: [1, 2, 3].map(n => ({ id: `routine-${n}`, projectId: 'p-aeon', name: `Inbox triage ${n}`, schedule: 'Weekdays at 08:00', next: new Date(now + n * 60_000).toISOString(), paused: false, revision: 1 })), lastActivity: { at: ago(12), text: 'Replied' } },
+    [scout.principal_id]: { ...unavailableAssistantFacts(), adapter: { state: 'ok', lastReceipt: ago(2) }, spend: { amount: '8.40', daily: Array.from({ length: 7 }, (_, n) => ({ day: String(n + 1), amount: n === 4 ? '8.40' : '0' })) }, approvals: [], routines: [], lastActivity: { at: ago(30), text: 'Replied' } },
+  }
+  return { items: [scout, amy], facts }
+}
+
+export async function mockAssistants(page: Page, items: Assistant[], owner: string) {
+  const writes: { id: string; body: { expected_revision: number; policy: Assistant['policy'] } }[] = []
+  const events: AssistantEvent[] = []
+  const now = Date.now()
+  const routines = [1, 2, 3].map(n => ({ id: `ab000000-0000-4000-8000-00000000000${n}`, project_id: 'p-aeon', parent_id: 'p-aeon', template: { name: `Inbox triage ${n}`, title: `Triage ${n}`, description: '', acceptance_criteria: [], estimate_hours: 0, priority: 'medium', tags: [], type: 'work' }, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', time_of_day: '08:00', timezone: 'Europe/Vienna' }, queue_each: false, overlap_policy: 'skip', catch_up_policy: 'one', paused: false, revision: 1, occurrence_count: 1, next_at: new Date(now + n * 3600_000).toISOString(), created_at: new Date(now - 86400_000).toISOString(), updated_at: new Date(now - 3600_000).toISOString(), last_run: { id: `ad000000-0000-4000-8000-00000000000${n}`, state: 'done', reason: '', created_at: new Date(now - n * 3600_000).toISOString() } }))
+  const routineWrites: { id: string; action: string; expected_revision: number }[] = []
+  const runOwners: Record<string, string> = {}, routineReads: string[] = []
+  await page.route('**/api/recurrences**', async route => {
+    const url = new URL(route.request().url()), method = route.request().method()
+    if (method === 'GET') routineReads.push(url.pathname)
+    if (url.pathname === '/api/recurrences' && method === 'GET') return route.fulfill({ json: { items: items.some(item => item.principal_id === agent(5)) ? routines : [], next_cursor: null } })
+    const match = /^\/api\/recurrences\/([^/]+)(?:\/(.*))?$/.exec(url.pathname), routine = routines.find(row => row.id === match?.[1])
+    if (!routine) return route.fallback()
+    const action = match?.[2]
+    if (action === 'agent-owner') return route.fulfill({ json: { owner_principal_id: agent(5), destination: { kind: 'new_ticket' }, granted_by_principal_id: owner, definition_digest: 'a'.repeat(64) } })
+    if (action === 'pause' || action === 'resume') {
+      const body = route.request().postDataJSON()
+      routineWrites.push({ id: routine.id, action, expected_revision: body.expected_revision })
+      if (body.expected_revision !== routine.revision) return route.fulfill({ status: 409, json: { error: 'Routine revision changed' } })
+      routine.paused = action === 'pause'; routine.revision++
+      return route.fulfill({ json: routine })
+    }
+    const run = { id: routine.last_run.id, recurrence_id: routine.id, definition_revision: 1, owner_principal_id: runOwners[routine.id] ?? agent(5), state: 'done', reason: '', work_node_id: 'n-a1', work_order_id: null, agent_run_id: null, created_at: routine.last_run.created_at, updated_at: new Date(now - 30 * 60_000).toISOString(), usage: {} }
+    if (action === 'runs') return route.fulfill({ json: { items: [run], next_cursor: null } })
+    if (action === `runs/${routine.last_run.id}`) return route.fulfill({ json: { run, attempts: { items: [], next_cursor: null }, actions: { items: [], next_cursor: null }, effects: { items: [], next_cursor: null } } })
+    if (action === `runs/${routine.last_run.id}/agent-result`) return route.fulfill({ json: { run_id: routine.last_run.id, status: 'succeeded', node_id: 'n-a1', request_digest: 'a'.repeat(64) } })
+    return route.fallback()
+  })
+  await page.route('**/api/assistants**', async route => {
+    const url = new URL(route.request().url()), method = route.request().method()
+    if (url.pathname === '/api/assistants' && method === 'GET') return route.fulfill({ json: { assistants: items } })
+    const policy = /^\/api\/assistants\/([^/]+)\/policy$/.exec(url.pathname)
+    if (policy) {
+      const item = items.find(row => row.principal_id === policy[1])
+      if (!item) return route.fulfill({ status: 404, json: { error: 'Assistant not found' } })
+      if (method === 'PUT') {
+        const body = route.request().postDataJSON() as typeof writes[number]['body']
+        writes.push({ id: item.principal_id, body })
+        if (body.expected_revision !== item.revision) return route.fulfill({ status: 409, json: { error: 'Revision changed' } })
+        const before = structuredClone(item)
+        item.policy = body.policy; item.revision++
+        events.push({ id: events.length + 1, type: 'assistant.policy_updated', at: new Date().toISOString(), actor_principal_id: owner, before, after: structuredClone(item) })
+      }
+      return route.fulfill({ json: item })
+    }
+    if (url.pathname === '/api/assistants' && method === 'POST') {
+      const body = route.request().postDataJSON()
+      const item: Assistant = { ...body, principal_id: agent(8), status: 'active', revision: 1, kind: 'assistant', principal_kind: 'agent', messaging_only: true }
+      items.push(item)
+      return route.fulfill({ status: 201, json: item })
+    }
+    return route.fulfill({ status: 404, json: { error: 'Assistant route not available' } })
+  })
+  await page.route('**/api/events?*', route => new URL(route.request().url()).searchParams.get('type')?.startsWith('assistant.') ? route.fulfill({ json: { items: events, next_after: null } }) : route.fallback())
+  return { writes, events, routineWrites, routines, runOwners, routineReads }
+}

@@ -14,6 +14,11 @@ import { toast } from '../lib/toast'
 import { TICKET_PEEK } from '../lib/ticketPeek'
 import { usePoller } from '../lib/usePolledData'
 import { useAgents, type SessionView } from '../stores/agents'
+import { useAssistants } from '../stores/assistants'
+import { assistantConnectLink, unavailableAssistantFacts } from '../lib/assistants'
+import { assistantCopy } from '../lib/assistantsCopy'
+import AssistantsSection from '../components/agents/AssistantsSection.vue'
+import AssistantPanel from '../components/agents/AssistantPanel.vue'
 import { useProjects } from '../stores/projects'
 import { useDecisionDesk } from '../stores/decisionDesk'
 import RoutinesLine from '../components/routines/RoutinesLine.vue'
@@ -63,6 +68,15 @@ import { isHolderTerminalTarget } from '../lib/nativeTerminal/ports'
 // the list's own tools and sticks inside the card. Sessions group by project, each lead
 // heading its group (AEON-1210). A session opens in the docked panel.
 const agents = useAgents()
+const assistants = useAssistants(), assistantWords = assistantCopy()
+const assistantSortEpoch = ref(0)
+let assistantAnchor: HTMLElement | null = null
+// Hosted personas have one home; even an old harness row for that principal
+// cannot duplicate its routine/message activity in Sessions.
+const assistantPrincipals = computed(() => new Set(assistants.items.map(item => item.principal_id)))
+const sessionViews = computed(() => agents.views.filter(view => !assistantPrincipals.value.has(view.session.agent_principal_id)))
+const sessionHistory = computed(() => agents.historyViews.filter(view => !assistantPrincipals.value.has(view.session.agent_principal_id)))
+const sessionGroups = computed(() => Object.fromEntries(Object.entries(agents.grouped).map(([key, rows]) => [key, rows.filter(view => !assistantPrincipals.value.has(view.session.agent_principal_id))])) as typeof agents.grouped)
 const pause = useAgentPause()
 const headerMenu = ref<{ type: 'add' | 'more'; anchor: HTMLElement } | null>(null)
 function headerAction(type: 'add' | 'more', event: Event) { headerMenu.value = headerMenu.value?.type === type ? null : { type, anchor: event.currentTarget as HTMLElement } }
@@ -203,6 +217,7 @@ const leadlessNote = computed(() => !leadLaunchAvailable.value ? launchReason.va
 const showNew = computed(() => canStart.value || canStartLead.value || canAttach.value || showConnect.value)
 watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => {
   headerMenu.value = null; filter.value = null; capMoved.value = false; capOpen.value = false
+  assistantAnchor = null
   if (query.value) setQuery('')
   if (FACET_KEYS.some(key => facets.value[key].length)) setFacets(emptyFacets())
   if (group.value !== DEFAULT_GROUP) setGroup(DEFAULT_GROUP)
@@ -211,12 +226,15 @@ watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, 
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
-const selected = computed(() => [...agents.views, ...agents.historyViews].find(v => v.session.id === sessionId.value))
+const assistantId = computed(() => !sessionId.value && typeof route.query.assistant === 'string' && /^[0-9a-f-]{36}$/i.test(route.query.assistant) ? route.query.assistant : '')
+const selectedAssistant = computed(() => assistants.items.find(item => item.principal_id === assistantId.value))
+const selected = computed(() => [...sessionViews.value, ...sessionHistory.value].find(v => v.session.id === sessionId.value))
 // AEON-1196 r7: the handle is the list's width, never a global panel width.
 const LIST_MIN = 280, DETAILS_MIN = 380, FORM_AT = 560, DIVIDER = 16, FOCUS_WIDTH = 320, OVERVIEW_DETAILS = 480
 const layoutPref = usePreference<{ handle?: number; [key: string]: unknown }>('agents:layout')
 const person = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
 const work = ref<HTMLElement>(), divider = ref<HTMLElement>(), listPane = ref<HTMLElement>()
+const layoutDock = ref<HTMLElement>()
 const workWidth = ref(0), paneHeight = ref(0)
 const canSplit = computed(() => workWidth.value >= FORM_AT + DIVIDER + OVERVIEW_DETAILS)
 const panelLayout = ref<PanelLayout>('side'), previousPanelLayout = ref<PanelLayout>('side')
@@ -249,7 +267,7 @@ async function setPanelLayout(next: PanelLayout, persist = true) {
   pref.save({ ...pref.value.value, layout: next }, 0)
   localPanelLayout.value = null
 }
-const panelOpen = computed(() => !!sessionId.value && agents.loaded && !ticketPeekOpen.value)
+const panelOpen = computed(() => (!!sessionId.value && agents.loaded || !!selectedAssistant.value) && !ticketPeekOpen.value)
 const split = computed(() => panelOpen.value && canSplit.value && panelLayout.value === 'side')
 const panelOnly = computed(() => panelOpen.value && panelLayout.value === 'wide')
 const maxHandle = computed(() => workWidth.value - DIVIDER - DETAILS_MIN)
@@ -267,7 +285,7 @@ const layouts = { focus: ['Focus', 'sessions narrow, details wide'], overview: [
 const nextPreset = computed(() => ({ list: 'focus', focus: 'overview', overview: 'list' } as const)[preset.value])
 const layoutKeys = computed(() => shortcutKeys('agents.layout.preset'))
 const layoutTip = computed(() => [layouts[preset.value][0], `Next: ${layouts[nextPreset.value][0]}`, ...layoutKeys.value.flatMap(shortcutCaps).flat()].join(' · '))
-const layoutEnabled = computed(() => canSplit.value && agents.loaded && !!(sessionId.value || agents.views.length || agents.historyViews.length) && !ticketPeekOpen.value)
+const layoutEnabled = computed(() => canSplit.value && agents.loaded && !!(sessionId.value || assistantId.value || sessionViews.value.length || sessionHistory.value.length) && !ticketPeekOpen.value)
 const willClose = computed(() => dragWidth.value !== null && workWidth.value - DIVIDER - handle.value < DETAILS_MIN)
 const layoutSaveFailed = computed(() => preferenceSaves.failed.has(`${person.value}/agents:layout`))
 let lastSession = '', layoutResize: ResizeObserver | undefined, layoutFrame: number | undefined
@@ -308,7 +326,7 @@ async function cycleLayout() {
   const next = nextPreset.value
   if (next === 'list') { await closePanel(); return }
   rememberHandle(next === 'focus' ? FOCUS_WIDTH : workWidth.value - DIVIDER - OVERVIEW_DETAILS)
-  if (!sessionId.value) {
+  if (!sessionId.value && !assistantId.value) {
     const visible = rows().filter(row => row.dataset.row?.startsWith('s:'))
     const row = visible.find(row => row.dataset.row === `s:${lastSession}`) ?? visible.find(row => row.dataset.row === cursor.value) ?? visible[0]
     if (row?.dataset.row) openSession(row.dataset.row.slice(2))
@@ -342,8 +360,14 @@ function moveHandle(width: number) { rememberHandle(width); announce(`List width
 watch(person, (_next, previous) => {
   layoutWrite++; pendingHandle.value = null
   drag = null; dragWidth.value = null; rowAnchor = null; lastSession = ''; openedFromList = false; cursor.value = ''
-  if (previous && sessionId.value) void router.replace({ path: '/agents', query: {} })
+  if (previous && (sessionId.value || assistantId.value)) void router.replace({ path: '/agents', query: {} })
 })
+watch([assistantId, () => !!selectedAssistant.value, canSplit], async ([id, found, fits]) => {
+  if (!id || !found || !fits) return
+  const owner = person.value
+  await nextTick()
+  if (id === assistantId.value && owner === person.value && split.value) ensureWorkTop()
+}, { flush: 'post' })
 watch([sessionId, canSplit, () => agents.loaded], async ([id, fits, loaded], previous) => {
   if (!id || !fits || !loaded) return
   const owner = person.value
@@ -478,12 +502,24 @@ function openSession(id: string) {
   rowAnchor = row ? { id, top: row.getBoundingClientRect().top } : null
   lastSession = id
   cursor.value = `s:${id}`
-  if (sessionId.value) { void router.replace({ path: `/agents/${id}`, query: route.query }); return }
+  if (sessionId.value) { void router.replace({ path: `/agents/${id}`, query: { ...route.query, assistant: undefined } }); return }
   openedFromList = true
-  void router.push({ path: `/agents/${id}`, query: route.query })
+  void router.push({ path: `/agents/${id}`, query: { ...route.query, assistant: undefined } })
+}
+function openAssistant(id: string, anchor: HTMLElement) {
+  assistantAnchor = anchor
+  void router.push({ path: '/agents', query: { ...route.query, assistant: id } })
 }
 // Focus returns to the session's row once the panel is gone.
 async function closePanel() {
+  if (assistantId.value) {
+    const owner = person.value, anchor = assistantAnchor
+    await router.replace({ path: '/agents', query: { ...route.query, assistant: undefined } })
+    assistantSortEpoch.value++
+    await nextTick()
+    if (owner === person.value && !assistantId.value && anchor?.isConnected) anchor.focus({ preventScroll: true })
+    return
+  }
   const id = sessionId.value
   const owner = person.value
   if (id) cursor.value = `s:${id}`
@@ -529,7 +565,7 @@ function move(step: number) {
 const serviceTiers = useServiceTiers()
 const pageActionScope = {
   enabled: () => !!session.identity,
-  when: (event: KeyboardEvent) => !isHolderTerminalTarget(event.target) && !isHolderTerminalTarget(document.activeElement) && !(event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)),
+  when: (event: KeyboardEvent) => !(event.target instanceof HTMLElement && event.target.closest('.assistant-panel')) && !isHolderTerminalTarget(event.target) && !isHolderTerminalTarget(document.activeElement) && !(event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)),
 }
 const actionScope = {
   ...pageActionScope,
@@ -569,8 +605,8 @@ const shortcutDisposers = [
   onAction('agents.details.close', event => {
     if (ticketPeekOpen.value) return false
     if (shortcutTyping(event.target)) { (event.target as HTMLElement).blur(); (event.target as HTMLElement).closest<HTMLElement>('.session-panel')?.focus({ preventScroll: true }); return }
-    if (sessionId.value && panelLayout.value === 'full') void setPanelLayout('side')
-    else if (sessionId.value) void closePanel()
+    if (panelOpen.value && panelLayout.value === 'full') void setPanelLayout('side')
+    else if (sessionId.value || assistantId.value) void closePanel()
     else if (filter.value) filter.value = null
     else return false
   }, pageActionScope),
@@ -588,7 +624,8 @@ const activeHints = computed(() => hintGroups.map(group => ({ ...group, keys: gr
 
 // ---------- Live ----------
 let stop: (() => void) | undefined
-const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load(), pause.refreshLeaving()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
+let stopAssistants: (() => void) | undefined
+const poller = usePoller(() => Promise.all([agents.loadAll(), assistants.load(), capacity.load(), pause.refreshLeaving()]), 20_000, { invalidate: () => { agents.invalidatePolls(); assistants.invalidate(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
 const evidenceRefresh = tierEvidenceRefresh(() => selected.value?.session, session => {
@@ -596,6 +633,7 @@ const evidenceRefresh = tierEvidenceRefresh(() => selected.value?.session, sessi
 }, () => document.visibilityState !== 'hidden')
 function evidenceVisible() { if (document.visibilityState !== 'hidden') evidenceRefresh.notify() }
 function changed(event?: string, identity?: AgentEventIdentity) {
+  if (!event || event.startsWith('assistant.')) { void assistants.load(); if (assistantId.value) void assistants.loadHistory() }
   if (!event || event.startsWith('inbox.')) agents.threadChanged()
   evidenceRefresh.notify(event, identity)
   // Confirmation polling already tracks its own exact pending sessions.
@@ -636,6 +674,8 @@ onMounted(() => {
   stopTierWatch = serviceTiers.watchPage()
   document.addEventListener('visibilitychange', evidenceVisible)
   void agents.loadAll()
+  void assistants.load()
+  stopAssistants = assistants.watchPage()
   void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
   poller.start()
@@ -647,7 +687,7 @@ onBeforeUnmount(() => {
   if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
   evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
-  stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
+  stop?.(); stopAssistants?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   shortcutDisposers.forEach(dispose => dispose())
 })
 watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } }, { immediate: true })
@@ -658,7 +698,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
     <!-- One line (AEON-780): title, the counts as filters, then the controls. -->
     <header class="page-head">
       <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
-      <HeadCounts :views="agents.views" :now="agents.now" :loaded="agents.loaded" :filter="filter" @filter="setFilter">
+      <HeadCounts :views="sessionViews" :now="agents.now" :loaded="agents.loaded" :filter="filter" @filter="setFilter">
         <!-- No "Live" in the head; only a delay is worth saying, at the line end (AEON-785 moves freshness to the footer). -->
         <p v-if="stale" class="freshness" role="status" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" />Update delayed</p>
       </HeadCounts>
@@ -680,6 +720,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
             <button v-if="canStartLead" type="button" role="menuitem" class="menu-item" :aria-disabled="!leadLaunchAvailable" @click="leadLaunchAvailable && menuAction(() => openStartLead(leadless, headerMenu?.anchor ?? null, true))"><AppIcon name="play" /><span>Start {{ LEAD_WORDS.l }}…<small>{{ leadlessNote }}</small></span></button>
             <button v-if="canAttach" type="button" role="menuitem" class="menu-item" @click="menuAction(() => attachDialog?.open())"><AppIcon name="link" /><span>Attach a running session…<small>Bring in a session started in a terminal.</small></span></button>
             <RouterLink v-if="showConnect" role="menuitem" class="menu-item" to="/agents/register-agent" @click="headerMenu = null"><AppIcon name="monitor" /><span>Connect your machine…<small>Install agentd so it can run agents.</small></span></RouterLink>
+            <RouterLink v-if="assistants.mayConnect" role="menuitem" class="menu-item" :to="assistantConnectLink" @click="headerMenu = null"><AppIcon name="agent" /><span>{{ assistantWords.connectMenu }}<small>{{ assistantWords.connectHelp }}</small></span></RouterLink>
             <template v-if="canStart">
               <button type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.openOnce())"><AppIcon name="agent" /><span>Run once…<small>A single run with a task and optional instruction. Read-only by default.</small></span></button>
             </template>
@@ -729,15 +770,20 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
       </div>
     </div>
     <div ref="work" class="agents-work" :data-layout="preset">
-      <!-- One sticky dock. Both heads reserve its box; it never changes parents. -->
-      <div v-show="canSplit && !panelOpen" class="layout-dock">
-        <button type="button" class="icon-btn raised layout-button" data-layout-cycle :data-layout="preset" :aria-disabled="!layoutEnabled" :aria-label="`Layout: ${layouts[preset][0]}, ${layouts[preset][1]}. Next: ${layouts[nextPreset][0]}`" :aria-keyshortcuts="layoutKeys.join(' ') || undefined" :data-tip="layoutTip" @click="cycleLayout"><AppIcon :name="`layout-${preset}`" :size="17" /></button>
-      </div>
+      <!-- The same header control stays reachable after its card scrolls away. -->
+      <div v-show="canSplit && !panelOpen" ref="layoutDock" class="layout-dock" />
       <div class="agents-split">
         <div v-show="!panelOnly" ref="listPane" class="agents-list-pane" @transitionend="finishLayout">
+        <!-- Admit both cards together, after capacity, metadata and grants settle. -->
+        <AssistantsSection v-if="agents.loaded" :items="assistants.items" :facts="assistants.facts" :state="assistants.state" :error="assistants.error" :truncated="assistants.truncated" :can-connect="assistants.mayConnect" :can-approve="can('approvals.decide')" :now="agents.now" :sort-epoch="assistantSortEpoch" :selected="assistantId" :owner="person" :project-names="Object.fromEntries(projects.projects.map(project => [project.id, project.routeKey]))" :control-id="canSplit && !panelOpen ? 'agents-layout-cycle' : undefined" @open="openAssistant" @retry="assistants.load()">
+          <template #actions><div v-show="canSplit && !panelOpen" class="layout-home">
+            <!-- Header ownership stays explicit; CSS in the dock keeps the control still while scrolling. -->
+            <Teleport v-if="layoutDock" :to="layoutDock"><button id="agents-layout-cycle" type="button" class="icon-btn raised layout-button" data-layout-cycle :data-layout="preset" :aria-disabled="!layoutEnabled" :aria-label="`Layout: ${layouts[preset][0]}, ${layouts[preset][1]}. Next: ${layouts[nextPreset][0]}`" :aria-keyshortcuts="layoutKeys.join(' ') || undefined" :data-tip="layoutTip" @click="cycleLayout"><AppIcon :name="`layout-${preset}`" :size="17" /></button></Teleport>
+          </div></template>
+        </AssistantsSection>
         <SessionList
           v-if="agents.loaded" ref="sessionList"
-          :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
+          :groups="sessionGroups" :history="sessionHistory" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart" :filter="filter" :query="query" :layout-dock="canSplit && !split" :pane="split"
           :projects="projectLeads" :group="group" :facets="facets"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()" @clear-filter="clearFilter"
@@ -751,9 +797,10 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
         </div>
         <div ref="divider" class="agents-divider" :role="split ? 'separator' : undefined" :aria-hidden="split ? undefined : true" :aria-orientation="split ? 'vertical' : undefined" :tabindex="split ? 0 : undefined" :aria-label="split ? 'Resize the session list' : undefined" :aria-valuemin="split ? LIST_MIN : undefined" :aria-valuemax="split ? maxHandle : undefined" :aria-valuenow="split ? handle : undefined" :aria-valuetext="split ? `List width ${handle} pixels` : undefined" :data-tip="split ? 'Drag to resize the session list' : undefined" @pointerdown="startDrag" @pointermove="moveDivider" @pointerup="endDrag" @pointercancel="endDrag"><span class="grip" /></div>
         <SessionPanel
-          v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock" :docked="split || panelOnly" :sheet="!canSplit" :layout="panelLayout" :sidebar-available="canSplit"
+          v-if="sessionId && !assistantId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock" :docked="split || panelOnly" :sheet="!canSplit" :layout="panelLayout" :sidebar-available="canSplit"
           @close="closePanel" @control="control" @review="review" @layout="setPanelLayout" @auto-layout="setPanelLayout($event, false)"
         />
+        <AssistantPanel v-if="selectedAssistant && !ticketPeekOpen" :item="selectedAssistant" :facts="assistants.facts[selectedAssistant.principal_id] ?? unavailableAssistantFacts()" :now="agents.now" :docked="split || panelOnly" :sheet="!canSplit" :layout="panelLayout" :sidebar-available="canSplit" @close="closePanel" @layout="setPanelLayout" />
       </div>
       <p v-if="panelOpen && (localPanelLayout || preferenceSaves.failed.has(`${person}/agents:panel.layout.${smallPanel ? 'phone' : 'large'}`))" class="layout-error" role="status">The panel layout lasts for this visit until it can be saved.</p>
       <p v-if="layoutSaveFailed" class="layout-error" role="status">The layout could not be saved. It lasts for this visit.</p>
@@ -808,8 +855,10 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
 .hint .keycap + .keycap { margin-left: 2px; }
 /* Geometry and dock match the approved round-7 HTML; the main scroller starts below the header. */
 .agents-work { position: relative; margin-top: 14px; }
+.layout-home { flex: none; width: var(--ctl-h); height: var(--ctl-h); }
 .layout-dock { position: sticky; top: 0; z-index: 25; height: 0; }
-.layout-button { position: absolute; top: 15px; right: 11px; width: var(--ctl-h); height: var(--ctl-h); color: var(--ink-2); }
+.layout-dock .layout-button { position: absolute; top: 15px; right: 19px; }
+.layout-button { width: var(--ctl-h); height: var(--ctl-h); color: var(--ink-2); }
 .layout-button:not([data-layout="list"]) { color: var(--teal-ink); }
 .layout-button[aria-disabled="true"] { opacity: .5; }
 .agents-split { display: flex; gap: 0; align-items: flex-start; min-width: 0; }
@@ -818,6 +867,10 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
    Cap the pane at the row and let the divider yield so that frame cannot widen main. */
 .agents-list-pane { flex: 0 0 100%; min-width: 0; max-width: 100%; container: sessions / inline-size; transition: flex-basis 240ms ease; }
 .split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
+/* Both cards share the viewport: Sessions scrolls in the room below Assistants. */
+.split .agents-list-pane { display: flex; flex-direction: column; height: var(--pane-h); }
+.split .agents-list-pane > :deep(.assistants) { flex: none; }
+.split .agents-list-pane > :deep(.sessions.pane) { flex: 1 1 auto; min-height: 0; height: auto; }
 .split, .panel-only { padding-bottom: 8px; }
 /* The pane toolbar is already below the app header. Page-anchor clearance
    would scroll its focused controls away from the pane's top. */

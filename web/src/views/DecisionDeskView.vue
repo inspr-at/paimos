@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { assistantCopy } from '../lib/assistantsCopy'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
@@ -140,10 +141,13 @@ function queryPresent(value: unknown) {
 // invisible, so an empty lesson list claimed the whole desk was clear.
 function inScope(item: DeskItem) {
   return (!route.query.kind || item.kind === route.query.kind) && (!route.query.project || item.projectId === route.query.project)
+    && (!assistantScopePresent.value || !!scopeAssistant.value && item.askers?.some(asker => asker.principalId === scopeAssistant.value))
 }
+const assistantScopePresent = computed(() => queryPresent(route.query.assistant))
+const scopeAssistant = computed(() => typeof route.query.assistant === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(route.query.assistant) ? route.query.assistant : '')
 const scopeKind = computed(() => typeof route.query.kind === 'string' ? route.query.kind : '')
 const scopeProject = computed(() => typeof route.query.project === 'string' ? route.query.project : '')
-const scopeActive = computed(() => queryPresent(route.query.kind) || queryPresent(route.query.project))
+const scopeActive = computed(() => queryPresent(route.query.kind) || queryPresent(route.query.project) || assistantScopePresent.value)
 const scopeProjectName = computed(() => {
   const id = scopeProject.value
   if (!id) return ''
@@ -151,6 +155,7 @@ const scopeProjectName = computed(() => {
 })
 const scopePlace = computed(() => scopeProjectName.value || (scopeProject.value ? 'this project' : ''))
 const scopeCopy = computed(() => {
+  if (assistantScopePresent.value) return scopeAssistant.value ? assistantCopy().deskScope : assistantCopy().invalidAssistantFilter
   const place = scopePlace.value
   if (scopeKind.value === 'lesson' && place) return `Showing lessons in ${place}.`
   if (scopeKind.value === 'lesson') return 'Showing lessons.'
@@ -171,6 +176,7 @@ const showAllTo = computed(() => {
   const query = { ...route.query }
   delete query.kind
   delete query.project
+  delete query.assistant
   return { path: '/decision-desk', query }
 })
 // A scoped Open count matches the list. The header keeps the whole-desk total.
