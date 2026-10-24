@@ -1,0 +1,125 @@
+{
+  "license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "ticket": "AEON-1726",
+  "testedHead": "6ad933f57c70decaf8cdc91724e8bb5f4fa2ca20",
+  "recordedAt": "2026-10-24T09:41:37.700397+00:00",
+  "checks": {
+    "workflowAndGuard": {
+      "command": "node --test scripts/full-ui-qa.test.mjs",
+      "exit": 0,
+      "passed": 8,
+      "skipped": 0
+    },
+    "negativeControls": [
+      {
+        "control": "unassigned",
+        "exit": 1,
+        "error": "Unassigned Full QA spec: tests/workspace-activity.spec.ts"
+      },
+      {
+        "control": "duplicated",
+        "exit": 1,
+        "error": "Duplicate Full QA spec: tests/a11y.spec.ts"
+      }
+    ],
+    "workflowShell": {
+      "partitions": 6,
+      "successAndFailureCases": 12,
+      "passed": 12,
+      "browserLaunched": false
+    },
+    "remoteStatic": {
+      "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
+      "exit": 0,
+      "summary": "Static pre-filter: 157.38s; 46 passed, 0 optional skipped. Hosted CI remains the proof."
+    }
+  },
+  "inventory": {
+    "specs": 397,
+    "filesChangingObservedShardOwnership": 295,
+    "basisCounts": {
+      "latest-json": 302,
+      "latest-complete-log-file": 46,
+      "latest-json-and-log": 1,
+      "prior-nightly": 48
+    },
+    "minutesByBasis": {
+      "latest-json": 274.5248,
+      "latest-complete-log-file": 85.311933,
+      "latest-json-and-log": 0.874183,
+      "prior-nightly": 48.629183
+    }
+  },
+  "projected": [
+    {
+      "shard": 1,
+      "files": 78,
+      "minutes": 83.873,
+      "withinTarget": false,
+      "audits": [
+        "tests/ui-audit-dark-1440.spec.ts",
+        "tests/ui-audit-light-1440.spec.ts",
+        "tests/ui-audit.spec.ts"
+      ]
+    },
+    {
+      "shard": 2,
+      "files": 79,
+      "minutes": 83.872,
+      "withinTarget": false,
+      "audits": [
+        "tests/ui-audit-dark-1920.spec.ts",
+        "tests/ui-audit-dark-390.spec.ts",
+        "tests/ui-audit-light-1280.spec.ts"
+      ]
+    },
+    {
+      "shard": 3,
+      "files": 79,
+      "minutes": 83.871,
+      "withinTarget": false,
+      "audits": [
+        "tests/ui-audit-dark-1024.spec.ts"
+      ]
+    },
+    {
+      "shard": 4,
+      "files": 82,
+      "minutes": 83.861,
+      "withinTarget": false,
+      "audits": [
+        "tests/ui-audit-light-1024.spec.ts"
+      ]
+    },
+    {
+      "shard": 5,
+      "files": 79,
+      "minutes": 83.863,
+      "withinTarget": false,
+      "audits": [
+        "tests/ui-audit-dark-1280.spec.ts",
+        "tests/ui-audit-light-1920.spec.ts"
+      ]
+    }
+  ],
+  "acceptance": {
+    "coverageAndNegativeControls": true,
+    "sameFiveShardsOneWorkerZeroRetriesForbidOnly": true,
+    "sixtyMinuteTarget": false,
+    "setupSecondsPerShard": 120,
+    "totalTestMinutes": 409.3401,
+    "perfectPackingMinutesIncludingSetup": 83.86802,
+    "completedCurrentEvidenceMinutesBeforePriorEstimates": 360.710917,
+    "reason": "Five single-worker shards cannot meet a 300-minute aggregate target when completed current evidence alone accounts for 360.711 minutes before setup. No tests, assertions, retries or timeouts were reduced. OPS owns workflow_dispatch after the PR exists."
+  },
+  "scope": {
+    "ciYmlChanged": false,
+    "browserSpecsChanged": false,
+    "existingAssertionsChanged": false,
+    "originPushed": false,
+    "deployed": false,
+    "modelReviewRun": false,
+    "auditOwnership": "Existing S7 scripts/** and docs/** globs",
+    "tierRegistration": "New cases in existing full-ui-qa-tests static check; script tests are outside Go/web tier catalogue"
+  }
+}
