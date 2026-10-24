@@ -176,5 +176,148 @@
     "summary": "2 passed (8.4s)",
     "configuration": "Normal committed UI config, repeatEach default 1."
   },
-  "completed_at_utc": "2026-10-24T10:23:34Z"
+  "completed_at_utc": "2026-10-24T10:23:34Z",
+  "fix_round_2": {
+    "baseline_commit": "08a5fa7e5df30794b3b2a7bd7689e3984ec29e5d",
+    "ci_findings": {
+      "browser_job": "https://github.com/inspr-at/paimos/actions/runs/40085904959/job/120849140327",
+      "actual_browser_failures": 1,
+      "actual_failed_case": "AEON-1401: the delivered viewport width clears a glimpse while geometry and media reads stay wide",
+      "failure_stage": "The 5000ms predicate waiting for the delivered root width, before either painted-graph assertion.",
+      "agents_split_disposition": "All 12 cases passed in the native caseResults. The findings extractor also matched four successful case log headings. No change to that spec is needed.",
+      "public_name_failure": "Replace the two operator-host references in this evidence file with neutral descriptions; retain the existing public-name guard."
+    },
+    "root_cause_and_fix": {
+      "risk": "The stale-hint regression depends on a native root ResizeObserver delivery following a real browser resize. Software-rendered Chromium controls when that callback can run, so the test can exhaust its assertion budget before establishing the condition it intends to test.",
+      "fix": "Capture the registered document-element observer and explicitly deliver a complete narrow entry while native observer deliveries, frames and timer callbacks are held. Keep window, media and geometry hints wide, and retain every original assertion. The remaining header cases still exercise real viewport resizes.",
+      "scope": "Test fixture only; no product behavior changed.",
+      "outside_original_scope": "web/tests/header-glimpse.spec.ts: repairs the actual browser CI failure named by the fix-round brief."
+    },
+    "unchanged_linux_baseline": {
+      "commit": "08a5fa7e5df30794b3b2a7bd7689e3984ec29e5d",
+      "run": {
+        "run": "spec-08a5fa7e5d-33553",
+        "suite_exit_code": 0,
+        "exit_code": 0,
+        "cleanup_complete": true
+      },
+      "passed": 1,
+      "note": "Quiet Linux baseline passes; this is not evidence that native delivery is synchronized."
+    },
+    "held_native_delivery_reproduction": {
+      "commit": "d531f491f3",
+      "baseline_test_source": "The existing test at 08a5fa7e, with only a callback barrier holding native observer deliveries after state.holding becomes true.",
+      "run": {
+        "run": "spec-d531f491f3-73168",
+        "suite_exit_code": 1,
+        "exit_code": 1,
+        "cleanup_complete": true
+      },
+      "passed": 0,
+      "failed": 1,
+      "failure_reason": "The original predicate sees window=1280, geometry=1280, media=true, delivered=undefined rather than 390. The same assertions run after explicit delivery in the fixed test.",
+      "limit": "This establishes the native-delivery dependency deterministically; the CI artifact does not expose its final predicate values."
+    },
+    "discarded_sample_negative_control": {
+      "commit": "a30ca23d07",
+      "mutation": "Remove observedViewportWidth from viewportWidth(), leaving the window and geometry reads in place. Test source is identical to the implementation commit.",
+      "run": {
+        "run": "spec-a30ca23d07-77143",
+        "suite_exit_code": 1,
+        "exit_code": 1,
+        "cleanup_complete": true
+      },
+      "passed": 0,
+      "failed": 1,
+      "failure_reason": "The delivery predicate passes, then the original painted-graph assertion fails: [data-header-glimpse=\"on\"] expected 0, received 1. The test still detects loss of the delivered sample."
+    },
+    "affected_suite_linux": {
+      "implementation_commit": "efb119606a",
+      "command": "remote-spec.sh <worktree> \"tests/header-glimpse.spec.ts tests/resilient-polling.spec.ts tests/aeon-1213-agents-split.spec.ts\"",
+      "run": {
+        "run": "spec-efb119606a-59995",
+        "suite_exit_code": 0,
+        "exit_code": 0,
+        "cleanup_complete": true
+      },
+      "passed": 45,
+      "failed": 0,
+      "skipped": 0,
+      "summary": "45 passed (2.0m)",
+      "execution": "Three serial spec chunks, each with one browser worker. The merged report labels the three separate workers together."
+    },
+    "related_web_units_linux": {
+      "scratch_commit": "b6991197f2",
+      "run": {
+        "run": "spec-b6991197f2-84402",
+        "suite_exit_code": 0,
+        "exit_code": 0,
+        "cleanup_complete": true
+      },
+      "method": "A temporary beforeAll hook runs the related units inside the approved remote-spec.sh job, followed by the AEON-1401 browser case. The hook is absent from the work branch.",
+      "commands": [
+        "node --experimental-strip-types --test tests/header-glimpse.test.ts",
+        "node node_modules/vitest/vitest.mjs run tests/resilient-polling.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0"
+      ],
+      "node_passed": 10,
+      "vitest_passed": 9,
+      "browser_passed": 1,
+      "failed": 0,
+      "go_packages": "None affected: no Go, API or product source changed."
+    },
+    "preserved": {
+      "production_source_unchanged": true,
+      "all_113_header_assertion_lines_unchanged": true,
+      "all_28_header_test_and_describe_lines_unchanged": true,
+      "polling_spec_unchanged_this_round": true,
+      "committed_playwright_config_unchanged": true,
+      "test_names_and_manifests_unchanged": true,
+      "no_timeout_increase_retries_skips_or_quarantine": true,
+      "no_push_to_origin_deploy_review_gate_or_other_model_calls": true,
+      "scratch_changes_absent_from_work_branch": true
+    },
+    "repeated_regression_linux": {
+      "scratch_commit": "75ddaf6372",
+      "configuration": "Only repeatEach: 30 added to the UI config on a scratch branch. The committed work branch keeps the original config.",
+      "run": {
+        "run": "spec-75ddaf6372-69528",
+        "suite_exit_code": 0,
+        "exit_code": 0,
+        "cleanup_complete": true
+      },
+      "native_blob_reports": 30,
+      "repeat_each_indices": "0..29",
+      "workers_per_serial_chunk": 1,
+      "retries": 0,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "summary": "30 passed (3.9m)"
+    },
+    "static_validation": {
+      "entrypoint": "ci-static-locked.sh",
+      "command": "node scripts/ci-static.mjs --merge-main",
+      "implementation_commit": "efb119606a",
+      "initial_refusal": {
+        "exit_code": 3,
+        "reason": "Remote test-host guard OPS-300 reported busy; no local fallback was run."
+      },
+      "retry_exit_code": 0,
+      "passed_checks": 46,
+      "optional_skips": 0,
+      "duration_seconds": 176.5,
+      "summary": "Static pre-filter: 176.5s; 46 passed, 0 optional skipped. Hosted CI remains the proof.",
+      "includes": [
+        "public-name guard and its regressions",
+        "test-tier selector regressions",
+        "web shard regressions",
+        "ownership audit",
+        "Go vet",
+        "web typecheck and lint",
+        "strict test manifests"
+      ],
+      "final_evidence_check": "The public-name guard and git diff --check also pass after recording these results."
+    },
+    "completed_at_utc": "2026-10-24T11:00:50Z"
+  }
 }
