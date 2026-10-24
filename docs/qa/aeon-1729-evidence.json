@@ -67,11 +67,11 @@
       "retries": [
         {
           "exit": 3,
-          "error": "remote paused: mbp2606 not GREEN (night protocol, OPS host watch); not falling back to a heavy local run; retry later or rely on PR CI"
+          "error": "remote paused: remote test host not GREEN (night protocol, OPS host watch); not falling back to a heavy local run; retry later or rely on PR CI"
         },
         {
           "exit": 3,
-          "error": "remote paused: mbp2606 not GREEN (night protocol, OPS host watch); not falling back to a heavy local run; retry later or rely on PR CI"
+          "error": "remote paused: remote test host not GREEN (night protocol, OPS host watch); not falling back to a heavy local run; retry later or rely on PR CI"
         }
       ]
     }
@@ -240,6 +240,6 @@
   },
   "workerStatus": {
     "pct": 95,
-    "reason": "BLOCKED-REMOTE-CAPACITY: remote static timed out only in unrelated apt-step-bounds; both retries refused because mbp2606 is not GREEN. Full UI QA guard and affected checks passed. No heavy local fallback."
+    "reason": "BLOCKED-REMOTE-CAPACITY: remote static timed out only in unrelated apt-step-bounds; both retries refused because remote test host is not GREEN. Full UI QA guard and affected checks passed. No heavy local fallback."
   }
 }
