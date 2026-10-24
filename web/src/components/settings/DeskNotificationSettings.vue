@@ -59,6 +59,7 @@ function act(work: (signal: AbortSignal) => Promise<unknown>) {
   reads.cancel(); busy.value = true; failed.value = false
   return writes.run(({ after, signal }) => after(work(signal), () => after(Promise.all([phoneSettings(signal), deviceSubscriptionHash()]), ([value, device]) => {
     settings.value = value; hash.value = device
+    window.dispatchEvent(new Event('aeon:desk-notifications'))
   })), { failed: () => { failed.value = true }, settled: () => { busy.value = false; browser.value = deskPushBrowser() } })
 }
 function toggle() {
@@ -84,7 +85,7 @@ onBeforeUnmount(stopAccess)
     <div v-if="!browser.homeScreenRequired" class="switch-row">
       <button type="button" class="notification-switch" role="switch" :aria-checked="enabled" :disabled="busy || !settings?.push_available || !browser.supported || browser.permission === 'denied' || !can('profile.write')" @click="toggle">
         <span class="switch-track" aria-hidden="true"><span /></span>
-        <span>{{ text('Notify me in this browser when a decision waits', 'In diesem Browser benachrichtigen, wenn eine Entscheidung wartet') }}</span>
+        <span>{{ text('Notify me in this browser when a decision waits, including connected instances', 'In diesem Browser über wartende Entscheidungen benachrichtigen, auch auf verbundenen Instanzen') }}</span>
       </button>
     </div>
     <!-- All state copy shares a slot sized by the longest line this browser can reach. -->

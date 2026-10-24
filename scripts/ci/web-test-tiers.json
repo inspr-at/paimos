@@ -8634,17 +8634,47 @@
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"the bar opens a stepped chart in place; one global range; the signal row and its stall rule; nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"a person who is not the owner never reads a sibling and sees no instance tags","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"Desk coverage matrix, header tooltip and preview evidence in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"an unreadable sibling is one quiet line in the same slot; Try again reads it in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"Goals connection states and final-head evidence at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"the owner sees this instance first, then the sibling, with tags, askers and Coming at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"Goals connection states and final-head evidence at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"the owner sees this instance first, then the sibling, with tags, askers and Coming at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"Settings connection statuses use sentence case and keep both connection cards stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"two sibling lines keep the goals controls still when a refresh fails and recovers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"an unconnected sibling contributes nothing to the empty Desk, Goals and preview","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"unknown coverage is not an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"confirmation shows the account, keeps actions stable and Cancel shares nothing at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"confirmation shows the account, keeps actions stable and Cancel shares nothing at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"confirmation shows the account, keeps actions stable and Cancel shares nothing at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"connect opens a top-level confirmation and a single-use callback clears the fragment before rendering","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"every signed-in person can connect and unknown coverage never claims an empty Desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"explicit sign-out clears only the departing person’s grants and pending proof","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"long German account names and hosts remain readable at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"long German account names and hosts remain readable at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"long German account names and hosts remain readable at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"only newly created sibling items notify and the recorded payload opens their home item","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"phone status and project keys expose their full copy with text spacing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"shared sibling counts, exact home links and stable Goals controls at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"shared sibling counts, exact home links and stable Goals controls at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"shared sibling counts, exact home links and stable Goals controls at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"sibling sync ages keep the number and seconds unit together","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"unreachable results remain dated, ended results disappear, and connection states keep the same row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"a glimpse renderer takes its host size when its engine loads after the first resize pass","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -17498,17 +17528,41 @@
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"blocks unknown or unread grants but excludes disconnected siblings from all-clear","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"clears only the departing person storage and in-memory grants on explicit sign-out","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"connects with one browser-bound single-use state and accepts a credential only in the configured sibling callback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"keeps the checked age and its seconds unit together","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"notifies each newly observed sibling item once with the existing opt-in and opens its home instance","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"notifies only items created after the previous source read, never existing items entering the top five","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"refuses unconfigured, expired and other-person callback states without adopting a credential","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"retains dated unreachable results, clears ended results and drops late reads after disconnect and person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"revokes at home before disconnect or replacement and keeps a failed disconnect retryable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"shares one read, consolidated counts and home links across Goals, preview and tab title","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"upgrades the legacy notice marker without notifying existing backlog","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"uses plural-aware waiting copy and impersonal German across Goals and the header","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"exchanges the history code in a credential-free POST and receives the bearer only in the body","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"parseSummary > keeps first lines and resolves links inside the sibling only","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"parseSummary > refuses another instance, bad counts and unbounded lists","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"readSibling > rejects a sibling body over 64000 bytes even when Content-Length is smaller","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > keeps a failed instance list unknown and reads it again on refresh","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"reports a refused remote revocation as a failed disconnect","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > keeps the shown line count when a later sibling refresh fails","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > treats a confirmed empty sibling list as known","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"treats 429 as unreachable instead of ending the connection","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > chooses reading, all clear, a silent source or the scope line, and nothing while rows are listed","tier":"ESSENTIAL"}
     ,
@@ -19511,6 +19565,8 @@
     {"kind":"vitest","file":"tests/session-auth.unit.test.ts","name":"a failed sign-out keeps the account available to retry and rechecks its permissions","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-auth.unit.test.ts","name":"a late anonymous /me response cannot clear the person established by a newer explicit sign-in","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-auth.unit.test.ts","name":"explicit sign-out removes this person’s stored instance credentials and pending verifier","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-auth.unit.test.ts","name":"retains public sign-in config when the initial 401 invalidates the session before /me returns","tier":"ESSENTIAL"}
     ,

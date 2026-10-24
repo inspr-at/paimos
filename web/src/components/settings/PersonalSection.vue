@@ -19,6 +19,7 @@ import GraphMotionSettings from './GraphMotionSettings.vue'
 import SessionWatchingSettings from './SessionWatchingSettings.vue'
 import PhoneApprovalSettings from './PhoneApprovalSettings.vue'
 import DeskNotificationSettings from './DeskNotificationSettings.vue'
+import InstanceConnections from './InstanceConnections.vue'
 import { displayLanguage } from '../../lib/displayLanguage'
 import { useSession } from '../../stores/session'
 import { can } from '../../lib/authz'
@@ -96,6 +97,8 @@ const KEYS: { keys: string[][]; label: string }[] = [
     <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" title="Phone approvals" icon="shield" anchor="phone-approvals">
       <PhoneApprovalSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
     </SettingsCard>
+
+    <InstanceConnections v-if="session.identity?.principal.kind === 'person'" />
 
     <SettingsCard v-if="profile || profileError" title="Appearance" icon="sun" anchor="appearance">
       <template #lead>Light, dark, or whatever your system uses. Saved to your account, so it stays after a reload and on your other devices.</template>

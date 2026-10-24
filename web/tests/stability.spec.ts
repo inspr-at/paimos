@@ -164,8 +164,8 @@ test('the approval queue never says nothing waits before it knows', async ({ pag
   try {
     await started
     await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-    await expect(desk).toHaveAccessibleName('Decision Desk, count unavailable')
+    await expect(desk).toHaveAccessibleName('Decision Desk, count unavailable · Reading Decision Desk · Reading here')
     await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
   } finally { release() }
-  await expect(desk).toHaveAccessibleName('Decision Desk, 4 open')
+  await expect(desk).toHaveAccessibleName('Decision Desk, 4 open · 4 wait for you · 4 here')
 })

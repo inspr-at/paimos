@@ -1,0 +1,285 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { defineStore } from 'pinia'
+import { computed, onScopeDispose, ref, watch } from 'vue'
+import { useSession } from './session'
+import { ConnectionEnded, connectionLabel, revokeSibling, readInstances, readSibling, type DeskSibling, type ElsewhereDiscovery, type ElsewhereSummary } from '../lib/deskElsewhere'
+import { deviceSubscriptionHash, phoneSettings } from '../lib/phoneApprovals'
+import { displayLanguage } from '../lib/displayLanguage'
+import { exchangeInstance } from '../lib/instanceConnect'
+
+export type ConnectionState = 'not connected' | 'connecting' | 'reading' | 'ok' | 'unreachable' | 'ended'
+export interface InstanceRead extends DeskSibling {
+  state: ConnectionState; summary: ElsewhereSummary | null; account: string; connectedAt: string; expiresAt: string
+  expanded: boolean; hiddenUntil: number; slots: number
+  notify: boolean; allItems: boolean
+  lastReadAt: number
+}
+interface BrowserGrant { token: string; origin: string; account: string; createdAt: string; expiresAt: string }
+interface Pending { owner: string; tag: string; origin: string; until: number; returnTo: string; verifier: string }
+const PREFIX = 'aeon.desk-connections.', PENDING = `${PREFIX}pending.`, NOTICES = 'aeon:desk-notifications'
+const TOKEN = /^desk_[\da-f-]{36}_[\da-f-]{36}_[A-Za-z0-9_-]{43}$/i
+const STATE = /^[A-Za-z0-9_-]{43}$/
+const storageGet = (key: string) => { try { return localStorage.getItem(key) } catch { return null } }
+const storagePut = (key: string, value: string | null) => { try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value) } catch { /* This tab still works without persistent storage. */ } }
+function readJSON<T>(key: string): T | null { try { return JSON.parse(storageGet(key) ?? 'null') as T | null } catch { return null } }
+const emptyRead = (s: DeskSibling): InstanceRead => ({ ...s, state: 'not connected', summary: null, account: '', connectedAt: '', expiresAt: '', expanded: false, hiddenUntil: 0, slots: 0, notify: true, allItems: false, lastReadAt: 0 })
+
+// One store per signed-in person, shared by every Desk surface. Raw credentials
+// are private browser data: never returned by this store or written via api().
+export const useDeskConnections = defineStore('deskConnections', () => {
+  const session = useSession()
+  const owner = computed(() => session.identity?.principal.kind === 'person' ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
+  const here = ref(''), reads = ref<InstanceRead[]>([]), discovery = ref<ElsewhereDiscovery>('pending')
+  const noticeEnabled = ref(false)
+  const checkedAt = ref(Date.now())
+  let generation = 0, noticeTurn = 0, abort = new AbortController(), discoveryFlight: Promise<void> | undefined
+  const grants = new Map<string, BrowserGrant>(), flights = new Map<string, Promise<void>>(), attempted = new Map<string, number>()
+  const pending = new Map<string, string>()
+  const key = (tag: string, suffix = '') => `${PREFIX}${owner.value}.${tag}${suffix}`
+  const current = (who: string, turn: number) => who === owner.value && turn === generation && session.authenticationCurrent()
+  function patch(tag: string, value: Partial<InstanceRead>) { reads.value = reads.value.map(row => row.tag === tag ? { ...row, ...value } : row) }
+  function save(tag: string) { const grant = grants.get(tag); storagePut(key(tag), grant ? JSON.stringify(grant) : null) }
+  function restore(row: InstanceRead) {
+    const grant = readJSON<BrowserGrant>(key(row.tag))
+    const prefs = readJSON<{ expanded?: boolean; hiddenUntil?: number; slots?: number; ended?: boolean; notify?: boolean; allItems?: boolean }>(key(row.tag, '.view'))
+    row.expanded = prefs?.expanded === true; row.hiddenUntil = Number(prefs?.hiddenUntil) || 0; row.slots = Math.min(5, Math.max(0, Number(prefs?.slots) || 0))
+    row.notify = prefs?.notify !== false; row.allItems = prefs?.allItems === true
+    if (!grant || grant.origin !== row.origin || !TOKEN.test(grant.token) || !Number.isFinite(Date.parse(grant.expiresAt))) { if (prefs?.ended) row.state = 'ended'; return }
+    row.account = typeof grant.account === 'string' ? grant.account.slice(0, 120) : ''; row.connectedAt = grant.createdAt; row.expiresAt = grant.expiresAt
+    if (Date.parse(grant.expiresAt) <= Date.now()) { row.state = 'ended'; row.slots = 0; storagePut(key(row.tag), null); storagePut(key(row.tag, '.view'), JSON.stringify({ ...prefs, ended: true, slots: 0 })); return }
+    grants.set(row.tag, grant); row.state = 'reading'
+  }
+  function view(tag: string) {
+    const row = reads.value.find(r => r.tag === tag)
+    if (row) storagePut(key(tag, '.view'), JSON.stringify({ expanded: row.expanded, hiddenUntil: row.hiddenUntil, slots: row.slots, ended: row.state === 'ended', notify: row.notify, allItems: row.allItems }))
+  }
+  function expand(tag: string) { const row = reads.value.find(r => r.tag === tag); if (row) { patch(tag, { expanded: !row.expanded }); view(tag) } }
+  function dismiss(tag: string) { patch(tag, { hiddenUntil: Date.now() + 30 * 86400_000 }); view(tag) }
+  function setNotify(tag: string, notify: boolean) { patch(tag, { notify }); view(tag) }
+  async function showAll(tag: string) {
+    const who = owner.value, turn = generation
+    patch(tag, { allItems: true }); view(tag)
+    if (flights.has(tag)) await flights.get(tag)
+    if (current(who, turn)) await readOne(tag, true, true)
+  }
+  function ended(tag: string) { grants.delete(tag); flights.delete(tag); save(tag); patch(tag, { state: 'ended', summary: null, slots: 0 }); view(tag) }
+
+  async function notificationPreference() {
+    const who = owner.value, turn = generation, notice = ++noticeTurn
+    const valid = () => current(who, turn) && notice === noticeTurn
+    if (!who) return
+    noticeEnabled.value = false
+    try {
+      const hash = await deviceSubscriptionHash()
+      if (!hash || !valid()) { if (valid()) noticeEnabled.value = false; return }
+      const settings = await phoneSettings(abort.signal)
+      if (valid()) noticeEnabled.value = settings.subscriptions.some(sub => sub.endpoint_hash === hash && sub.desk_enabled)
+    } catch { if (valid()) noticeEnabled.value = false }
+  }
+  async function notify(tag: string, summary: ElsewhereSummary, baseline: boolean, who: string, turn: number, grant: BrowserGrant) {
+    const run = async () => {
+      if (!current(who, turn) || grants.get(tag) !== grant) return
+      // One bounded lookup/claim per item, without loading an ever-growing
+      // ledger. Prime even an empty Desk so its first arrival can notify.
+      const seenKey = `${PREFIX}${who}.${tag}.seen`
+      const previous = Number(storageGet(seenKey))
+      const asOf = Date.parse(summary.asOf)
+      // Compare source creation times with the last successful source read,
+      // never the top-five membership or this browser's clock. Reconnects
+      // establish a new baseline so old backlog cannot become a notification.
+      const after = Math.max(Number.isFinite(previous) ? previous : 0, Date.parse(grant.createdAt))
+      storagePut(seenKey, String(Math.max(previous || 0, asOf)))
+      for (const line of summary.lines) {
+        const id = `${line.kind}:${line.id}`
+        const claim = `${PREFIX}${who}.${tag}.notice.${encodeURIComponent(id)}`
+        if (storageGet(claim)) continue
+        storagePut(claim, '1')
+        if (storageGet(claim) !== '1') continue // No repeatable delivery without a durable claim.
+        if (baseline || !Number.isFinite(Date.parse(line.createdAt)) || Date.parse(line.createdAt) <= after || !noticeEnabled.value || reads.value.find(r => r.tag === tag)?.notify === false || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue
+        const de = displayLanguage() === 'de', title = de ? `Neu auf ${tag}: ${line.title}` : `New on ${tag}: ${line.title}`
+        const body = [line.projectKey, de ? `auf ${tag} entscheiden` : `decide on ${tag}`].filter(Boolean).join(' · ')
+        try {
+          const notice = new Notification(title, { body, tag: `desk-${tag}-${id}` })
+          notice.onclick = () => { notice.close(); if (current(who, turn) && grants.get(tag) === grant) window.open(line.url, '_blank', 'noopener,noreferrer') }
+        } catch {
+          // iOS and some installed browsers require service-worker delivery.
+          // The home URL stays in a fragment, never in a request to this server.
+          try {
+            const registration = await navigator.serviceWorker?.getRegistration('/')
+            if (!current(who, turn) || grants.get(tag) !== grant) return
+            const fragment = new URLSearchParams({ instance: tag, url: line.url, owner: who })
+            await registration?.showNotification(title, { body, tag: `desk-${tag}-${id}`, data: { path: `/instances/open#${fragment}` } })
+          } catch { /* A failed delivery never affects the in-app count. */ }
+        }
+      }
+    }
+    // Across tabs, a durable claim precedes delivery. Never send anything to a server.
+    if (typeof navigator !== 'undefined' && navigator.locks) await navigator.locks.request(`${PREFIX}${who}.notify`, run)
+    else run()
+  }
+  function readOne(tag: string, force = false, silent = false): Promise<void> {
+    if (flights.has(tag)) return flights.get(tag)!
+    const row = reads.value.find(r => r.tag === tag), grant = grants.get(tag)
+    if (!row || !grant || !owner.value || !session.authenticationCurrent()) return Promise.resolve()
+    if (Date.parse(grant.expiresAt) <= Date.now()) { ended(tag); return Promise.resolve() }
+    if (!force && Date.now() - (attempted.get(tag) ?? 0) < 25_000) return Promise.resolve()
+    attempted.set(tag, Date.now())
+    const watermark = Number(storageGet(key(tag, '.seen')))
+    const who = owner.value, turn = generation, signal = abort.signal, baseline = !Number.isFinite(watermark) || watermark <= 1 || watermark < Date.parse(grant.createdAt)
+    const valid = () => current(who, turn) && grants.get(tag) === grant && !signal.aborted
+    if (!row.summary) patch(tag, { state: 'reading' })
+    let flight!: Promise<void>
+    flight = (async () => {
+      try {
+        const summary = await readSibling(row, grant.token, signal, row.allItems ? 100 : 5)
+        if (!valid()) return
+        if (Date.parse(grant.expiresAt) <= Date.now()) { ended(tag); return }
+        patch(tag, { state: 'ok', summary, slots: Math.min(5, summary.lines.length), lastReadAt: Date.now() }); view(tag)
+        await notify(tag, summary, baseline || silent, who, turn, grant)
+      } catch (error) {
+        if (!valid()) return
+        if (error instanceof ConnectionEnded) ended(tag)
+        else patch(tag, { state: 'unreachable' }) // Retain the last answer, explicitly dated by the UI.
+      } finally { if (flights.get(tag) === flight) flights.delete(tag) }
+    })()
+    flights.set(tag, flight); return flight
+  }
+  function discover(): Promise<void> {
+    if (discoveryFlight) return discoveryFlight
+    const who = owner.value, turn = generation
+    if (!who || !session.authenticationCurrent()) return Promise.resolve()
+    let flight!: Promise<void>
+    flight = (async () => {
+      try {
+        const instances = await readInstances(abort.signal)
+        if (!current(who, turn)) return
+        here.value = instances.here
+        reads.value = instances.siblings.map(s => { const row = emptyRead(s); restore(row); return row })
+        discovery.value = 'known'
+        await Promise.all(reads.value.map(row => readOne(row.tag)))
+      } catch { if (current(who, turn)) discovery.value = 'unknown' }
+      finally { if (discoveryFlight === flight) discoveryFlight = undefined }
+    })()
+    discoveryFlight = flight; return flight
+  }
+  async function refresh(force = false) {
+    checkedAt.value = Date.now()
+    if (discovery.value !== 'known') return discover()
+    for (const [tag, state] of pending) {
+      const p = readJSON<Pending>(PENDING + state)
+      if (!p || p.until <= Date.now()) cancel(tag)
+    }
+    await Promise.all(reads.value.map(row => readOne(row.tag, force)))
+  }
+  async function connect(tag: string) {
+    const row = reads.value.find(r => r.tag === tag), who = owner.value, turn = generation
+    if (!row || !who || !session.authenticationCurrent()) return
+    cancel(tag)
+    const random = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const state = random(), verifier = random()
+    const record: Pending = { owner: who, tag, origin: row.origin, verifier, until: Date.now() + 10 * 60_000, returnTo: location.pathname + location.search }
+    storagePut(PENDING + state, JSON.stringify(record))
+    if (!storageGet(PENDING + state)) { patch(tag, { state: 'unreachable' }); return }
+    pending.set(tag, state); patch(tag, { state: 'connecting', hiddenUntil: 0 })
+    let digest: ArrayBuffer
+    try { digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)) }
+    catch { if (current(who, turn) && pending.get(tag) === state) { cancel(tag); patch(tag, { state: 'unreachable' }) }; return }
+    if (!current(who, turn) || pending.get(tag) !== state) return
+    const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const url = new URL('/instances/connect', row.origin); url.searchParams.set('origin', location.origin); url.searchParams.set('state', state); url.searchParams.set('code_challenge', challenge)
+    window.open(url.href, '_blank', 'noopener,noreferrer')
+  }
+  function cancel(tag: string) {
+    const state = pending.get(tag)
+    if (state) storagePut(PENDING + state, null)
+    pending.delete(tag)
+    const row = reads.value.find(r => r.tag === tag)
+    if (row?.state === 'connecting') patch(tag, { state: grants.has(tag) ? (row.summary ? 'ok' : 'reading') : 'not connected' })
+  }
+  async function acceptFragment(fragment: string): Promise<string | null> {
+    if (!owner.value || !session.authenticationCurrent() || fragment.length > 2048) return null
+    const params = new URLSearchParams(fragment.replace(/^#/, '')), state = params.get('state') ?? ''
+    if (!STATE.test(state)) return null
+    const accept = async () => {
+      const who = owner.value, turn = generation
+      const record = readJSON<Pending>(PENDING + state)
+      storagePut(PENDING + state, null) // Single use, including refused callbacks.
+      if (!record || record.owner !== owner.value || record.until < Date.now()) return null
+      if (discovery.value !== 'known') await discover()
+      if (!current(who, turn)) return null
+      const row = reads.value.find(r => r.tag === record.tag && r.origin === record.origin)
+      const code = params.get('code') ?? ''
+      if (!row || params.get('instance') !== row.tag || !/^code_[\da-f-]{36}_[\da-f-]{36}_[A-Za-z0-9_-]{43}$/i.test(code) || !STATE.test(record.verifier) || params.has('token')) return null
+      const previous = grants.get(row.tag), signal = abort.signal
+      const valid = () => current(who, turn) && grants.get(row.tag) === previous && !signal.aborted
+      if (previous) {
+        await revokeSibling(row, previous.token, signal)
+        if (!valid()) return null
+        ended(row.tag)
+      }
+      const grant: BrowserGrant = await exchangeInstance(row, code, state, record.verifier, signal)
+      if (!current(who, turn) || signal.aborted || grants.has(row.tag)) {
+        // An identity change or another callback cannot leave an adopted-orphan grant.
+        void revokeSibling(row, grant.token).catch(() => {})
+        return null
+      }
+      const { createdAt, expiresAt } = grant
+      flights.delete(row.tag); attempted.delete(row.tag)
+      grants.set(row.tag, grant); save(row.tag); pending.delete(row.tag)
+      patch(row.tag, { state: 'reading', account: grant.account, connectedAt: createdAt, expiresAt, hiddenUntil: 0, summary: null })
+      view(row.tag)
+      await readOne(row.tag, true)
+      if (!current(who, turn)) return null
+      return record.returnTo.startsWith('/') && !record.returnTo.startsWith('//') && !record.returnTo.startsWith('/\\') ? record.returnTo : '/decision-desk'
+    }
+    if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`${PREFIX}connect.${state}`, accept)
+    return accept()
+  }
+  async function disconnect(tag: string): Promise<boolean> {
+    const row = reads.value.find(r => r.tag === tag), grant = grants.get(tag), who = owner.value, turn = generation
+    if (!row || !grant) return false
+    // Keep the credential until the home instance confirms revocation, so a
+    // failed Disconnect can be retried and never claims to have ended access.
+    await revokeSibling(row, grant.token, abort.signal)
+    if (!current(who, turn) || grants.get(tag) !== grant) return false
+    cancel(tag); grants.delete(tag); flights.delete(tag); attempted.delete(tag); save(tag)
+    patch(tag, { ...emptyRead(row), expanded: row.expanded, notify: row.notify }); view(tag)
+    return true
+  }
+  function reset() {
+    for (const state of pending.values()) storagePut(PENDING + state, null)
+    generation++; noticeTurn++; abort.abort(); abort = new AbortController()
+    grants.clear(); flights.clear(); attempted.clear(); pending.clear(); discoveryFlight = undefined
+    here.value = ''; reads.value = []; discovery.value = owner.value ? 'pending' : 'known'; noticeEnabled.value = false
+  }
+  watch(owner, () => { reset(); void notificationPreference(); void discover() }, { immediate: true, flush: 'sync' })
+  const focus = async () => { checkedAt.value = Date.now(); await notificationPreference(); void refresh(true) }
+  const storage = (event: StorageEvent) => {
+    if (event.key?.startsWith(PREFIX) && owner.value) {
+      // Callback/disconnect in another tab: restore only this person's configured rows.
+      for (const row of reads.value) {
+        if (event.key === key(row.tag)) {
+          grants.delete(row.tag); flights.delete(row.tag); attempted.delete(row.tag)
+          const next = emptyRead(row); restore(next); patch(row.tag, next)
+          void readOne(row.tag, true)
+        }
+      }
+    }
+  }
+  const signout = (event: Event) => { if ((event as CustomEvent<string>).detail === owner.value) reset() }
+  if (typeof window !== 'undefined') { window.addEventListener('aeon:desk-signout', signout); window.addEventListener('focus', focus); window.addEventListener('storage', storage); window.addEventListener(NOTICES, notificationPreference) }
+  onScopeDispose(() => { reset(); if (typeof window !== 'undefined') { window.removeEventListener('aeon:desk-signout', signout); window.removeEventListener('focus', focus); window.removeEventListener('storage', storage); window.removeEventListener(NOTICES, notificationPreference) } })
+  const count = computed(() => reads.value.reduce((n, r) => n + (r.summary?.open ?? 0), 0))
+  const complete = computed(() => discovery.value === 'known' && reads.value.every(r => !grants.has(r.tag) || (r.state === 'ok' && checkedAt.value - r.lastReadAt < 60_000)))
+  const allClear = computed(() => complete.value && count.value === 0)
+  const text = (en: string, de: string) => displayLanguage() === 'de' ? de : en
+  const breakdown = computed(() => reads.value.flatMap(r => {
+    if (r.state === 'not connected') return []
+    if (r.state === 'ended') return [`${r.tag}: ${connectionLabel(r.state, { standalone: false })}`]
+    if (r.summary) return [text(`${r.summary.open} on ${r.tag}`, `${r.summary.open} auf ${r.tag}`) + (r.state === 'unreachable' ? text(` (as of ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`, ` (Stand ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`) : '')]
+    return [`${r.tag}: ${connectionLabel(r.state, { standalone: false })}`]
+  }))
+  const checkedAge = (seconds: number) => text(`checked ${seconds}\u00a0s ago`, `vor ${seconds}\u00a0s geprüft`)
+  const syncTooltip = (now: number) => reads.value.filter(r => r.state !== 'not connected').map(r => `${r.tag}: ${r.state === 'unreachable' || r.state === 'ended' || !r.summary ? connectionLabel(r.state, { standalone: false }) : checkedAge(Math.max(0, Math.floor((now - r.lastReadAt) / 1000)))}${r.state === 'unreachable' && r.summary ? text(` · showing ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, ` · Stand ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`) : ''}`).join('\n')
+  return { here, reads, discovery, count, complete, allClear, breakdown, syncTooltip, noticeEnabled, refresh, connect, cancel, acceptFragment, disconnect, expand, dismiss, setNotify, showAll }
+})

@@ -13,6 +13,7 @@ import { toast } from './lib/toast'
 import { settleConfirm } from './lib/confirm'
 import { announceAttachCode, attachCodeFromHash, dropAttachCode, hasAttachFragment, holdAttachCode } from './lib/attachLink'
 import { scopeOwner } from './lib/identityScope'
+import { holdInstanceFragment } from './lib/instanceConnect'
 import { carriesDraft, draftInAddress, holdDraft } from './lib/importDraft'
 import { expiredSignIn, takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
@@ -114,6 +115,9 @@ export const router = createRouter({
     { path: '/settings/:section(personal|theme|developer|policies|models|routines|agent-rules|accounts|computers|capacity|workspace|vocabulary|kinds|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
+    { path: '/instances/connect', component: () => import('./views/InstanceConnectView.vue'), meta: { title: 'Connect instance', bare: true } },
+    { path: '/instances/connected', component: () => import('./views/InstanceConnectView.vue'), props: { callback: true }, meta: { title: 'Instance connected', bare: true } },
+    { path: '/instances/open', component: () => import('./views/InstanceConnectView.vue'), props: { openHome: true }, meta: { title: 'Open decision', bare: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/from-classic/:rest(.*)*', component: () => import('./views/FromClassicView.vue'), meta: { title: 'Finding your page' } },
@@ -148,6 +152,11 @@ function refreshSession() {
 // A code held for a session that is gone is dropped, and the return path never carries it.
 function signInAgain(fullPath: string) { dropAttachCode(); return expiredSignIn(fullPath) }
 router.beforeEach(async (to, from) => {
+  if ((to.path === '/instances/connected' || to.path === '/instances/open') && to.hash) {
+    holdInstanceFragment(to.hash)
+    window.history.replaceState(window.history.state, '', to.path)
+    return { path: to.path, query: {}, hash: '', replace: true }
+  }
   // An open confirmation belongs to the record that was on screen. Back,
   // Forward and another quote change that record before this guard continues,
   // so the confirmation is refused and cannot land on the record now shown.
@@ -233,6 +242,7 @@ router.beforeEach(async (to, from) => {
     // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
     if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
     if (to.path.startsWith('/phone-approvals/')) return { path: '/signin', query: { return: to.fullPath } }
+    if (to.path === '/instances/connect') return { path: '/signin', query: { return: to.fullPath } }
     if (to.path === '/new-project') return { path: '/signin', query: { return: '/new-project' } }
     if (wasSignedIn) return signInAgain(to.fullPath)
     dropAttachCode()

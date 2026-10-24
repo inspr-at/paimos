@@ -39,7 +39,7 @@ export function displayLanguageViolations(source, filename) {
   const inspect = node => {
     const raw = text(node)
     const comparison = ts.isBinaryExpression(node) && [ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(node.operatorToken.kind)
-    const germanDetector = ts.isCallExpression(node) && (/\.(?:startsWith|includes|indexOf)\s*\(\s*['"]de(?:[-_][^'"]*)?['"]/.test(raw) || /\/\^de[^/]*\/[a-z]*\.test\(/.test(raw))
+    const germanDetector = ts.isCallExpression(node) && (/\.(?:startsWith|includes|indexOf)\s*\(\s*['"]de(?:[-_][^'"]*)?['"]/.test(raw) || /\/\^de(?![A-Za-z0-9])[^/]*\/[a-z]*\.test\(/.test(raw))
     const profileDetector = ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && ['test', 'match', 'search', 'startsWith', 'includes', 'indexOf'].includes(node.expression.name.text) && locale(node)
     if (germanDetector || profileDetector || comparison && locale(node) && /['"](?:de|en)(?:[-_][^'"]*)?['"]/.test(raw)) {
       const { line } = tree.getLineAndCharacterOfPosition(node.getStart(tree))

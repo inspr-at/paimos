@@ -13,6 +13,7 @@ import { settleConfirm } from '../lib/confirm'
 import { setPreferenceOwner } from '../lib/preferences'
 import { resetPositions } from '../lib/position'
 import { resetReleaseOpen } from '../lib/releaseMembership'
+import { clearPersonConnections } from '../lib/instanceConnect'
 
 export class SignInError extends Error {
   readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
@@ -125,6 +126,8 @@ export const useSession = defineStore('session', () => {
     // End outstanding work before the cookie can change. Keep the account menu
     // until the server answers, so a failed sign-out still offers its retry.
     const started = ++epoch
+    const departing = identity.value
+    if (departing?.principal.kind === 'person') clearPersonConnections(`${departing.tenant.id}:${departing.principal.id}`)
     setPreferenceOwner(null, authenticationCurrent)
     resetToasts()
     settleConfirm(false)

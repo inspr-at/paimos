@@ -3936,7 +3936,7 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestDeskPeekClearFollowsBrowserCookiePath","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/auth","name":"TestDeskPeekCookieReadsOnlyTheOwnerSummaryFromASibling","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/auth","name":"TestDeskSummaryRejectsSessionAndRetiredPeekCookies","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestDevIdentitySubjectPreservesUnicodeMailbox","tier":"GATED-FULL"}
     ,
@@ -6232,6 +6232,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestConcurrentClaimsRetryRecipientAndRevocation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestConnectionHistoryCodeRequiresSingleUsePKCE","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestCoverageFailureExplainsLimit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestCutoverLinksKeepSourceIdentity","tier":"ESSENTIAL"}
@@ -6246,6 +6248,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestDeskQuestionCommittedEventWakesSender","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestExchangeAndDisconnectPreflight","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestHeldRequestCanonicalizationDoesNotRepeatNotice","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource","tier":"GATED-FULL"}
@@ -6254,7 +6258,9 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestNotificationPointersAndNormalBriefingItem","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/decisiondesk","name":"TestOwnerSummaryStaysWithTheOwnerAndCarriesFirstLinesOnly","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/decisiondesk","name":"TestPersonConnectionsScopeExpiryAndRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestPersonDiscoveryAndProjectionRetainOwnAskersAndUpcoming","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestPersonStepProjectionIgnoresIrrelevantCoverage","tier":"ESSENTIAL"}
     ,
@@ -6277,6 +6283,12 @@
     {"kind":"go","package":"internal/decisiondesk","name":"TestStepupProjectionBoundsTargetPermissionsAtProjectLimit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestStepupProjectionUsesNativePermissionAndHeldExpiry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestSummaryLimiterWindowAndUsageClaim","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestSummaryParallelReadsAvoidFenceAndRateLimitBurst","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestSummaryPreflightAllowsOnlyConfiguredReadOriginsAndHeaders","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestTierCutoverUsesNativeRowsAndCurrentProjectPermissions","tier":"ESSENTIAL"}
     ,

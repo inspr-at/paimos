@@ -90,7 +90,9 @@ export async function setDeskSubscription(enabled: boolean, publicKey: string, p
   signal.throwIfAborted()
   if (!subscription) throw new Error('desk-subscription')
   const { endpoint, keys } = subscription.toJSON()
-  return phoneRequest<PhoneItem>('/me/phone-approvals/subscriptions', 'POST', { endpoint, keys, desk_enabled: enabled }, signal)
+  const saved = await phoneRequest<PhoneItem>('/me/phone-approvals/subscriptions', 'POST', { endpoint, keys, desk_enabled: enabled }, signal)
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('aeon:desk-notifications'))
+  return saved
 }
 export const reviewPath = (kind: PhoneKind, id: string) => `/phone-approvals/${kind}/${encodeURIComponent(id)}`
 export function decodeBytes(value: string): ArrayBuffer {

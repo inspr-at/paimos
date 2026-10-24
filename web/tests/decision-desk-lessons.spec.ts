@@ -240,7 +240,7 @@ test('AEON-1331 lesson scope names its filter and Show all restores other waitin
   await expect(page.getByTestId('desk-row-a:approval-1')).toHaveCount(0)
   await expect(page.getByText('Nothing is waiting in the available sources.')).toHaveCount(0)
   await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*1$/)
-  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 2 open', exact: true })).toBeVisible()
+  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 2 open · 2 wait for you · 2 here', exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('scope-filtered.png') })
   // The approved layout puts reload actions beside source errors; sample its
   // persistent header along with both tabs and the round action.
@@ -357,12 +357,12 @@ async function lessonUndoAfterReturn(page: Page) {
   await pause(page); await page.getByTestId('desk-decide').click(); await expect(allDecidedUndo(page)).toBeVisible()
   await page.clock.runFor(1200); await expect(page).toHaveURL('/agents'); await expect(page.getByTestId('desk-paper')).toHaveCount(0)
   const place = page.locator('[data-place="desk"] .place-main')
-  await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 0 open')
+  await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 0 open · 0 wait for you · 0 here')
   await page.locator('.toast').filter({ hasText: 'Added to the changelog.' }).getByRole('button', { name: 'Undo', exact: true }).click()
   await expect(page.locator('.toast').filter({ hasText: 'Undone. The lesson waits on the Desk again.' })).toBeVisible()
   expect(state.calls.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'undo']); expect(state.decided).toBe(false)
   // The header's Desk reads the restored lesson again.
-  await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 1 open')
+  await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 1 open · 1 waits for you · 1 here')
 }
 
 // AEON-1622 risk: a Desk read that began before a lesson was decided lands after the decision, puts the
