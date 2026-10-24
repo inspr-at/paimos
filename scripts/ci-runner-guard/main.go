@@ -20,7 +20,6 @@ const mainRoutedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_disp
 
 const routedRunner = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 const routedGoShards = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
-const hostedGoShards = `${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
 const visualCaptureRefusal = `set -euo pipefail
 if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$GITHUB_REF" != refs/heads/main ] || [ "$GITHUB_WORKFLOW_REF" != inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main ]; then
@@ -697,8 +696,8 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			return fmt.Errorf("required CI job %q must use the reviewed PR classification gate", id)
 		}
 	}
-	if mapping(mapping(mapping(jobs["go-test"])["strategy"])["matrix"])["shard"] != hostedGoShards {
-		return fmt.Errorf("hosted shard count must retain two essential PR shards and seven full shards")
+	if mapping(mapping(mapping(jobs["go-test"])["strategy"])["matrix"])["shard"] != routedGoShards {
+		return fmt.Errorf("Go shard count must retain the guarded four-way layout and two/seven fallback")
 	}
 	if mapping(tiers["outputs"])["web_shards"] != "${{ steps.tiers.outputs.web_shards }}" {
 		return fmt.Errorf("ci-plan must publish the planned web shard list")

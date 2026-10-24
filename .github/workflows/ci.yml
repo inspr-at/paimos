@@ -544,8 +544,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Hosted shards retain the PR essential/full partition counts.
-        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
+        # Retain the guarded four-way partition when the route reports the Mac
+        # layout; execution stays hosted, including reruns of that partition.
+        shard: ${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
     runs-on: ubuntu-latest
     services:
       postgres:

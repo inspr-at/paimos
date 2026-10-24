@@ -120,6 +120,39 @@ func TestVisualCaptureRunnerBoundary(t *testing.T) {
 		})
 	}
 	ci := readPolicyWorkflows(t)["ci.yml"]
+	// Risk: hosted-only execution could accidentally remove the four-way
+	// partition or accept it without the reviewed event/ref/attempt guards.
+	for _, sample := range []struct {
+		name, selection string
+		allowed         bool
+	}{
+		{"guarded four-way", routedGoShards, true},
+		{"four-way removed", `${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`, false},
+		{"stale attempt", strings.Replace(routedGoShards, "outputs.run_attempt == github.run_attempt && ", "", 1), false},
+		{"non-main ref", strings.Replace(routedGoShards, "github.ref == 'refs/heads/main'", "true", 1), false},
+		{"fork", strings.Replace(routedGoShards, " && github.event.pull_request.head.repo.full_name == github.repository", "", 1), false},
+		{"wrong runner class", strings.Replace(routedGoShards, "outputs.runner_class == 'mbp2606' && ", "", 1), false},
+	} {
+		t.Run("hosted Go partition/"+sample.name, func(t *testing.T) {
+			var changed map[string]any
+			if err := yaml.Unmarshal(ci, &changed); err != nil {
+				t.Fatal(err)
+			}
+			job := mapping(mapping(changed["jobs"])["go-test"])
+			if job["runs-on"] != "ubuntu-latest" {
+				t.Fatal("Go partition coverage requires literal hosted execution")
+			}
+			mapping(mapping(job["strategy"])["matrix"])["shard"] = sample.selection
+			err := checkCITriggersAndRequiredChecks(changed)
+			if sample.allowed {
+				if err != nil {
+					t.Fatalf("guarded hosted partition rejected: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "Go shard count must retain the guarded four-way layout") {
+				t.Fatalf("unsafe partition accepted or wrong rejection: %v", err)
+			}
+		})
+	}
 	for _, selection := range []string{"self-hosted", "[self-hosted, linux, x64]", routedRunner, "${{ matrix.runner }}"} {
 		t.Run("CI remains hosted/"+selection, func(t *testing.T) {
 			changed := strings.Replace(string(ci), "runs-on: ubuntu-latest", "runs-on: "+selection, 1)
