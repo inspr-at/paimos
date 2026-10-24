@@ -112,6 +112,7 @@ func (s *Service) Complete(ctx context.Context, in Completion) (Handoff, error) 
 			in.TenantID, in.TransactionID, in.TenantSlug, in.Origin, now).Scan(&out.State); err != nil {
 			return refused(err)
 		}
+		now = s.now()
 		tag, err := tx.Exec(ctx, `UPDATE native_login_transactions
 			SET person_id=$3::uuid,identity_id=$4::uuid,code_hash=$5,code_expires_at=$6,callback_at=$7,state_app=NULL
 			WHERE tenant_id=$1::uuid AND id=$2::uuid AND callback_at IS NULL AND expires_at>$7`,
@@ -201,6 +202,9 @@ func (s *Service) Exchange(ctx context.Context, in Exchange) (Tokens, error) {
 		if label == "" {
 			label = "PAIMOS App"
 		}
+		// Authorization and row acquisition may wait. Expiry belongs to the
+		// guarded consume, and the new family's leases start at issuance.
+		now = s.now()
 		tag, err := tx.Exec(ctx, `UPDATE native_login_transactions SET used_at=$3
 			WHERE tenant_id=$1::uuid AND id=$2::uuid AND used_at IS NULL AND expires_at>$3 AND code_expires_at>$3`, tid, id, now)
 		if err != nil {

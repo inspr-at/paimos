@@ -229,7 +229,7 @@ func TestNativeLoginHandoffAndExchange(t *testing.T) {
 // AEON-1731 risk: a stolen/replayed code crosses a state, verifier, redirect,
 // origin or tenant boundary, or survives loss of membership/person authority.
 func TestNativeLoginRejectsBindingsAndAuthorityLoss(t *testing.T) {
-	for _, name := range []string{"wrong-state", "missing-state", "wrong-verifier", "redirect", "other-instance", "other-tenant", "tenant-prefix", "expired-code", "expired-login", "removed-membership", "inactive-person", "changed-identity"} {
+	for _, name := range []string{"wrong-state", "missing-state", "wrong-verifier", "redirect", "other-instance", "other-tenant", "tenant-prefix", "expired-code", "expired-during-exchange", "expired-login", "removed-membership", "inactive-person", "changed-identity"} {
 		t.Run(name, func(t *testing.T) {
 			f := newNativeFixture(t)
 			p := f.begin()
@@ -271,7 +271,21 @@ func TestNativeLoginRejectsBindingsAndAuthorityLoss(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			res := f.exchange(in, suffix)
+			var res nativeResponse
+			if name == "expired-during-exchange" {
+				pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
+					return strings.Contains(sql, "code_hash,state_hash,person_id::text,identity_id::text FROM native_login_transactions")
+				})
+				f.m.DeviceSessions = devicesessions.New(pool, func() time.Time { return f.now })
+				done := make(chan nativeResponse, 1)
+				go func() { done <- f.exchange(in, suffix) }()
+				barrier.Wait(t, ctx)
+				f.now = f.now.Add(devicesessions.CodeTTL)
+				barrier.Release()
+				res = dbtest.Await(t, ctx, done)
+			} else {
+				res = f.exchange(in, suffix)
+			}
 			f.check(res, want)
 			if !bytes.Contains(res.body, []byte(map[int]string{400: "invalid exchange request", 401: "native login code refused"}[want])) {
 				t.Fatal("exchange failed for the wrong reason")
