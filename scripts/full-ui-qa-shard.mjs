@@ -11,6 +11,7 @@ export const assignmentPath = fileURLToPath(new URL('./ci/full-ui-qa-shards.json
 export const loadAssignment = () => JSON.parse(readFileSync(assignmentPath, 'utf8'))
 export const formatAssignment = assignment => JSON.stringify({ ...assignment, specs: [] }, null, 2)
   .replace('"specs": []', `"specs": [\n${assignment.specs.map(spec => `    ${JSON.stringify(spec)}`).join(',\n')}\n  ]`) + '\n'
+const isAudit = spec => /^tests\/ui-audit(?:-(?:dark|light)-\d+)?\.spec\.ts$/.test(spec.file)
 
 export function fullUIInventory(root = webRoot) {
   const config = readFileSync(resolve(root, 'playwright.ui.config.ts'), 'utf8')
@@ -24,27 +25,27 @@ export function fullUIInventory(root = webRoot) {
 }
 
 export function checkAssignment(assignment, expected = fullUIInventory()) {
-  if (assignment.version !== 1 || assignment.shards !== 5 || !Array.isArray(assignment.specs) ||
+  if (assignment.version !== 1 || assignment.shards !== 8 || !Array.isArray(assignment.specs) ||
       !assignment.specs.length || assignment.specs.length > 10_000 ||
       !Number.isFinite(assignment.setupSeconds) || assignment.setupSeconds < 0 || assignment.targetMinutes !== 60) {
-    throw new Error('Expected five Full QA shards with a setup reserve and 60-minute target')
+    throw new Error('Expected eight Full QA shards with a setup reserve and 60-minute target')
   }
   const found = new Set(expected), seen = new Set()
   for (const spec of assignment.specs) {
     if (seen.has(spec.file)) throw new Error(`Duplicate Full QA spec: ${spec.file}`)
     if (!found.has(spec.file)) throw new Error(`Stale or unexpected Full QA spec: ${spec.file}`)
-    if (!Number.isInteger(spec.shard) || spec.shard < 1 || spec.shard > 5 ||
+    if (!Number.isInteger(spec.shard) || spec.shard < 1 || spec.shard > assignment.shards ||
         !Number.isFinite(spec.seconds) || spec.seconds < 0) throw new Error(`Invalid Full QA assignment: ${spec.file}`)
     seen.add(spec.file)
   }
   for (const file of expected) if (!seen.has(file)) throw new Error(`Unassigned Full QA spec: ${file}`)
-  const projected = Array.from({ length: 5 }, (_, index) => {
+  const projected = Array.from({ length: assignment.shards }, (_, index) => {
     const specs = assignment.specs.filter(spec => spec.shard === index + 1)
     if (!specs.length) throw new Error(`Empty Full QA shard: ${index + 1}`)
     const seconds = assignment.setupSeconds + specs.reduce((sum, spec) => sum + spec.seconds, 0)
     return { shard: index + 1, files: specs.length, minutes: Number((seconds / 60).toFixed(3)),
       withinTarget: seconds <= assignment.targetMinutes * 60,
-      audits: specs.filter(spec => /^tests\/ui-audit(?:-(?:dark|light)-\d+)?\.spec\.ts$/.test(spec.file)).map(spec => spec.file) }
+      audits: specs.filter(isAudit).map(spec => spec.file) }
   })
   return { specs: seen.size, projected }
 }
@@ -55,16 +56,42 @@ export function rebalance(assignment) {
   const weights = Object.fromEntries(assignment.specs.map(spec => [spec.file, spec.seconds]))
   const owners = assignment.specs.map(spec => ({ kind: 'browser', file: spec.file }))
   const placements = new Map()
-  for (let index = 1; index <= 5; index++) {
-    for (const spec of assignShard(owners, index, 5, weights)) placements.set(spec.file, index)
+  for (let index = 1; index <= assignment.shards; index++) {
+    for (const spec of assignShard(owners, index, assignment.shards, weights)) placements.set(spec.file, index)
   }
-  return { ...assignment, specs: assignment.specs.map(spec => ({ ...spec, shard: placements.get(spec.file) }))
-    .sort((a, b) => a.file.localeCompare(b.file)) }
+  const specs = assignment.specs.map(spec => ({ ...spec, shard: placements.get(spec.file) }))
+    .sort((a, b) => a.file.localeCompare(b.file))
+  // LPT can leave a shard without an audit. Exchange the closest-duration
+  // one- or two-file bundle with an audit from a shard that has more than one.
+  // Timings stay untouched; the sorted scan and strict tie-break are repeatable.
+  for (let index = 1; index <= assignment.shards; index++) {
+    if (specs.some(spec => spec.shard === index && isAudit(spec))) continue
+    const candidates = specs.filter(spec => spec.shard === index && !isAudit(spec))
+      .sort((a, b) => a.seconds - b.seconds || a.file.localeCompare(b.file))
+    let best
+    const consider = (audit, bundle) => {
+      const difference = Math.abs(audit.seconds - bundle.reduce((sum, spec) => sum + spec.seconds, 0))
+      if (!best || difference < best.difference) best = { audit, bundle, difference }
+    }
+    for (const audit of specs.filter(isAudit)) {
+      if (specs.filter(spec => spec.shard === audit.shard && isAudit(spec)).length < 2) continue
+      for (const spec of candidates) consider(audit, [spec])
+      for (let left = 0, right = candidates.length - 1; left < right;) {
+        consider(audit, [candidates[left], candidates[right]])
+        if (candidates[left].seconds + candidates[right].seconds < audit.seconds) left++
+        else right--
+      }
+    }
+    if (!best) throw new Error(`Cannot spread Full QA audits to shard: ${index}`)
+    for (const spec of best.bundle) spec.shard = best.audit.shard
+    best.audit.shard = index
+  }
+  return { ...assignment, specs }
 }
 
 export function shardArgs(assignment, partition, root = webRoot) {
   const { index, count } = parseShard(partition)
-  if (count !== assignment.shards) throw new Error('Full QA requires shard i/5')
+  if (count !== assignment.shards) throw new Error(`Full QA requires shard i/${assignment.shards}`)
   return ['test', '--config=playwright.ui.config.ts', '--workers=1', '--retries=0', '--forbid-only',
     '--trace=retain-on-failure', '--reporter=github,line,json',
     ...assignment.specs.filter(spec => spec.shard === index).map(spec =>
@@ -90,7 +117,7 @@ export async function main(args, { assignment = loadAssignment(), expected, root
     writeFileSync(assignmentPath, formatAssignment(next))
     return 0
   }
-  if (args.length !== 1) throw new Error('Usage: full-ui-qa-shard.mjs i/5 | --check | --rebalance')
+  if (args.length !== 1) throw new Error('Usage: full-ui-qa-shard.mjs i/8 | --check | --rebalance')
   const command = shardArgs(assignment, args[0], root)
   // Never launch a browser on a worker's Mac through this CI-only entry point.
   if (!env.CI || ['0', 'false'].includes(env.CI) || env.RUNNER_ENVIRONMENT !== 'github-hosted') {

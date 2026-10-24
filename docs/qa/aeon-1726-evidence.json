@@ -1,8 +1,8 @@
 {
   "license": "SPDX-License-Identifier: AGPL-3.0-only",
   "ticket": "AEON-1726",
-  "testedHead": "6ad933f57c70decaf8cdc91724e8bb5f4fa2ca20",
-  "recordedAt": "2026-10-24T09:41:37.700397+00:00",
+  "testedHead": null,
+  "recordedAt": "2026-10-24T09:54:05.694Z",
   "checks": {
     "workflowAndGuard": {
       "command": "node --test scripts/full-ui-qa.test.mjs",
@@ -23,20 +23,20 @@
       }
     ],
     "workflowShell": {
-      "partitions": 6,
-      "successAndFailureCases": 12,
-      "passed": 12,
+      "partitions": 9,
+      "successAndFailureCases": 18,
+      "passed": 18,
       "browserLaunched": false
     },
     "remoteStatic": {
       "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
-      "exit": 0,
-      "summary": "Static pre-filter: 157.38s; 46 passed, 0 optional skipped. Hosted CI remains the proof."
+      "exit": null,
+      "summary": "Awaiting committed-HEAD static check for fix1."
     }
   },
   "inventory": {
     "specs": 397,
-    "filesChangingObservedShardOwnership": 295,
+    "filesChangingObservedShardOwnership": 308,
     "basisCounts": {
       "latest-json": 302,
       "latest-complete-log-file": 46,
@@ -48,69 +48,104 @@
       "latest-complete-log-file": 85.311933,
       "latest-json-and-log": 0.874183,
       "prior-nightly": 48.629183
-    }
+    },
+    "sameTimingRowsAndSourceEvidence": true
   },
   "projected": [
     {
       "shard": 1,
-      "files": 78,
-      "minutes": 83.873,
-      "withinTarget": false,
+      "files": 47,
+      "minutes": 53.169,
+      "withinTarget": true,
       "audits": [
-        "tests/ui-audit-dark-1440.spec.ts",
-        "tests/ui-audit-light-1440.spec.ts",
         "tests/ui-audit.spec.ts"
       ]
     },
     {
       "shard": 2,
-      "files": 79,
-      "minutes": 83.872,
-      "withinTarget": false,
+      "files": 49,
+      "minutes": 53.173,
+      "withinTarget": true,
       "audits": [
-        "tests/ui-audit-dark-1920.spec.ts",
-        "tests/ui-audit-dark-390.spec.ts",
-        "tests/ui-audit-light-1280.spec.ts"
+        "tests/ui-audit-dark-1440.spec.ts"
       ]
     },
     {
       "shard": 3,
-      "files": 79,
-      "minutes": 83.871,
-      "withinTarget": false,
+      "files": 50,
+      "minutes": 53.177,
+      "withinTarget": true,
+      "audits": [
+        "tests/ui-audit-dark-1920.spec.ts"
+      ]
+    },
+    {
+      "shard": 4,
+      "files": 49,
+      "minutes": 53.164,
+      "withinTarget": true,
+      "audits": [
+        "tests/ui-audit-dark-1280.spec.ts"
+      ]
+    },
+    {
+      "shard": 5,
+      "files": 50,
+      "minutes": 53.164,
+      "withinTarget": true,
       "audits": [
         "tests/ui-audit-dark-1024.spec.ts"
       ]
     },
     {
-      "shard": 4,
-      "files": 82,
-      "minutes": 83.861,
-      "withinTarget": false,
+      "shard": 6,
+      "files": 49,
+      "minutes": 53.17,
+      "withinTarget": true,
       "audits": [
-        "tests/ui-audit-light-1024.spec.ts"
+        "tests/ui-audit-dark-390.spec.ts",
+        "tests/ui-audit-light-1024.spec.ts",
+        "tests/ui-audit-light-1920.spec.ts"
       ]
     },
     {
-      "shard": 5,
-      "files": 79,
-      "minutes": 83.863,
-      "withinTarget": false,
+      "shard": 7,
+      "files": 51,
+      "minutes": 53.164,
+      "withinTarget": true,
       "audits": [
-        "tests/ui-audit-dark-1280.spec.ts",
-        "tests/ui-audit-light-1920.spec.ts"
+        "tests/ui-audit-light-1440.spec.ts"
+      ]
+    },
+    {
+      "shard": 8,
+      "files": 52,
+      "minutes": 53.159,
+      "withinTarget": true,
+      "audits": [
+        "tests/ui-audit-light-1280.spec.ts"
       ]
     }
   ],
   "acceptance": {
     "coverageAndNegativeControls": true,
-    "sameFiveShardsOneWorkerZeroRetriesForbidOnly": true,
-    "sixtyMinuteTarget": false,
+    "uiShards": 8,
+    "performanceShardUnchanged": true,
+    "oneWorkerZeroRetriesForbidOnly": true,
+    "jobTimeoutMinutes": 90,
+    "sixtyMinuteTarget": true,
     "setupSecondsPerShard": 120,
     "totalTestMinutes": 409.3401,
-    "perfectPackingMinutesIncludingSetup": 83.86802,
+    "perfectPackingMinutesIncludingSetup": 53.167512,
+    "maxProjectedMinutes": 53.177,
     "completedCurrentEvidenceMinutesBeforePriorEstimates": 360.710917,
-    "reason": "Five single-worker shards cannot meet a 300-minute aggregate target when completed current evidence alone accounts for 360.711 minutes before setup. No tests, assertions, retries or timeouts were reduced. OPS owns workflow_dispatch after the PR exists."
+    "fallback": {
+      "requestedUIShards": 7,
+      "selectedUIShards": 8,
+      "sevenShardPerfectPackingMinutesIncludingSetup": 60.477157,
+      "reason": "Seven single-worker shards cannot meet 60 minutes: 409.3401 / 7 + 2 = 60.477157 minutes even with perfect packing. The fix1 brief authorizes eight when seven cannot meet the target."
+    },
+    "reason": "All eight projections include the unchanged 120-second setup reserve and meet the 60-minute target. The 397 files, their timing evidence, workers, retries, forbid-only, timeout and performance shard are preserved. OPS owns workflow_dispatch after the PR exists."
   },
   "scope": {
     "ciYmlChanged": false,

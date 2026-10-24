@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # Full UI QA file assignment (AEON-1726)
 
-Full UI QA uses `scripts/ci/full-ui-qa-shards.json` for its five UI partitions.
+Full UI QA uses `scripts/ci/full-ui-qa-shards.json` for its eight UI partitions.
 The performance partition retains its existing config and Playwright partition.
 `ci.yml`, its tier policy, browser specs and assertions are unchanged.
 
@@ -28,6 +28,10 @@ The new files are covered by audit slice S7's existing `scripts/**` and `docs/**
 ownership. To update a timing or add a spec, update its source evidence and row,
 then run `node scripts/full-ui-qa-shard.mjs --rebalance`. This uses the canonical
 whole-owner writer in `scripts/test-tiers/core.mjs`, independently of PR shards.
+If that duration balance leaves a partition without an audit, a deterministic
+swap exchanges an audit from a partition with several for the closest-duration
+one- or two-file bundle. This preserves every timing and gives each partition
+an audit without concentrating the slow audit files.
 
 ## Timing evidence and limits
 
@@ -71,23 +75,25 @@ retry settings or timeouts were reduced to improve the projection.
 
 | New shard | Files | Audit files | Projected minutes including reserve |
 | --- | ---: | ---: | ---: |
-| 1 | 78 | 3 | 83.873 |
-| 2 | 79 | 3 | 83.872 |
-| 3 | 79 | 1 | 83.871 |
-| 4 | 82 | 1 | 83.861 |
-| 5 | 79 | 2 | 83.863 |
+| 1 | 47 | 1 | 53.169 |
+| 2 | 49 | 1 | 53.173 |
+| 3 | 50 | 1 | 53.177 |
+| 4 | 49 | 1 | 53.164 |
+| 5 | 50 | 1 | 53.164 |
+| 6 | 49 | 3 | 53.170 |
+| 7 | 51 | 1 | 53.164 |
+| 8 | 52 | 1 | 53.159 |
 
-All ten audit files are spread across the five partitions (`ui-audit.spec.ts` is
-the light-390 audit). Of 349 files observed in the latest run, 295 change their
-recorded shard ownership; the other 48 have no completed latest placement.
+All ten audit files are spread across the eight partitions (`ui-audit.spec.ts` is
+the light-390 audit). The inventory and its 409.340 test minutes are unchanged;
+48 files still use prior nightly timings rather than completed latest placement.
 
-**The requested 60-minute target cannot be met by balancing five single workers.**
-The full timing inventory totals 409.340 test minutes: even perfect packing needs
-83.868 minutes per shard including the reserve. Even discarding all 48 historical
-rows leaves 360.711 minutes of completed current work, already over the aggregate
-300-minute target before setup. `--check` reports `withinTarget: false` explicitly;
-its zero exit status proves inventory coverage, not the runtime target. These
-projections leave about six minutes under the unchanged 90-minute job timeout,
-with uncertainty from the older estimates. The requested 60-minute acceptance
-remains unmet; more concurrent workers or a separate runtime reduction would be
-needed. OPS owns the actual workflow-dispatch proof after the PR exists.
+**Eight shards are required for the 60-minute target with the setup reserve.**
+OPS authorized seven shards with an eight-shard fallback in fix1. Even perfect
+seven-way packing needs 409.340 / 7 + 2 = 60.477 minutes per shard. The eight-shard
+assignment projects at most 53.177 minutes including setup, with at least one
+audit on every shard. The workflow/guard tests require every projection to meet
+the target; `--check` reports `withinTarget: true` for all eight. One worker,
+zero retries, forbid-only and the 90-minute timeout remain unchanged. These are
+projections with uncertainty from the older timings, not a measured successful
+eight-shard run. OPS owns workflow-dispatch proof after the PR exists.
