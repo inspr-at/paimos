@@ -1,0 +1,559 @@
+{
+  "ticket": "AEON-1662",
+  "risk": "Unrelated session readers can satisfy a transport-attempt counter before the table refresh records a failed outcome; the next online event invalidates that outcome and the third-failure banner never appears.",
+  "disposition": "The root-cause fix was already on main via AEON-1420. Strengthen its existing scenario with two competing project-tree reads so the known failing interleaving is exercised on every round.",
+  "baseline_commit": "5a4390185f89ec360233979d5dd3b3ad98eff3be",
+  "spec_sha256": "dd171cb920df244bf91d3870c3fb1f2ee30cbbc50e9fdf74b62df6ed04e3dd5b",
+  "historical_failure": {
+    "pr": 851,
+    "commit": "6b8c7e1af1a5af4084885600bfb4760f77941ece",
+    "job": "https://github.com/inspr-at/paimos/actions/runs/39719621462/job/119630581086",
+    "locator": "getByText('Sessions could not be refreshed:')",
+    "error": "expect(locator).toBeVisible() failed; element(s) not found; timeout 5000ms",
+    "original_test_start_line": 41,
+    "failing_assertion_line": 65,
+    "interpretation": "The missing element is the third-failure banner. This log does not establish that the loaded table vanished."
+  },
+  "timing": {
+    "agents_poll_period_ms": 20000,
+    "get_retries": 2,
+    "retry_delay_ms": "250 * 2 ** attempt * (0.75 + Math.random() * 0.5)",
+    "old_barrier": "All /api/harness-sessions query reads were counted, including project-tree reads. Waiting for already observed transports to settle does not wait for a retry scheduled in the future or for the refresh status update.",
+    "lost_outcome": "After one failure the delayed-update indicator stays visible. A later loop can satisfy its transport counter using another reader and pass the already-visible indicator assertion while the table read is still in backoff. The next online event restarts the poller and invalidates that unfinished read, so it cannot increment the failure count.",
+    "clock_ownership": "The Agents case uses its own real browser clock; the Live Agents case has a separate Playwright page/context. No fake-clock state is shared between cases. The competing-reader reproduction fails within one refresh sequence, without advancing the 20-second periodic timer."
+  },
+  "existing_fix": {
+    "filtered_table_reader_commit": "732d335880598c01e6f6635f0a9350dca6ee9e13",
+    "await_refresh_action_commit": "35a47f469d9c6d997e1a762c74ebb4a542aac478",
+    "merged_by_pr": 857,
+    "merge_commit": "7a3ef4b7f9d11f87974dee9eb2fc9fe6e575201a",
+    "behavior": "Filter the mock to the tenant-wide view=current reader, await the initial complete load, then observe the online-triggered loadAll action through its after callback before asserting status or sending the next event."
+  },
+  "linux_validation": {
+    "runner": "Approved LEAD remote-spec.sh; approved Linux test host; managed headless Chromium; serial one-worker chunks.",
+    "requested_flags_refusal": {
+      "flags": "--repeat-each=30",
+      "exit_code": 2,
+      "message": "remote refused: spec paths only, no flags (the runner sets config and workers)"
+    },
+    "equivalent_native_repetition": "Set Playwright repeatEach: 30 in the UI config on scratch/aeon-1662-baseline-repeats only; no spec or product change. Native reports confirm repeatEachIndex 0 through 29, workers 1, retries 0. Final work branch does not include this config change.",
+    "repetition_commit": "39248542e5a8c4f87ebe9dc6f194d6633cd95b50",
+    "command": "remote-spec.sh <worktree> \"tests/resilient-polling.spec.ts\" \"\" <worktree>/web/test-results/aeon-1662-baseline-30",
+    "run": {
+      "run": "spec-39248542e5-50755",
+      "suite_exit_code": 0,
+      "exit_code": 0,
+      "cleanup_complete": true
+    },
+    "native_blob_reports": 30,
+    "cases_per_repetition": 2,
+    "passed": 60,
+    "failed": 0,
+    "skipped": 0,
+    "retries": 0,
+    "summary": "60 passed (4.7m)",
+    "suite_once": {
+      "run": "spec-5a4390185f-24260",
+      "passed": 2,
+      "failed": 0,
+      "exit_code": 0,
+      "summary": "2 passed (8.5s)",
+      "note": "Initial unchanged-main full-spec run; a final-source full-spec run will also be recorded."
+    }
+  },
+  "original_counter_comparison": {
+    "quiet_runner": {
+      "commit": "fde721e08b0b51ad0e6b0822b1531aa67ce780a7",
+      "run": "spec-fde721e08b-14917",
+      "repetitions": 10,
+      "passed": 10,
+      "failed": 0,
+      "exit_code": 0
+    },
+    "competing_project_reads": {
+      "commit": "c4cff0ff1b6a78730dbfe87d35cf4059ad1fba88",
+      "run": {
+        "run": "spec-c4cff0ff1b-54167",
+        "suite_exit_code": 1,
+        "exit_code": 1,
+        "cleanup_complete": true
+      },
+      "repetitions": 10,
+      "passed": 0,
+      "failed": 10,
+      "failure_reason": "Every failure is the same missing third-failure banner as PR851: getByText('Sessions could not be refreshed:'); element(s) not found. No timeout increase or sleeping fixture was used."
+    },
+    "conclusion": "The original quiet-run pass does not establish synchronization. Starting two independent project reads alongside online recovery reproduces the lost failure count 10/10 with the old test. The final test retains that competing-reader schedule while waiting for the actual table action."
+  },
+  "snapshot_negative_control": {
+    "status": "failed as expected",
+    "commit": "3b89983d1eb005e391d7ecfd9836d6b7f182c2f2",
+    "mutation": "Set data.value = initial in usePolledData error handling, which discards the last successful snapshot. The test source is identical to the final work branch.",
+    "run": {
+      "run": "spec-3b89983d1e-46182",
+      "suite_exit_code": 1,
+      "exit_code": 1,
+      "cleanup_complete": true
+    },
+    "passed": 0,
+    "failed": 1,
+    "failure_reason": "The initially visible session row is absent after the failed refresh. The failure is the retained-row toBeVisible assertion at line 67, not startup, a missing handler, or a generic test timeout.",
+    "locator": "locator('.sessions [data-row^=\"s:\"]').first()"
+  },
+  "static_validation": {
+    "status": "passed on one remote rerun",
+    "command": "ci-static-remote.sh (runs node scripts/ci-static.mjs --merge-main on the approved macOS test host)",
+    "source_commit": "65545a990a32eabdb7d09fc501b0383612cceae7",
+    "first_run": {
+      "exit_code": 1,
+      "passed_checks": 45,
+      "optional_skips": 0,
+      "failure": "ci-static: apt-step-bounds exceeded timeout_seconds=60 after 60.03s (process group termination requested)",
+      "unrelated_to_change": "The change touches only the polling browser test. No apt/helper/workflow source was changed."
+    },
+    "exit_code": 0,
+    "passed_checks": 46,
+    "optional_skips": 0,
+    "duration_seconds": 181.37,
+    "apt_step_bounds_seconds": 41.46,
+    "summary": "Static pre-filter: 181.37s; 46 passed, 0 optional skipped. Hosted CI remains the proof.",
+    "rerun_reason": "The first run hit the unrelated apt-step-bounds 60s check timeout. The unchanged check passed on the single follow-up remote run; its limit was not raised."
+  },
+  "preserved": {
+    "product_changes": false,
+    "weakened_assertions": false,
+    "increased_timeouts": false,
+    "new_retries": false,
+    "skips_or_quarantine": false,
+    "test_manifest_changes": false,
+    "origin_push": false,
+    "deployment": false,
+    "review_gate": false,
+    "other_model_calls": false,
+    "existing_assertions": true,
+    "existing_test_names": true,
+    "source_files_changed": [
+      "web/tests/resilient-polling.spec.ts"
+    ],
+    "assertion_and_test_name_comparison": "Compared every expect/expect.poll source line and both registered test titles with starting main: identical. UI config is identical to starting main."
+  },
+  "implementation_commit": "65545a990a32eabdb7d09fc501b0383612cceae7",
+  "changes": [
+    "Keep the online-triggered loadAll completion barrier and all existing assertions.",
+    "Launch two bounded project-scoped session reads alongside each table refresh and join their completion with the table action; preserve the filtered table-reader mock.",
+    "Do not change production code, retry policy, timeouts, test names, tiers or shard manifests."
+  ],
+  "strengthened_spec_linux_30": {
+    "status": "passed",
+    "commit": "dbec728a0aa952b105641b54ef65ad62b23c3299",
+    "run": {
+      "run": "spec-dbec728a0a-84338",
+      "suite_exit_code": 0,
+      "exit_code": 0,
+      "cleanup_complete": true
+    },
+    "native_blob_reports": 30,
+    "passed": 60,
+    "failed": 0,
+    "skipped": 0,
+    "retries": 0,
+    "actual_workers_per_chunk": 1,
+    "repeat_each_indices": "0..29 for each of the two test titles",
+    "summary": "60 passed (4.6m)"
+  },
+  "final_source_suite_once": {
+    "status": "passed",
+    "source_commit": "65545a990a32eabdb7d09fc501b0383612cceae7",
+    "run": {
+      "run": "spec-65545a990a-57162",
+      "suite_exit_code": 0,
+      "exit_code": 0,
+      "cleanup_complete": true
+    },
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "summary": "2 passed (8.4s)",
+    "configuration": "Normal committed UI config, repeatEach default 1."
+  },
+  "completed_at_utc": "2026-10-24T10:23:34Z",
+  "fix_round_2": {
+    "baseline_commit": "08a5fa7e5df30794b3b2a7bd7689e3984ec29e5d",
+    "ci_findings": {
+      "browser_job": "https://github.com/inspr-at/paimos/actions/runs/40085904959/job/120849140327",
+      "actual_browser_failures": 1,
+      "actual_failed_case": "AEON-1401: the delivered viewport width clears a glimpse while geometry and media reads stay wide",
+      "failure_stage": "The 5000ms predicate waiting for the delivered root width, before either painted-graph assertion.",
+      "agents_split_disposition": "All 12 cases passed in the native caseResults. The findings extractor also matched four successful case log headings. No change to that spec is needed.",
+      "public_name_failure": "Replace the two operator-host references in this evidence file with neutral descriptions; retain the existing public-name guard."
+    },
+    "root_cause_and_fix": {
+      "risk": "The stale-hint regression depends on a native root ResizeObserver delivery following a real browser resize. Software-rendered Chromium controls when that callback can run, so the test can exhaust its assertion budget before establishing the condition it intends to test.",
+      "fix": "Capture the registered document-element observer and explicitly deliver a complete narrow entry while native observer deliveries, frames and timer callbacks are held. Keep window, media and geometry hints wide, and retain every original assertion. The remaining header cases still exercise real viewport resizes.",
+      "scope": "Test fixture only; no product behavior changed.",
+      "outside_original_scope": "web/tests/header-glimpse.spec.ts: repairs the actual browser CI failure named by the fix-round brief."
+    },
+    "unchanged_linux_baseline": {
+      "commit": "08a5fa7e5df30794b3b2a7bd7689e3984ec29e5d",
+      "run": {
+        "run": "spec-08a5fa7e5d-33553",
+        "suite_exit_code": 0,
+        "exit_code": 0,
+        "cleanup_complete": true
+      },
+      "passed": 1,
+      "note": "Quiet Linux baseline passes; this is not evidence that native delivery is synchronized."
+    },
+    "held_native_delivery_reproduction": {
+      "commit": "d531f491f3",
+      "baseline_test_source": "The existing test at 08a5fa7e, with only a callback barrier holding native observer deliveries after state.holding becomes true.",
+      "run": {
+        "run": "spec-d531f491f3-73168",
+        "suite_exit_code": 1,
+        "exit_code": 1,
+        "cleanup_complete": true
+      },
+      "passed": 0,
+      "failed": 1,
+      "failure_reason": "The original predicate sees window=1280, geometry=1280, media=true, delivered=undefined rather than 390. The same assertions run after explicit delivery in the fixed test.",
+      "limit": "This establishes the native-delivery dependency deterministically; the CI artifact does not expose its final predicate values."
+    },
+    "discarded_sample_negative_control": {
+      "commit": "a30ca23d07",
+      "mutation": "Remove observedViewportWidth from viewportWidth(), leaving the window and geometry reads in place. Test source is identical to the implementation commit.",
+      "run": {
+        "run": "spec-a30ca23d07-77143",
+        "suite_exit_code": 1,
+        "exit_code": 1,
+        "cleanup_complete": true
+      },
+      "passed": 0,
+      "failed": 1,
+      "failure_reason": "The delivery predicate passes, then the original painted-graph assertion fails: [data-header-glimpse=\"on\"] expected 0, received 1. The test still detects loss of the delivered sample."
+    },
+    "affected_suite_linux": {
+      "implementation_commit": "efb119606a",
+      "command": "remote-spec.sh <worktree> \"tests/header-glimpse.spec.ts tests/resilient-polling.spec.ts tests/aeon-1213-agents-split.spec.ts\"",
+      "run": {
+        "run": "spec-efb119606a-59995",
+        "suite_exit_code": 0,
+        "exit_code": 0,
+        "cleanup_complete": true
+      },
+      "passed": 45,
+      "failed": 0,
+      "skipped": 0,
+      "summary": "45 passed (2.0m)",
+      "execution": "Three serial spec chunks, each with one browser worker. The merged report labels the three separate workers together."
+    },
+    "related_web_units_linux": {
+      "scratch_commit": "b6991197f2",
+      "run": {
+        "run": "spec-b6991197f2-84402",
+        "suite_exit_code": 0,
+        "exit_code": 0,
+        "cleanup_complete": true
+      },
+      "method": "A temporary beforeAll hook runs the related units inside the approved remote-spec.sh job, followed by the AEON-1401 browser case. The hook is absent from the work branch.",
+      "commands": [
+        "node --experimental-strip-types --test tests/header-glimpse.test.ts",
+        "node node_modules/vitest/vitest.mjs run tests/resilient-polling.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0"
+      ],
+      "node_passed": 10,
+      "vitest_passed": 9,
+      "browser_passed": 1,
+      "failed": 0,
+      "go_packages": "None affected: no Go, API or product source changed."
+    },
+    "preserved": {
+      "production_source_unchanged": true,
+      "all_113_header_assertion_lines_unchanged": true,
+      "all_28_header_test_and_describe_lines_unchanged": true,
+      "polling_spec_unchanged_this_round": true,
+      "committed_playwright_config_unchanged": true,
+      "test_names_and_manifests_unchanged": true,
+      "no_timeout_increase_retries_skips_or_quarantine": true,
+      "no_push_to_origin_deploy_review_gate_or_other_model_calls": true,
+      "scratch_changes_absent_from_work_branch": true
+    },
+    "repeated_regression_linux": {
+      "scratch_commit": "75ddaf6372",
+      "configuration": "Only repeatEach: 30 added to the UI config on a scratch branch. The committed work branch keeps the original config.",
+      "run": {
+        "run": "spec-75ddaf6372-69528",
+        "suite_exit_code": 0,
+        "exit_code": 0,
+        "cleanup_complete": true
+      },
+      "native_blob_reports": 30,
+      "repeat_each_indices": "0..29",
+      "workers_per_serial_chunk": 1,
+      "retries": 0,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "summary": "30 passed (3.9m)"
+    },
+    "static_validation": {
+      "entrypoint": "ci-static-locked.sh",
+      "command": "node scripts/ci-static.mjs --merge-main",
+      "implementation_commit": "efb119606a",
+      "initial_refusal": {
+        "exit_code": 3,
+        "reason": "Remote test-host guard OPS-300 reported busy; no local fallback was run."
+      },
+      "retry_exit_code": 0,
+      "passed_checks": 46,
+      "optional_skips": 0,
+      "duration_seconds": 176.5,
+      "summary": "Static pre-filter: 176.5s; 46 passed, 0 optional skipped. Hosted CI remains the proof.",
+      "includes": [
+        "public-name guard and its regressions",
+        "test-tier selector regressions",
+        "web shard regressions",
+        "ownership audit",
+        "Go vet",
+        "web typecheck and lint",
+        "strict test manifests"
+      ],
+      "final_evidence_check": "The public-name guard and git diff --check also pass after recording these results."
+    },
+    "completed_at_utc": "2026-10-24T11:00:50Z"
+  },
+  "fix_round_3": {
+    "status": "blocked: original CI click timeout not reproduced; no fix claimed",
+    "finding": "PR #938 job 120856196903: anonymous live-agent chip text matched, then locator.click timed out at live-agents.spec.ts:159.",
+    "delivery_baseline": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+    "ci_merge_source": "291162386790932a5a01c0b70a5375e30358d6d4",
+    "ci_evidence": {
+      "run": "https://github.com/inspr-at/paimos/actions/runs/40088302308/job/120856196903",
+      "artifact": "web-shard-5-evidence (12558044434)",
+      "native_report": "attachment-security-combined/aeon-chunks-1v2nfK/reports/report-7.jsonl",
+      "case_duration_ms": 35020,
+      "navigation_duration_ms": 1145,
+      "card_visibility_assertion_duration_ms": 280,
+      "chip_text_assertion_duration_ms": 42,
+      "click_started_ms_after_test_start": 1561,
+      "click_duration_ms": 33470,
+      "context_teardown_duration_ms": 5011,
+      "page_snapshot_present": false,
+      "trace_present": false,
+      "observation": "The exact named chip matched 1 ms before click began. The click log contains only waiting for locator, and error-context has no Page snapshot. The test did not spend its budget on startup.",
+      "inference": "This evidence suggests a blocked browser page or selector evaluation. It does not prove a missing chip, changed accessible name, polling race or product defect."
+    },
+    "targeted_unchanged_linux": {
+      "run": "spec-91fb0fa693-7644",
+      "passed": 1,
+      "failed": 0,
+      "exit_code": 0
+    },
+    "diagnostic_linux_repetitions": {
+      "source_commit": "fa52dd67d922ab297fc7ffbe3fae24a033446c8a",
+      "run": "spec-fa52dd67d9-29243",
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "native_blob_reports": 30,
+      "per_chunk_workers": 1,
+      "case_duration_ms_range": [
+        613,
+        1260
+      ],
+      "changes": "Temporary repeatEach:30 plus a read-only DOM mutation observer and failure logging, isolated on scratch/aeon-1662-fix3-diagnosis. Original chip locator, click and assertions are unchanged.",
+      "delivery_includes_diagnostics": false,
+      "limitation": "The extra page.evaluate before the assertion can affect scheduling; these passes alone do not disprove a race.",
+      "native_repeat_indices": "0 through 29"
+    },
+    "affected_linux_specs": {
+      "source_commit": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+      "run": "spec-91fb0fa693-66161",
+      "specs": [
+        "tests/live-agents.spec.ts",
+        "tests/header-glimpse.spec.ts",
+        "tests/resilient-polling.spec.ts"
+      ],
+      "passed": 55,
+      "failed": 0,
+      "skipped": 14,
+      "retries": 0,
+      "exit_code": 0,
+      "cleanup_complete": true,
+      "skips": "Existing optional LIVE_SHOTS screenshots; no skips were added or changed.",
+      "summary": "55 passed, 14 skipped (2.7m)"
+    },
+    "cpu_throttled_trace_run": {
+      "status": "fallback passed; selected more cases than requested because the external wrapper split a multiword grep",
+      "requested_source_commit": "6b182e1e46b291d00c0ac55d8c31871e4da52aca",
+      "requested_cpu_throttle_rate": 4,
+      "requested_repeat_each": 30,
+      "platform": "approved macOS test host after Linux refused load 35.92 > 30",
+      "passed": 810,
+      "failed": 0,
+      "exit_code": 0,
+      "summary": "810 passed (26.1m)",
+      "last_anonymous_case_click_duration_ms": 124,
+      "last_anonymous_case_observation": "Console diagnostics show the exact working-agent label before click; click completed from 1792842845113 to 1792842845237.",
+      "limitation": "The macOS fallback transfers PNG/Markdown artifacts but not native JSON/blob reports or trace ZIPs. Its final stdout proves the suite passed and includes the throttled case, but is not used for the 132 unchanged Linux execution count."
+    },
+    "static_check": {
+      "status": "passed on final isolated remote run after the browser runs ended",
+      "command": "ci-static-remote.sh",
+      "source_commit": "5a5f5678de9f783102e16320251dc7707ecb54dc",
+      "initial_refusal": {
+        "exit_code": 3,
+        "message": "remote busy ([approved macOS test host] host guard OPS-300); retry later or rely on PR CI",
+        "public_evidence_note": "Operator host name neutralized here; the exact refusal is retained in the ignored local worker status."
+      },
+      "first_execution": {
+        "exit_code": 1,
+        "passed_checks": 45,
+        "optional_skips": 0,
+        "duration_seconds": 195.26,
+        "check": "test-tiers",
+        "error": "ci-static: test-tiers exceeded timeout_seconds=180 after 180.07s (process group termination requested)",
+        "node_summary": "198 passed, 0 failed, 1 cancelled; pending Promise after interruption",
+        "fixture_output_note": "FAIL go entries for TestFailed and TestOther are deliberately emitted by runner fixtures, not actual Go package failures."
+      },
+      "second_execution": {
+        "exit_code": 1,
+        "passed_checks": 44,
+        "optional_skips": 0,
+        "duration_seconds": 209.93,
+        "previously_failing_check": "test-tiers passed in 176.35s",
+        "budget_failures": [
+          {
+            "check": "releaseworkflow-tests",
+            "error": "ci-static: releaseworkflow-tests exceeded timeout_seconds=180 after 180s (process group termination requested)"
+          },
+          {
+            "check": "apt-step-bounds",
+            "error": "ci-static: apt-step-bounds exceeded timeout_seconds=60 after 60.02s (process group termination requested)",
+            "node_summary": "15 passed, 0 failed, 1 cancelled"
+          }
+        ],
+        "scope_note": "No source in either timed-out check or the code it measures was changed by this branch. Budget limits and assertions are unchanged."
+      },
+      "final_execution": {
+        "source_commit": "5a5f5678de9f783102e16320251dc7707ecb54dc",
+        "exit_code": 0,
+        "passed_checks": 46,
+        "optional_skips": 0,
+        "duration_seconds": 180.92,
+        "previously_timed_out_checks": {
+          "test-tiers_seconds": 171.31,
+          "releaseworkflow-tests_seconds": 128.91,
+          "apt-step-bounds_seconds": 50.99
+        },
+        "summary": "Static pre-filter: 180.92s; 46 passed, 0 optional skipped. Hosted CI remains the proof.",
+        "limits_or_assertions_changed": false
+      }
+    },
+    "scope": {
+      "product_changes": false,
+      "delivery_spec_changes": false,
+      "assertions_weakened": false,
+      "timeouts_increased": false,
+      "retries_added": false,
+      "review_gates_run": false,
+      "model_clis_called": false,
+      "origin_push": false,
+      "deployment": false
+    },
+    "ci_sequence_repetitions": {
+      "status": "passed",
+      "source_commit": "6d4b1feccda006bf73c8c0b247c3420622206941",
+      "run": "spec-6d4b1feccd-59242",
+      "repeat_each": 30,
+      "cases_per_repetition": 2,
+      "selection": "a card comes alive|without permission to know",
+      "spec_source_identical_to": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+      "changes": "Temporary UI config only: repeatEach:30 and trace:retain-on-failure. No DOM observer, CDP throttle, added evaluate or test-source change. Same first two cases and order as CI chunk 7.",
+      "delivery_includes_diagnostics": false,
+      "passed": 60,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "native_blob_reports": 30,
+      "native_repeat_indices": "0 through 29",
+      "per_chunk_workers": 1,
+      "exit_code": 0,
+      "cleanup_complete": true,
+      "summary": "60 passed (3.3m)"
+    },
+    "extended_ci_sequence_repetitions": {
+      "status": "passed",
+      "source_commit": "15dbab725a7f7de4a3ebb14385a3ffbdd9f6f176",
+      "run": "spec-15dbab725a-11135",
+      "repeat_each": 100,
+      "cases_per_repetition": 2,
+      "selection": "a card comes alive|without permission to know",
+      "spec_source_identical_to": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+      "changes": "Temporary UI config only: repeatEach:100 and trace:retain-on-failure. Original test source and assertions unchanged.",
+      "delivery_includes_diagnostics": false,
+      "passed": 200,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "native_blob_reports": 100,
+      "native_repeat_indices": "0 through 99",
+      "per_chunk_workers": 1,
+      "exit_code": 0,
+      "cleanup_complete": true,
+      "summary": "200 passed (8.8m)"
+    },
+    "unchanged_anonymous_case_linux_passes": 132,
+    "go_and_unit_scope": "No Go, web unit-test, application or runner source changed in this fix round. All seven Go and four web-unit shards on the original PR run passed; the two remote static executions also passed web typecheck, lint, shard tests, audit tests and their configured web-unit checks.",
+    "conclusion": "The original exact test source passes 132 Linux executions of the anonymous case (1 targeted + 1 affected-suite + 30 CI-sequence + 100 extended CI-sequence). A further 30 instrumented Linux runs and 30 Linux runs with CPU throttling at rate 4 also pass. The original CI artifact establishes a click stall after a successful match, but retains neither a Page snapshot nor a browser trace. No product or test defect has been established, and no failing regression against 91fb0fa6 can responsibly be claimed. Follow the brief stop condition instead of changing assertions, clocks or locators on a guess.",
+    "remaining": "The blocking original CI click timeout remains open. Needed evidence is a retained trace or sampled browser stack from an actual recurrence; passing repetitions alone do not establish its cause. The final remote static check passed all 46 checks without changing limits or assertions.",
+    "external_fallback_runner_issue": {
+      "owner": "Coordinator / OPS; external harness left unchanged",
+      "file": "remote-spec-mbp.sh",
+      "issue": "The unquoted remote heredoc removes the quotes in the GREP parameter expansion. A grep containing spaces becomes separate shell arguments on the remote side.",
+      "requested_argv": [
+        "tests/live-agents.spec.ts",
+        "-g",
+        "without permission to know",
+        "--workers=1",
+        "--reporter=line"
+      ],
+      "locally_reproduced_actual_argv": [
+        "tests/live-agents.spec.ts",
+        "-g",
+        "without",
+        "permission",
+        "to",
+        "know",
+        "--workers=1",
+        "--reporter=line"
+      ],
+      "effect": "Playwright sees grep=without and extra file selectors permission, to and know. The optional 30-case diagnostic therefore ran 810 cases from several files, serially; all passed.",
+      "reproduction": "Argument-only local Bash heredoc reproduces the same expansion; it launches no browser, test suite or remote command.",
+      "proposed_repair": "Pass the validated specs and grep as separately shell-quoted remote arguments and expand them as an argv array, as the Linux wrapper already does. Add a harness test proving a multiword grep remains one argument.",
+      "modified": false,
+      "relation_to_original_ci_failure": "This explains the unexpectedly broad fallback run, not the original GitHub CI click timeout."
+    },
+    "cpu_throttled_linux_repetitions": {
+      "status": "passed",
+      "source_commit": "6b182e1e46b291d00c0ac55d8c31871e4da52aca",
+      "run": "spec-6b182e1e46-9145",
+      "cpu_throttle_rate": 4,
+      "repeat_each": 30,
+      "selection": "without.permission.to.know",
+      "selection_note": "Single-token regex selects the same full title without allowing the fallback heredoc to split spaces.",
+      "delivery_includes_diagnostics": false,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "native_blob_reports": 30,
+      "native_repeat_indices": "0 through 29",
+      "per_chunk_workers": 1,
+      "suite_exit_code": 0,
+      "exit_code": 0,
+      "cleanup_complete": true,
+      "summary": "30 passed (3.0m)"
+    },
+    "completed_at_utc": "2026-10-24T12:04:03Z"
+  }
+}

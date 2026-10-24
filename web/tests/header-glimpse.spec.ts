@@ -289,9 +289,11 @@ test('eight linked tickets appear once the viewport reaches 1280', async ({ page
 // Risk: a resize delivery has the new root width while window/media hints and
 // a geometry read still describe the previous frame. Retain the delivered
 // measurement; another stale read must not leave the painted graph mounted.
+// Deliver that sample explicitly: software GL can delay Chromium's native
+// resize delivery beyond the assertion budget. Other cases cover real resizes.
 test('AEON-1401: the delivered viewport width clears a glimpse while geometry and media reads stay wide', async ({ page }) => {
   await page.addInitScript(() => {
-    const state = { holding: false, rootWidths: [] as number[], framesHeld: 0, tasksHeld: 0 }
+    const state = { holding: false, rootWidths: [] as number[], framesHeld: 0, tasksHeld: 0, deliverRoot: undefined as ((width: number) => void) | undefined }
     ;(window as unknown as { __aeonDeliveredViewport: typeof state }).__aeonDeliveredViewport = state
     const rect = Element.prototype.getBoundingClientRect
     Element.prototype.getBoundingClientRect = function () {
@@ -324,10 +326,22 @@ test('AEON-1401: the delivered viewport width clears a glimpse while geometry an
     const Observer = window.ResizeObserver
     window.ResizeObserver = class extends Observer {
       constructor(callback: ResizeObserverCallback) {
-        super((entries, observer) => {
+        const deliver: ResizeObserverCallback = (entries, observer) => {
           for (const entry of entries) if (state.holding && entry.target === document.documentElement) state.rootWidths.push(entry.contentRect.width)
           callback(entries, observer)
-        })
+        }
+        super((entries, observer) => { if (!state.holding) deliver(entries, observer) })
+        const observe = this.observe.bind(this)
+        this.observe = (target, options) => {
+          if (target === document.documentElement) state.deliverRoot = width => {
+            const size = { inlineSize: width, blockSize: document.documentElement.clientHeight }
+            deliver([{
+              target, contentRect: new DOMRectReadOnly(0, 0, width, size.blockSize),
+              borderBoxSize: [size], contentBoxSize: [size], devicePixelContentBoxSize: [size],
+            }], this)
+          }
+          observe(target, options)
+        }
       }
     }
   })
@@ -336,10 +350,12 @@ test('AEON-1401: the delivered viewport width clears a glimpse while geometry an
   await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
   await ready(page)
   await page.evaluate(() => {
-    (window as unknown as { __aeonDeliveredViewport: { holding: boolean } }).__aeonDeliveredViewport.holding = true
+    const state = (window as unknown as { __aeonDeliveredViewport: { holding: boolean; deliverRoot?: (width: number) => void } }).__aeonDeliveredViewport
+    if (!state.deliverRoot) throw new Error('The document-element resize observer was not registered')
+    state.holding = true
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    state.deliverRoot(390)
   })
-  await page.setViewportSize({ width: 390, height: 844 })
   await expect.poll(() => page.evaluate(() => ({
     window: window.innerWidth,
     geometry: document.documentElement.getBoundingClientRect().width,
