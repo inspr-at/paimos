@@ -25,6 +25,7 @@ CREATE TABLE outcome_review_rounds (
     PRIMARY KEY (tenant_id, id),
     UNIQUE (tenant_id, idempotency_key),
     UNIQUE (tenant_id, ticket_node_id, kind, round),
+    UNIQUE (tenant_id, review_run_id),
     FOREIGN KEY (tenant_id, project_id) REFERENCES nodes(tenant_id, id),
     FOREIGN KEY (tenant_id, ticket_node_id) REFERENCES nodes(tenant_id, id),
     FOREIGN KEY (tenant_id, actor_principal_id) REFERENCES principals(tenant_id, id),

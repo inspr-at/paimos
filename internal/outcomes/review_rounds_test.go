@@ -76,6 +76,7 @@ func TestReviewRoundOutcomes(t *testing.T) {
 		{"different verdict", token, func(in *ReviewRoundRecord) { in.Verdict = "ok" }, 403},
 		{"agent import", token, func(in *ReviewRoundRecord) { in.Source = "imported" }, 403},
 		{"not a role", token, func(in *ReviewRoundRecord) { in.ReviewerRole = "a person name" }, 400},
+		{"one run cannot invent another round", token, func(in *ReviewRoundRecord) { in.Round = 2 }, 409},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			copy := in
@@ -110,6 +111,12 @@ func TestReviewRoundOutcomes(t *testing.T) {
 	}
 	if got := personPost(imported, "imported-design-one"); got.Code != 200 {
 		t.Fatalf("import replay: %d %s", got.Code, got.Body.String())
+	}
+	insertNode(t, d, owner, "work", "RND-4", "A new child", &ticket)
+	parent := in
+	parent.Round = 2
+	if got := post(token, parent, "parent-review-denied"); got.Code != 403 {
+		t.Fatalf("a reviewed leaf became a parent: %d %s", got.Code, got.Body.String())
 	}
 	var observations, audit int
 	inTenant(t, d, owner, func(tx pgx.Tx) error {

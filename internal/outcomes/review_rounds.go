@@ -135,7 +135,7 @@ func (m *Module) recordReviewRound(w http.ResponseWriter, r *http.Request) {
 		}
 		digest := sha256.Sum256(raw)
 		rows, err := tx.Query(ctx, `SELECT id::text,request_digest,recorded_at FROM outcome_review_rounds
- WHERE idempotency_key=$1 OR (ticket_node_id=$2 AND kind=$3 AND round=$4) LIMIT 2`, key, node.id, in.Kind, in.Round)
+ WHERE idempotency_key=$1 OR (ticket_node_id=$2 AND kind=$3 AND round=$4) OR review_run_id=$5::uuid LIMIT 2`, key, node.id, in.Kind, in.Round, nilUUID(in.ReviewRunID))
 		if err != nil {
 			return err
 		}
