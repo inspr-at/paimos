@@ -180,7 +180,18 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
         console.log(`${checkpoint.id}: REPORT-ONLY quality ${report.quality.status}; comparison ${report.comparison.status}; awaiting re-capture under the final renderer`)
       }
     } catch (error) {
-      if (capture || reportOnly || gate.mode === 'compare') await page.screenshot({ path: info.outputPath(`failed-${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }).catch(() => {})
+      if (capture || reportOnly || gate.mode === 'compare') {
+        const name = `failed-${checkpoint.id}.png`
+        const png = await page.screenshot({ path: info.outputPath(name), animations: 'disabled', caret: 'hide' }).catch(() => null)
+        if (png) {
+          const path = info.outputPath(`${checkpoint.id}.md`)
+          const previous = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
+          // Bind failed prerequisite pixels to this checkout and owner too.
+          writeFileSync(path, JSON.stringify({ ...previous, id: checkpoint.id, sourceSpec: sourceSpec(info), captureSHA,
+            failurePNG: { name, sha256: createHash('sha256').update(png).digest('hex') },
+            quality: { status: 'failed', error: String(error) } }, null, 2))
+        }
+      }
       writeFileSync(info.outputPath(`failed-${checkpoint.id}.md`), `${checkpoint.id}: ${String(error)}\n${JSON.stringify({ console: errors, responses }, null, 2)}\n`)
       throw error
     } finally { await context.close() }
