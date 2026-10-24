@@ -68,8 +68,8 @@ least about eleven hours for that example; reserved read capacity and network
 time can make it longer),
 below the [minimum installation budget of 5,000/hour](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
 Other projects, live reads and explicit Check again retries share that budget;
-Check again deliberately bypasses the delay. GitHub refusals retain the
-existing error classification and persisted backoff. Lists have explicit bounds;
+Check again bypasses ordinary pacing, while a GitHub rate-limit deadline
+remains binding. GitHub refusals retain a classified reason and persisted backoff. Lists have explicit bounds;
 a bound never turns missing history into success or zero.
 
 Linking a delivery metric source schedules history reading on the server. Changing
@@ -80,6 +80,20 @@ the page and restarting the server; each step stores its cursor and facts togeth
 Continuation with omitted `days` and Check again retain the selected window,
 including after a first automatic read fails before committing a cursor. Once
 a cursor exists, selecting another window requires `restart`.
+
+AEON-1710 stores a read watermark and a fixed upper time bound in the existing
+cursor JSON. Finished sources refresh every fifteen minutes; Check again can
+start that incremental refresh immediately. Ordinary continuation of a finished
+job remains a no-op. Actions listings read only the created-time interval after
+the previous watermark. Unfinished runs retain bounded IDs and are followed on
+the next refresh, so a late completion is not lost behind the time filter.
+Checks history uses the new interval for commit listing, suite selection and
+updated pulls; its existing coverage limitations remain explicit. Repeated
+Actions pages reuse contiguous stored attempts. Job reads remain restricted to
+missing first-attempt job maps for the selected CI workflow's PR/queue runs.
+Validated pages and their retry position commit together even if a later read
+fails. These fields survive a cold start without introducing a new table or
+changing the user-visible delivery-settings revision.
 
 ## Job and attempt ingestion (AEON-1658)
 
@@ -146,19 +160,31 @@ claim is made that the production backfill had never run. The code-level gaps
 were workflow-run metrics being skipped, workflow-job ingress being refused,
 and failed live job reads not rescheduling a completed backfill.
 
-The source exposes `last_read_error` (reason, missing permission when known, and
-check time), `retry_at`, and `last_event_at`. An Actions 403 that is not classified
-as rate limiting becomes `actions_read_missing`; a missing installation/repository becomes
-`not_installed`; other read failures become `github_unavailable`. Permission and
-installation failures start at 30 minutes; other non-transient failures start at
-one minute. Repeated failures double the persisted delay, capped at one hour.
-Transient failures retry with jitter after 30–59 seconds. Partial job reads use
-the same policy, and failed runs become eligible at the source's stored deadline.
-The server honours these times. `POST /projects/{projectId}/delivery/metrics/check-again` bypasses the
-retry time immediately without discarding progress; it requires `delivery.manage`.
-A successful step clears its read error. Signed, installation-bound repository
-webhooks update the last event time; clients consider seven days without an event
-stale. A linked source without any webhook has a null event time.
+The source exposes `last_read_error` (reason, missing permission when known,
+check time, optional `status_code` and `reset_at`), `retry_at`, and `last_event_at`.
+An Actions 403 that is not rate limiting becomes `actions_read_missing`; a missing
+installation/repository becomes `not_installed`. Rate limits use `rate_limited`,
+request timeouts `timed_out`, other HTTP errors `github_error` with the status,
+and transport failures `unreachable`. Legacy or unclassified failures retain
+`github_unavailable`; the UI explains that no specific cause was recorded.
+English and German copy names each known cause and keeps the stored history.
+
+Permission and installation failures start at 30 minutes; other non-transient
+failures start at one minute. Repeated failures double the persisted delay,
+capped at one hour. Transient failures retry with jitter after 30–59 seconds.
+Rate-limit Retry-After/reset hints instead set the exact persisted retry time,
+including a deadline beyond an hour. Successful responses with at most 100
+requests remaining stop further history reads and resume at reset. Missing
+hints retain a bounded fallback. Check again and restart cannot bypass a stored
+rate-limit deadline. Partial job reads use the same policy, and failed runs
+become eligible at the source's stored deadline. A successful step clears its
+read error. Signed, installation-bound repository webhooks update the last event
+time; clients consider seven days without an event stale. A linked source
+without any webhook has a null event time.
+
+Each classified history failure logs the endpoint family, status, parsed
+remaining/reset hints, timeout flag and duration. Error strings, URLs, queries,
+response text and credentials never enter that diagnostic.
 
 The job stores only the initiating principal and authenticating key metadata IDs.
 It reloads current authority and checks `delivery.manage` again under the tenant

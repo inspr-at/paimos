@@ -521,7 +521,8 @@ const (
 // upserts the listed attempt, so a newer attempt that landed between steps is
 // kept, including one for a run this page already finished. That gap waits
 // until a paused run on the same page is stored, and a pause keeps that run's
-// identity. A failed step leaves the stored cursor alone. Pulls into other
+// identity. On failure, the caller can commit validated facts and the failed
+// page/attempt position together. Pulls into other
 // base branches are not facts. Hitting the last pull page while recent pulls
 // remain is truncated, not done.
 func backfillStep(get func(string, any) error, repository string, workflows []string, cursor backfillCursor, now time.Time, known ...func(int64) int) (backfillCursor, backfillBatch, error) {

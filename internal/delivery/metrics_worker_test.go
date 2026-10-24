@@ -2,6 +2,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -982,5 +984,101 @@ func TestDeliveryMergeWebhookProofUsesOnlyRequiredInstallationGrants(t *testing.
 	facts, pending, err = readMergedGroup(t.Context(), reader, sha, false)
 	if err != nil || pending || len(facts) != 1 || facts[0].SHA != sha || minted != 3 {
 		t.Fatalf("push proof: %+v pending=%v err=%v mints=%d", facts, pending, err, minted)
+	}
+}
+
+func TestDeliveryHistorySchedulesIncrementalRefreshFromStoredWatermark(t *testing.T) {
+	// Risk: finished history never recovers missed webhooks, or a restarted
+	// reader repeats the whole selected window on every periodic refresh.
+	f, g := newMetricsFixture(t)
+	f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+	through := f.at.Add(-metricRefreshInterval - time.Minute)
+	cursor := backfillCursor{Since: dayStart(f.at.AddDate(0, 0, -30)), Phase: "done", ReadSource: historyActions,
+		ReadThrough: &through, ReadUntil: &through, Workflows: fullBackfillWorkflows(&metricSourceRow{CIWorkflow: defaultCIWorkflow, NightlyWorkflow: defaultNightlyWorkflow}), DefaultBranch: "main"}
+	raw, err := json.Marshal(cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_done_at=$3,backfill_pending=false WHERE project_id=$1`, f.project, raw, through)
+		return err
+	})
+	var nextID int64 = 1001
+	g.respond = func(endpoint string) (any, error) {
+		u, _ := url.Parse(endpoint)
+		if strings.HasPrefix(u.Path, "/actions/workflows/") {
+			bounds := strings.Split(u.Query().Get("created"), "..")
+			if len(bounds) != 2 || bounds[0] != through.UTC().Format(time.RFC3339) || bounds[1] != f.at.UTC().Format(time.RFC3339) {
+				t.Fatalf("scheduled refresh lost the stored interval: %s", endpoint)
+			}
+			if strings.Contains(u.Path, "/ci.yml/") {
+				body := githubRunBody(nextID, 1, defaultCIWorkflow, "push", "main", strings.Repeat("a", 40), f.at.Add(-5*time.Minute), time.Second, "success", 0)
+				nextID++
+				return map[string]any{"total_count": 1, "workflow_runs": []any{body}}, nil
+			}
+			return githubRunsPage{}, nil
+		}
+		if u.Path == "/pulls" {
+			return []any{}, nil
+		}
+		t.Fatalf("unexpected scheduled read: %s", endpoint)
+		return nil, errRead
+	}
+	sweep := func() {
+		fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+		fresh.now = f.m.now
+		fresh.sweepMetrics(t.Context())
+	}
+	sweep()
+	if len(g.calls) != 4 {
+		t.Fatalf("refresh requests: %v", g.calls)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		stored, err := loadMetricSourceTx(t.Context(), tx, f.project, false)
+		if err != nil {
+			return err
+		}
+		if stored.Pending || stored.Cursor.ReadThrough == nil || !stored.Cursor.ReadThrough.Equal(f.at) {
+			t.Fatalf("scheduled watermark not durable: %+v", stored)
+		}
+		return nil
+	})
+	through = f.at
+	f.at = f.at.Add(metricRefreshInterval - time.Microsecond)
+	sweep()
+	if len(g.calls) != 4 {
+		t.Fatal("restart read history before its refresh interval")
+	}
+	f.at = f.at.Add(time.Microsecond)
+	sweep()
+	if len(g.calls) != 8 {
+		t.Fatalf("refresh did not resume at its exact interval: %v", g.calls)
+	}
+}
+
+func TestDeliveryHistoryFailureLogKeepsOnlyClassifiedMetadata(t *testing.T) {
+	// Risk: history cannot be diagnosed from its logs, or raw upstream errors
+	// leak private request/response text instead of fixed, safe metadata.
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	defer slog.SetDefault(previous)
+	at := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	remaining := 0
+	failure := &webhookGitHubError{class: "secondary_limit", reset: at.Add(2 * time.Hour), remaining: &remaining,
+		endpoint: "/actions/runs/{run}/attempts/{attempt}/jobs", duration: 1500 * time.Millisecond,
+		cause: fmt.Errorf("private fixture response and request URL: %w", &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true})}
+	logMetricFailure(t.Context(), failure, metricError(failure, at))
+	var fields map[string]any
+	if err := json.Unmarshal(output.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]any{"reason": "rate_limited", "status": float64(403), "rate_limit_remaining": float64(0), "rate_limit_reset": failure.reset.Format(time.RFC3339), "timeout": false, "duration_ms": float64(1500), "endpoint": failure.endpoint} {
+		if fields[key] != want {
+			t.Fatalf("log %s = %v, want %v", key, fields[key], want)
+		}
+	}
+	if strings.Contains(output.String(), "private") || strings.Contains(output.String(), "Authorization") || strings.Contains(output.String(), "token") {
+		t.Fatal("private upstream data escaped into history diagnostics")
 	}
 }

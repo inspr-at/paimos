@@ -192,6 +192,7 @@ func githubRateHints(headers http.Header) (*int, time.Time, time.Duration) {
 // Endpoint families are sufficient to diagnose a failing read. Repository,
 // workflow, commit and run identities, query strings and credentials stay out.
 func historyEndpoint(path string) string {
+	path, _, _ = strings.Cut(path, "?")
 	if strings.Contains(path, "/actions/workflows/") {
 		return "/actions/workflows/{workflow}/runs"
 	}

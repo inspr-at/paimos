@@ -286,6 +286,8 @@ func (m *Module) runMetrics(ctx context.Context) {
 	}
 }
 
+const metricRefreshInterval = 15 * time.Minute
+
 // A short bounded page and one bounded step per project keep history work from
 // monopolising the server. The session lock prevents duplicate replica reads;
 // foreground steps still use revision checks and re-authorize their final write.
@@ -333,20 +335,25 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 			projectAfter = m.metricsProjectCursor
 		}
 		service := db.AllProjects(op, "durable delivery history jobs")
-		type job struct{ project, actor, key string }
+		type job struct {
+			project, actor, key string
+			refresh             bool
+		}
 		var jobs []job
 		err = db.InTenant(service, m.pool, tid, func(tx pgx.Tx) error {
-			rows, err := tx.Query(op, `SELECT s.project_id::text,s.backfill_actor_id::text,coalesce(s.backfill_key_id::text,'')
+			rows, err := tx.Query(op, `SELECT s.project_id::text,s.backfill_actor_id::text,coalesce(s.backfill_key_id::text,''),NOT coalesce(s.backfill_pending,false)
     FROM delivery_metric_sources s JOIN nodes n ON n.id=s.project_id
-    WHERE s.backfill_pending AND s.backfill_actor_id IS NOT NULL AND n.deleted_at IS NULL
-    AND (s.backfill_retry_at IS NULL OR s.backfill_retry_at<=$1) AND s.project_id::text>$2 ORDER BY s.project_id::text LIMIT 16`, m.now(), projectAfter)
+    WHERE (s.backfill_pending OR (s.backfill_cursor->>'phase'='done'
+      AND coalesce((s.backfill_cursor->>'read_through')::timestamptz,s.backfill_done_at)<=$3))
+    AND s.backfill_actor_id IS NOT NULL AND n.deleted_at IS NULL
+    AND (s.backfill_retry_at IS NULL OR s.backfill_retry_at<=$1) AND s.project_id::text>$2 ORDER BY s.project_id::text LIMIT 16`, m.now(), projectAfter, m.now().Add(-metricRefreshInterval))
 			if err != nil {
 				return err
 			}
 			defer rows.Close()
 			for rows.Next() {
 				var j job
-				if err = rows.Scan(&j.project, &j.actor, &j.key); err != nil {
+				if err = rows.Scan(&j.project, &j.actor, &j.key, &j.refresh); err != nil {
 					return err
 				}
 				jobs = append(jobs, j)
@@ -383,7 +390,12 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 			})
 			if err == nil {
 				step := tenant.WithPrincipal(op, p)
-				_, err = m.metricBackfillStep(step, p, j.project, backfillInput{})
+				if j.refresh {
+					err = m.scheduleMetricBackfill(step, p, j.project, backfillInput{}, true)
+				}
+				if err == nil {
+					_, err = m.metricBackfillStep(step, p, j.project, backfillInput{})
+				}
 			}
 			if err != nil && op.Err() == nil {
 				slog.WarnContext(op, "delivery history step incomplete", "project_id", j.project)

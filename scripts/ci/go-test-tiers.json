@@ -6452,6 +6452,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryClassifiesFailuresAndHonoursReset","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryFailureLogKeepsOnlyClassifiedMetadata","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryIncrementalVolumeAndPendingRunsSurviveRestart","tier":"ESSENTIAL"}
@@ -6465,6 +6467,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryPermissionRetryCheckAgainAndTenantIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryRetryBackoffGrowsAndCaps","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistorySchedulesIncrementalRefreshFromStoredWatermark","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistorySourceChangeRejectsOldStepAndResumesAfterRestart","tier":"ESSENTIAL"}
     ,

@@ -47,6 +47,7 @@ async function setup(page: Page, readOnly = false) {
     return route.fulfill({ json: { items: groups } })
   })
   await page.route('**/api/events/41/undo', route => { groups.splice(0, groups.length, ...inverse); return route.fulfill({ json: { event_id: 42 } }) })
+  await page.route('**/api/projects/*/definitions/context', route => route.fulfill({ json: { project_id: new URL(route.request().url()).pathname.split('/')[3], definition: null, workspace_default: null, copied_from_checks: null, can_manage: !readOnly, pending_changes: [], admins: [] } }))
   await page.route('**/api/projects/*/delivery/metrics', route => route.fulfill({ json: {
     project_id: 'p-pharos', generated_at: '2026-09-23T12:00:00Z', metrics: [],
     source: { repository: 'example/delivery', ci_workflow: '.github/workflows/ci.yml', nightly_workflow: '.github/workflows/nightly-full.yml', history_source: 'actions', app_connected: true, backfill: 'running', backfill_since: '2026-08-24T00:00:00Z', backfill_done_at: null, covered_since: null, last_read_error: { reason: 'rate_limited', permission: null, at: '2026-09-23T11:59:00Z', reset_at: '2026-09-23T12:14:00Z', status_code: 403 }, retry_at: '2026-09-23T12:14:00Z' },
@@ -349,6 +350,7 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PHAROS-15.')
       await expect(page.locator('#description-help')).toHaveText('Shown under the name in the header; Markdown works.')
       async function capture(state: string) {
+        await expect(page.locator('.toast')).toHaveCount(0)
         const spacing = await page.locator('.project-settings').evaluate(element => {
           const nav = document.querySelector('.project-navigation')!
           return { gap: element.getBoundingClientRect().top - nav.getBoundingClientRect().bottom, expected: parseFloat(getComputedStyle(element).getPropertyValue('--section-gap')) }
@@ -403,7 +405,7 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       if (width <= 1000) { await nav.click(); await capture('nav-open'); await page.keyboard.press('Escape') }
       await navigate(page, '/p/AEON/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: AEON-1.'); await capture('general-aeon')
       await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PRJ-26-1.'); await capture('general-prj26')
-      await navigate(page, '/p/PHAROS/settings/definitions'); await expect(page.locator('.settings-body')).toBeVisible(); await capture('definitions-pharos')
+      await navigate(page, '/p/PHAROS/settings/definitions'); await expect(page.locator('#definitions .origin')).toContainText('No definition yet'); await capture('definitions-pharos')
       await navigate(page, '/p/PHAROS/settings/delivery'); await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', 'unavailable'); await expect(page.locator('#checks .frow').first()).toBeVisible(); await expect(page.locator('#repository .ds-h')).toContainText('GitHub’s rate limit'); await capture('delivery-pharos')
       await navigate(page, '/p/PHAROS/settings/agents'); await expect(page.getByText('This project has no context yet, so no account may work on it. Choose one.', { exact: true })).toBeVisible(); await capture('agents-pharos')
       world.control.contextFail = true
