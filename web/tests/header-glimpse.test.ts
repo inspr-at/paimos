@@ -1,11 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { compileStyle, parse } from '@vue/compiler-sfc'
 import { glimpseControlSpot, glimpseOverlaps, glimpsePlaceControls, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpsePaintClears, headerGlimpseWide, nextHeaderGlimpseWide, headerGlimpseViewportWide } from '../src/lib/headerGlimpse.ts'
 
 const on = { enabled: true, reduced: false, wide: true, tickets: 8 }
+
+// Risk: CI's fullyParallel setting splits software-GL header cases between
+// workers, exhausting the shared raster budget. Listing exercises the real
+// scheduler's grouping without launching a browser or measuring elapsed time.
+test('header software GL cases stay in one worker group under full parallelism', () => {
+  type Suite = { specs?: { tests: unknown[] }[]; suites?: Suite[] }
+  const count = (suite: Suite): number =>
+    (suite.specs ?? []).reduce((sum, spec) => sum + spec.tests.length, 0) +
+    (suite.suites ?? []).reduce((sum, child) => sum + count(child), 0)
+  const shards = [1, 2].map(index => {
+    const listed = spawnSync(process.execPath, [
+      fileURLToPath(new URL('../node_modules/@playwright/test/cli.js', import.meta.url)),
+      'test', 'tests/header-glimpse.spec.ts', '-c', 'playwright.ui.config.ts',
+      '--list', '--fully-parallel', '--workers=2', `--shard=${index}/2`,
+      '--pass-with-no-tests', '--reporter=json',
+    ], { cwd: new URL('../', import.meta.url), encoding: 'utf8', timeout: 15_000, maxBuffer: 8 * 1024 * 1024 })
+    assert.equal(listed.status, 0, listed.error?.message ?? listed.stderr)
+    return count(JSON.parse(listed.stdout) as Suite)
+  })
+  assert.ok(shards.some(size => size > 0), 'header cases must be discovered')
+  assert.equal(shards.filter(size => size > 0).length, 1, `software GL cases split across worker groups: ${shards}`)
+})
 
 test('the header glimpse needs a wide viewport, motion, and eight tickets', () => {
   assert.equal(headerGlimpseAllowed(on), true)

@@ -15402,6 +15402,8 @@
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"collapsing the header zeroes the glimpse column, not the project page","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/header-glimpse.test.ts","name":"header software GL cases stay in one worker group under full parallelism","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"hover controls drop to the compact size when the labelled row cannot fit","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"hover controls find room around text, including a long title and a crowded saved view strip","tags":["delete-candidate"],"tier":"GATED-FULL"}
