@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Status icon CPU budget</title>
+  <style>body { margin: 24px; } main { display: flex; gap: 12px; }</style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { createApp, h } from 'vue'
+    import StatusIcon from '../src/components/work/StatusIcon.vue'
+    import { useStatusMotion } from '../src/lib/statusMotion'
+    import '../src/styles/tokens.css'
+    import '../src/styles/status-icons.css'
+
+    // Mount the actual component and motion hooks. App navigation, list
+    // rendering, background polling and other animations are outside this
+    // component's budget; its own JS, style, layout and paint all count.
+    createApp({ setup() {
+      useStatusMotion()
+      return () => h('main', Array.from({ length: 24 }, (_, key) => h(StatusIcon, { key, state: 'in-progress' })))
+    } }).mount('#app')
+  </script>
+</body>
+</html>

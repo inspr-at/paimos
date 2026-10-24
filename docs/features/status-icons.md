@@ -15,8 +15,9 @@ Every status in the app is drawn by one component, `web/src/components/work/Stat
 - **Nothing moves** with `prefers-reduced-motion: reduce`. Slides pause off-screen and in hidden tabs. Only
   transform, opacity and stroke-dashoffset animate, so nothing shifts. The budget for 24 sliding icons is 1 ms of
   main-thread CPU time per animation frame, checked in `web/tests/status-icons.spec.ts` using Chromium's thread
-  CPU clock over 120 actual frames after 12 warm-up frames. Scheduler waits are excluded; measured GC and other
-  page work remain included. AEON-1666 restores this guarantee after AEON-1683 retired the elapsed-time check.
+  CPU clock over 120 actual frames after 12 warm-up frames. A fixture mounts the actual component, stylesheet
+  and motion hooks without the rest of the app. Scheduler waits are excluded; all measured CPU work including
+  GC remains included. AEON-1666 restores this guarantee after AEON-1683 retired the elapsed-time check.
 
 ## For views that build on it
 

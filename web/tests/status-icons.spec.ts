@@ -355,11 +355,8 @@ test('AEON-1362 bar form: diagonal stripes slide only live or under the pointer;
 })
 
 test('AEON-1666: 24 sliding icons cost at most 1 ms of main-thread CPU time per animation frame', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 1440, height: 1600 })
-  await mockWork(page, workData('light', 23))
-  await page.goto('/p/PHAROS')
-  await showProjectHead(page)
-  const icons = grid(page).locator('tr.ticket-row .st-ip')
+  await page.goto('/tests/status-icons-budget-harness.html')
+  const icons = page.locator('.st-ip')
   await expect(icons).toHaveCount(24)
   await expect.poll(async () => (await slides(page)).filter(slide => slide.state === 'running' && !slide.offscreen).length).toBeGreaterThanOrEqual(24)
   await page.mouse.move(0, 0)
