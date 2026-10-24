@@ -42,8 +42,9 @@ export function historyReadReason(source: MetricSource | null, lang: DeliveryLan
   if (!error) return ''
   const words = deliveryText(lang).historyRead
   if (error.reason === 'rate_limited') {
-    const reset = source?.retry_at
-    return reset && Number.isFinite(Date.parse(reset)) ? fill(words.rate_limited, { t: clockTime(reset, lang) }) : words.rate_limited_unknown
+    // Check again can clear the schedule while retaining the last diagnostic.
+    const retry = source?.retry_at
+    return retry && Number.isFinite(Date.parse(retry)) ? fill(words.rate_limited, { t: clockTime(retry, lang) }) : words.rate_limited_unknown
   }
   return fill(words[error.reason], { status: error.status_code ?? '?' })
 }
