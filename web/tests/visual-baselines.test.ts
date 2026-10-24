@@ -100,6 +100,8 @@ else if (args[0] !== 'workflow' || args[1] !== 'run') process.exit(2)
       return { ...result, calls: readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) }
     }
     const fixedSettings = Object.entries(visual.rendererPreparation.settings).filter(([, policy]: [string, any]) => policy.machine)
+    for (const [, policy] of fixedSettings as [string, any][])
+      Object.assign(policy.machine, { cpuModel: null, cpuFlagsSHA256: null })
     writeFileSync(path, JSON.stringify(visual))
     for (const [setting] of fixedSettings) {
       const refused = invoke('main', setting)
@@ -351,11 +353,14 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.deepEqual(candidateVisual.baselineAuthority, manifest.baselineAuthority)
   const [fixedSetting, fixedPolicy] = Object.entries(manifest.rendererPreparation.settings).find(([, setting]) => setting.machine && setting.browserArgs.length === 1)!
   const fixedLabel = fixedPolicy.machine.runnerLabel
-  assert.throws(() => preparedRenderer(manifest, fixedSetting), /OPS-pinned CPU identity/)
+  const unpinnedMachine = structuredClone(manifest)
+  unpinnedMachine.rendererPreparation.settings[fixedSetting].machine.cpuModel = null
+  unpinnedMachine.rendererPreparation.settings[fixedSetting].machine.cpuFlagsSHA256 = null
+  assert.throws(() => preparedRenderer(unpinnedMachine, fixedSetting), /OPS-pinned CPU identity/)
   const fixedEnv = { ...candidateEnv, AEON_VISUAL_RENDERER_SETTING: fixedSetting, GITHUB_WORKFLOW: 'Visual capture',
     GITHUB_REF: 'refs/heads/main', GITHUB_WORKFLOW_REF: 'inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main' }
   assert.equal(captureEnabled(manifest, fixedEnv), true)
-  assert.throws(() => captureVisual(manifest, fixedEnv), /OPS-pinned CPU identity/)
+  assert.throws(() => captureVisual(unpinnedMachine, fixedEnv), /OPS-pinned CPU identity/)
   for (const unsafe of [
     { GITHUB_WORKFLOW: 'CI' }, { GITHUB_EVENT_NAME: 'pull_request' }, { GITHUB_EVENT_NAME: 'merge_group' },
     { GITHUB_REF: 'refs/heads/work/candidate' }, { GITHUB_REF: 'refs/tags/main' }, { GITHUB_WORKFLOW_REF: '' },
