@@ -53,6 +53,48 @@ func TestVisualCaptureRunnerBoundary(t *testing.T) {
 	if problems, err := checkWorkflow("visual-capture.yml", body); err != nil || len(problems) != 0 {
 		t.Fatalf("dedicated manual capture rejected: %v %v", problems, err)
 	}
+	// Risk: widening the Nix store exception could expose writable host paths
+	// or the Docker daemon, including through options or a service container.
+	t.Run("container mounts", func(t *testing.T) {
+		const mountRejection = "exactly the read-only /nix/store:/nix/store:ro volume"
+		const optionsRejection = "exactly --ipc=host --init container options"
+		for _, tc := range []struct {
+			name, field, want string
+			value             any
+		}{
+			{"missing volume", "volumes", mountRejection, nil},
+			{"empty volumes", "volumes", mountRejection, []any{}},
+			{"scalar volume", "volumes", mountRejection, "/nix/store:/nix/store:ro"},
+			{"other read-only volume", "volumes", mountRejection, []any{"/tmp:/tmp:ro"}},
+			{"extra read-only volume", "volumes", mountRejection, []any{"/nix/store:/nix/store:ro", "/tmp:/tmp:ro"}},
+			{"duplicate volume", "volumes", mountRejection, []any{"/nix/store:/nix/store:ro", "/nix/store:/nix/store:ro"}},
+			{"writable store", "volumes", mountRejection, []any{"/nix/store:/nix/store:rw"}},
+			{"implicitly writable store", "volumes", mountRejection, []any{"/nix/store:/nix/store"}},
+			{"remapped source", "volumes", mountRejection, []any{"/:/nix/store:ro"}},
+			{"remapped target", "volumes", mountRejection, []any{"/nix/store:/host-store:ro"}},
+			{"docker socket read-only", "volumes", mountRejection, []any{"/nix/store:/nix/store:ro", "/var/run/docker.sock:/var/run/docker.sock:ro"}},
+			{"docker socket writable", "volumes", mountRejection, []any{"/var/run/docker.sock:/var/run/docker.sock:rw"}},
+			{"volume option", "options", optionsRejection, "--ipc=host --init --volume /tmp:/tmp:ro"},
+			{"writable option", "options", optionsRejection, "--ipc=host --init -v /nix/store:/nix/store:rw"},
+			{"socket mount option", "options", optionsRejection, "--ipc=host --init --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock,readonly"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var workflow map[string]any
+				if err := yaml.Unmarshal(body, &workflow); err != nil {
+					t.Fatal(err)
+				}
+				mapping(mapping(mapping(workflow["jobs"])["visual-reference-capture"])["container"])[tc.field] = tc.value
+				mutated, err := yaml.Marshal(workflow)
+				if err != nil {
+					t.Fatal(err)
+				}
+				problems, err := checkWorkflow("visual-capture.yml", mutated)
+				if err != nil || !strings.Contains(strings.Join(problems, "\n"), tc.want) {
+					t.Fatalf("unsafe mount accepted or wrong rejection: %v %v, want %q", problems, err, tc.want)
+				}
+			})
+		}
+	})
 	mutations := map[string]struct {
 		want string
 		edit func(map[string]any)
@@ -95,6 +137,11 @@ func TestVisualCaptureRunnerBoundary(t *testing.T) {
 		}},
 		"mutable image": {"digest-pinned Playwright", func(w map[string]any) {
 			mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["container"])["image"] = "mcr.microsoft.com/playwright:latest"
+		}},
+		"service volume": {"must not add service containers or volumes", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["visual-reference-capture"])["services"] = map[string]any{
+				"extra": map[string]any{"image": "alpine:3", "volumes": []any{"/var/run/docker.sock:/var/run/docker.sock:ro"}},
+			}
 		}},
 	}
 	for _, event := range []string{"pull_request", "pull_request_target", "push", "merge_group", "schedule", "workflow_run", "workflow_call", "repository_dispatch"} {

@@ -28,6 +28,8 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
       options: --ipc=host --init
+      # NixOS runner externals are store symlinks; mount the already world-readable host store read-only.
+      volumes: [ /nix/store:/nix/store:ro ]
     defaults:
       run:
         shell: bash
