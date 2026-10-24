@@ -156,7 +156,6 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var items []Message
-	var policyErr error
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		items = nil
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
@@ -202,14 +201,15 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 			return err
 		}
 		rows.Close()
-		decisions, refusal, err := m.assistantPickupPolicyTx(ctx, tx, p, items)
+		var decisions []assistants.Decision
+		items, decisions, err = m.assistantPickupPolicyTx(ctx, tx, p, items)
 		if err != nil {
 			return err
 		}
-		if refusal != "" {
-			items = nil
-			policyErr = &httpError{409, "assistant_policy_denied", refusal}
-			return assistants.AppendDecisionsTx(ctx, tx, p, decisions...)
+		if sessionID != nil {
+			if err := MarkSessionSeen(ctx, tx, *sessionID, via); err != nil {
+				return err
+			}
 		}
 		ids := make([]string, len(items))
 		for i := range items {
@@ -231,14 +231,8 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 		if err = assistants.AppendDecisionsTx(ctx, tx, p, decisions...); err != nil {
 			return err
 		}
-		if sessionID != nil {
-			return MarkSessionSeen(ctx, tx, *sessionID, via)
-		}
 		return nil
 	})
-	if err == nil {
-		err = policyErr
-	}
 	if err != nil {
 		items = nil
 	}

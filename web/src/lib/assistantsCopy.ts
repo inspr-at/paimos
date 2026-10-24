@@ -93,6 +93,8 @@ export function assistantCopy(language: DisplayLanguage = displayLanguage()) {
     noAccess: de ? 'Zum Anzeigen ist Mitglieder-Zugriff erforderlich.' : 'Members access is required to see assistants.',
     retry: de ? 'Erneut versuchen' : 'Try again', truncated: de ? 'Die Liste ist unvollständig; weitere Einträge sind vorhanden.' : 'This list is partial; more entries are available.',
     historyRange: de ? 'Richtlinienänderungen und Entscheidungen der letzten 90 Tage.' : 'Policy changes and decisions from the last 90 days.',
+    policyHistoryRange: de ? 'Richtlinienänderungen der letzten 90 Tage.' : 'Policy changes from the last 90 days.',
+    anotherMember: de ? 'einem anderen Mitglied' : 'another member',
     historyUnavailable: de ? 'Richtlinienverlauf nicht verfügbar.' : 'Policy history unavailable.',
     noActivity: de ? 'Keine Aktivität in dieser Ansicht.' : 'No activity in this view.',
     changed: (name: string, time: string, what: string) => de ? `Geändert von ${name} um ${time}: ${what}` : `Changed by ${name} at ${time}: ${what}`,

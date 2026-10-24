@@ -10,20 +10,26 @@ their inbox-only restriction. A policy grants no key, role or project authority.
 Policy is checked under the access-change fence at inbox acceptance, the final
 hosted push claim, sleeping-host pull pickup, outward action request/approval,
 and agent-owned routine admission/result writes. Ordinary internal inbox
-transport is free. Hosted sends and routine work reserve the receiving
-assistant's allowance independently of the caller. Classified assistants use
+transport is free. Hosted sends check the receiving assistant's remaining
+allowance without reserving it; only routine work reserves its person-granted
+budget independently of the caller. Classified assistants use
 the registered hosted adapter or durable inbox; the generic webhook wake path
 cannot execute their work. An action approval records consent only; it does
 not execute an effect or grant a reusable permission.
 
 Each decision retains an `assistant_policy_receipts` row and
 `assistant.policy_evaluated` event. Policy-refused sends retain a failed inbox
-receipt and cannot later be fetched. A pull-time refusal leaves queued work
-unread and returns a policy error. Restoring the grant permits another pickup.
+receipt and cannot later be fetched. A pull-time refusal fails that message's
+receipt with its policy reason and removes it from pickup; permitted messages
+in the same bounded page still return. Restoring the grant requires a new send.
 A refusal after project access is withdrawn is recorded without a hidden
 project reference. Outward refusals/decisions keep the existing Desk, action
 history and durable outcome receipts. Assistants rows and the existing Policy
-and Activity tabs show decisions, including the refusal filter. Admission
+and Activity tabs show policy changes and decisions, including the refusal
+filter. Policy changes have a separate bounded query and audit list, so
+successful admissions stay in Activity without displacing policy edits. Known
+actors use their loaded names; unknown actors have a neutral member label with
+their identity available in a tooltip. Admission
 evidence does not imply that a host is running.
 
 ## Weekly accounting and approvals
@@ -72,12 +78,15 @@ no peer instance is contacted.
 Accepted delegation reserves the assistant budget before creating its
 occurrence and uses the existing routine outbox/inbox dispatch. The original
 lead key, session, owner, scopes and instance remain bound to the run and are
-rechecked at dispatch and result return. Exact retries reuse the run; changed
-facts conflict. The assistant submits through the existing agent-result route.
-The ordinary writer stores the result and atomically queues a pointer to the
+rechecked at dispatch. Exact retries reuse the run; changed facts conflict. The
+assistant submits through the existing agent-result route, which rechecks the
+current person grant, assistant authority, policy, instance and budget. The
+ordinary writer stores the result and atomically records a pointer to the
 original lead session. `lead_message_id` identifies its inbox receipt; queueing
-does not claim handoff. Failure to queue the pointer rolls back the result.
-No successor session or other principal is substituted.
+does not claim handoff. An ended lead session or withdrawn lead authority fails
+only that pointer receipt, with its reason, while retaining the authorized
+result. Unexpected persistence failures still roll back the transaction. No
+successor session or other principal is substituted.
 
 ## Threat notes
 

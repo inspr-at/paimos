@@ -47,14 +47,15 @@ const statusLine = computed(() => {
   return ''
 })
 const history = computed(() => store.events.filter(event => (event.after?.principal_id ?? event.before?.principal_id) === props.item.principal_id).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id - a.id))
+const policyHistory = computed(() => history.value.filter(event => !['assistant.policy_evaluated', 'assistant.delegated'].includes(event.type)))
 function historyText(event: typeof store.events[number]) {
-  const name = event.actor_principal_id === session.identity?.principal.id ? session.identity.principal.name : event.actor_principal_id.slice(0, 8)
+  const name = store.actorName(event.actor_principal_id)
   const format = ['assistant.policy_evaluated', 'assistant.delegated'].includes(event.type) ? words.recorded : words.changed
   return format(name, time(event.at), policyChange(event))
 }
 const activities = computed(() => [
-  ...history.value.map(event => ({ key: `policy:${event.id}`, at: event.at, kind: 'policy', text: historyText(event), href: undefined as string | undefined, refused: event.type === 'assistant.policy_evaluated' && event.after?.allowed === false })),
-  ...(props.facts.activity ?? []).map((event, index) => ({ ...event, key: `activity:${index}` })),
+  ...history.value.map(event => ({ key: `policy:${event.id}`, at: event.at, kind: 'policy', text: historyText(event), actorId: event.actor_principal_id, href: undefined as string | undefined, refused: event.type === 'assistant.policy_evaluated' && event.after?.allowed === false })),
+  ...(props.facts.activity ?? []).map((event, index) => ({ ...event, key: `activity:${index}`, actorId: undefined })),
 ].filter(event => (activityFilter.value === 'all' || event.kind === activityFilter.value) && (!refusalsOnly.value || event.refused)).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)))
 const displayPolicy = computed(() => editing.value && draft.value ? draft.value : props.item.policy)
 const dirty = computed(() => editing.value && JSON.stringify(draft.value) !== JSON.stringify(original.value?.policy))
@@ -174,12 +175,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <section class="assistant-block locked-rule" data-locked-rule="outward"><h3><AppIcon name="lock" :size="14" />{{ words.outward }}</h3><strong>{{ words.outwardRule }}</strong><p>{{ words.outwardHelp }}</p></section>
         <section class="assistant-block"><h3>{{ words.approvers }}</h3><p>{{ words.approversUnavailable }}</p></section>
         <section class="assistant-block locked-rule" data-locked-rule="secrets"><h3><AppIcon name="lock" :size="14" />{{ words.locked }}</h3><strong>{{ words.secretsRule }}</strong><button type="button" class="text-link" @click="activityFilter = 'all'; refusalsOnly = true; tab = 'activity'">{{ words.refusals }}</button></section>
-        <section class="assistant-block policy-audit"><h3>{{ words.tabs.activity }}</h3><p v-for="event in history.slice(0, 5)" :key="event.id">{{ historyText(event) }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }}</p><p v-if="store.historyTruncated">{{ words.truncated }}</p><p class="history-range">{{ words.historyRange }}</p></section>
+        <section class="assistant-block policy-audit"><h3>{{ words.tabs.activity }}</h3><p v-for="event in policyHistory.slice(0, 5)" :key="event.id" :title="event.actor_principal_id">{{ historyText(event) }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }}</p><p v-if="store.historyTruncated">{{ words.truncated }}</p><p class="history-range">{{ words.policyHistoryRange }}</p></section>
       </div>
       <div v-show="tab === 'activity'" id="assistant-pane-activity" role="tabpanel" aria-labelledby="assistant-tab-activity" class="assistant-activity">
         <div class="activity-filters"><label for="assistant-activity-filter">{{ words.tabs.activity }}</label><select id="assistant-activity-filter" v-model="activityFilter" class="field" @change="refusalsOnly = false"><option v-for="(label, key) in words.filters" :key="key" :value="key">{{ label }}</option></select></div>
-        <p v-if="facts.activity === null || facts.activityIncomplete">{{ assistantCapabilities.routines ? words.routineHistoryWindow : words.activityUnavailable }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }} {{ store.historyError }}</p><p v-if="store.historyTruncated || facts.routinesTruncated">{{ words.truncated }}</p>
-        <article v-for="event in activities" :key="event.key" class="assistant-log-entry"><time :datetime="event.at">{{ new Date(event.at).toLocaleString('en-GB') }}</time><p>{{ event.text }}</p><RouterLink v-if="event.href" :to="event.href">{{ event.href }}</RouterLink></article><p v-if="!activities.length && store.historyState === 'ready' && (activityFilter === 'policy' || activityFilter === 'runs' && facts.activity !== null)">{{ words.noActivity }}</p><p class="history-range">{{ words.historyRange }}</p>
+        <p v-if="facts.activity === null || facts.activityIncomplete">{{ assistantCapabilities.routines ? words.routineHistoryWindow : words.activityUnavailable }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }} {{ store.historyError }}</p><p v-if="store.historyTruncated || store.decisionsTruncated || facts.routinesTruncated">{{ words.truncated }}</p>
+        <article v-for="event in activities" :key="event.key" class="assistant-log-entry"><time :datetime="event.at">{{ new Date(event.at).toLocaleString('en-GB') }}</time><p :title="event.actorId">{{ event.text }}</p><RouterLink v-if="event.href" :to="event.href">{{ event.href }}</RouterLink></article><p v-if="!activities.length && store.historyState === 'ready' && (activityFilter === 'policy' || activityFilter === 'runs' && facts.activity !== null)">{{ words.noActivity }}</p><p class="history-range">{{ words.historyRange }}</p>
       </div>
     </div>
     <footer class="assistant-save-bar">

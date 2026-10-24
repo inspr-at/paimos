@@ -4,7 +4,7 @@ import { computed, onScopeDispose, ref, watch } from 'vue'
 import { APIError, pauseRecurrence } from '../lib/api'
 import { can, ensurePermissions, onAccessRevalidate, permissionsKnown } from '../lib/authz'
 import { assistantCopy } from '../lib/assistantsCopy'
-import { assistantCapabilities, assistantDeskLink, assistantPolicyEvents, assistantRequest, disconnectAssistant, listAssistants, policyChange, saveAssistantPolicy, unavailableAssistantFacts, type Assistant, type AssistantEvent, type AssistantPolicy, type AssistantSnapshot, type AssistantRoutine } from '../lib/assistants'
+import { assistantCapabilities, assistantDeskLink, assistantPolicyEvents, assistantDecisionEvents, assistantRequest, disconnectAssistant, listAssistants, policyChange, saveAssistantPolicy, unavailableAssistantFacts, type Assistant, type AssistantEvent, type AssistantPolicy, type AssistantSnapshot, type AssistantRoutine } from '../lib/assistants'
 import { presentAssistantRoutine, readAssistantRoutines, type OwnedAssistantRoutine } from '../lib/assistantRoutines'
 import { useSession } from './session'
 import { useProjects } from './projects'
@@ -20,7 +20,7 @@ export const useAssistants = defineStore('assistants', () => {
   const items = ref<Assistant[]>([]), state = ref<'loading' | 'ready' | 'error' | 'forbidden' | 'unavailable'>('loading')
   const error = ref(''), truncated = ref(false)
   const events = ref<AssistantEvent[]>([]), historyState = ref<'idle' | 'loading' | 'ready' | 'error' | 'forbidden'>('idle')
-  const historyTruncated = ref(false), historyError = ref('')
+  const historyTruncated = ref(false), decisionsTruncated = ref(false), historyError = ref('')
   const busy = ref<Record<string, boolean>>({})
   const ownedRoutines = ref<OwnedAssistantRoutine[]>([]), routinesReady = ref(false), routinesTruncated = ref(false), routinesError = ref('')
   let routineRead = 0, routineStarted = false, routineController: AbortController | undefined, routineFlight: Promise<void> | undefined
@@ -47,11 +47,17 @@ export const useAssistants = defineStore('assistants', () => {
   const mayConnect = computed(() => session.identity?.principal.kind === 'person' && can('agents.create') && can('keys.manage'))
   const mayRead = computed(() => session.identity?.principal.kind === 'person' ? can('members.read') : session.identity?.principal.kind === 'agent' && can('inbox.read'))
   function mayEdit(item: Assistant) { return mayConnect.value && session.identity?.principal.id === item.owner_person_id }
+  function actorName(id: string): string {
+    const ownName = id === session.identity?.principal.id ? session.identity.principal.name : undefined
+    const assistantName = items.value.find(item => item.principal_id === id)?.display_name
+    const deskName = session.identity?.principal.kind === 'person' && mayRead.value ? desk.projection?.items.find(item => item.asked_by?.id === id)?.asked_by?.name : undefined
+    return ownName || assistantName || deskName || assistantCopy().anotherMember
+  }
   function reset() {
     generation++; read++; historyRead++; controller?.abort(); historyController?.abort(); flight = undefined
     routineRead++; routineController?.abort(); routineFlight = undefined; routineStarted = false; ownedRoutines.value = []; routinesReady.value = false; routinesTruncated.value = false; routinesError.value = ''
     items.value = []; events.value = []; busy.value = {}; state.value = 'loading'; historyState.value = 'idle'
-    error.value = ''; historyError.value = ''; truncated.value = false; historyTruncated.value = false
+    error.value = ''; historyError.value = ''; truncated.value = false; historyTruncated.value = false; decisionsTruncated.value = false
   }
   watch(owner, reset, { flush: 'sync' })
   const stopAccess = onAccessRevalidate({ reset, refresh: () => { void load() } })
@@ -132,9 +138,10 @@ export const useAssistants = defineStore('assistants', () => {
     if (!can('events.read') || session.identity?.principal.kind !== 'person') { historyState.value = 'forbidden'; events.value = []; return }
     historyState.value = 'loading'; historyController = new AbortController()
     try {
-      const body = await assistantPolicyEvents(Date.now(), historyController.signal)
+      const now = Date.now(), signal = AbortSignal.any([historyController.signal, AbortSignal.timeout(30_000)])
+      const [body, decisions] = await Promise.all([assistantPolicyEvents(now, signal), assistantDecisionEvents(now, signal)])
       if (turn !== historyRead || who !== owner.value || epoch !== generation) return
-      events.value = body.items; historyTruncated.value = body.truncated; historyState.value = 'ready'; historyError.value = ''
+      events.value = [...body.items, ...decisions.items]; historyTruncated.value = body.truncated; decisionsTruncated.value = decisions.truncated; historyState.value = 'ready'; historyError.value = ''
     } catch (failure) {
       if (turn !== historyRead || who !== owner.value || epoch !== generation) return
       historyState.value = 'error'; historyError.value = failure instanceof Error ? failure.message : assistantCopy().historyUnavailable
@@ -223,5 +230,5 @@ export const useAssistants = defineStore('assistants', () => {
     } finally { if (who === owner.value && epoch === generation) busy.value[key] = false }
   }
   watch([owner, mayRead, () => permissionsKnown()], () => { void load() }, { immediate: true })
-  return { items, facts, state, error, truncated, mayConnect, mayRead, mayEdit, load, loadRoutines, watchPage, invalidate, save, disconnect, adopt, busy, events, historyState, historyTruncated, historyError, loadHistory, mayManageRoutine, toggleRoutine }
+  return { items, facts, state, error, truncated, mayConnect, mayRead, mayEdit, actorName, load, loadRoutines, watchPage, invalidate, save, disconnect, adopt, busy, events, historyState, historyTruncated, decisionsTruncated, historyError, loadHistory, mayManageRoutine, toggleRoutine }
 })

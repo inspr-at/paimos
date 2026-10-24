@@ -237,7 +237,7 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 			if err := tx.QueryRow(ctx, `SELECT coalesce(assistant_policy_key,'message/'||id::text) FROM inbox_messages WHERE id=$1::uuid`, messageID).Scan(&policyKey); err != nil {
 				return err
 			}
-			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.send", Key: policyKey, Scopes: []string{"inbox.read"}, Charge: true, Now: now})
+			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.send", Key: policyKey, Scopes: []string{"inbox.read"}, RequireBudget: true, Now: now})
 			if err != nil {
 				return err
 			}

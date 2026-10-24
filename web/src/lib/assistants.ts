@@ -135,13 +135,16 @@ export async function listAssistants(signal?: AbortSignal): Promise<{ items: Ass
 }
 export const saveAssistantPolicy = (id: string, revision: number, policy: AssistantPolicy) => assistantRequest<AssistantSnapshot>(`/assistants/${encodeURIComponent(id)}/policy`, 'PUT', { expected_revision: revision, policy })
 export const disconnectAssistant = (id: string) => assistantRequest<Assistant>(`/assistants/${encodeURIComponent(id)}/disable`, 'POST')
-export async function assistantPolicyEvents(now: number, signal?: AbortSignal): Promise<{ items: AssistantEvent[]; truncated: boolean }> {
+async function assistantEvents(types: string, now: number, signal?: AbortSignal): Promise<{ items: AssistantEvent[]; truncated: boolean }> {
   const from = new Date(now - 90 * 86400_000).toISOString(), to = new Date(now).toISOString()
-  const query = new URLSearchParams({ type: 'assistant.created,assistant.updated,assistant.disabled,assistant.policy_updated,assistant.policy_evaluated,assistant.delegated', from, to, limit: '100' })
+  const query = new URLSearchParams({ type: types, from, to, limit: '100' })
   const body = await assistantRequest<{ items: AssistantEvent[]; next_after: number | null }>(`/events?${query}`, 'GET', undefined, signal)
   if (!Array.isArray(body.items) || body.items.length > 100) throw new Error(assistantCopy().invalidResponse)
   return { items: body.items, truncated: body.next_after !== null }
 }
+// Successful admissions cannot consume the policy-change query's window.
+export const assistantPolicyEvents = (now: number, signal?: AbortSignal) => assistantEvents('assistant.created,assistant.updated,assistant.disabled,assistant.policy_updated', now, signal)
+export const assistantDecisionEvents = (now: number, signal?: AbortSignal) => assistantEvents('assistant.policy_evaluated,assistant.delegated', now, signal)
 export function policyChange(event: AssistantEvent): string {
   const words = assistantCopy(), before = event.before?.policy, after = event.after?.policy
   if (event.type === 'assistant.delegated') return words.taskDelegated

@@ -1304,9 +1304,11 @@ test('assistant policy refusals remain visible in rows and the stable existing a
   const amy = items.find(item => item.display_name === 'Amy')!
   amy.display_name = 'Rechercheassistentin für bereichsübergreifende Wissenspflege'
   const { events } = await mockAssistants(page, items, me.id)
+  const unknownActor = 'feedface-0000-4000-8000-000000000002'
   events.push(
-    { id: 73, type: 'assistant.policy_evaluated', at: new Date(now).toISOString(), actor_principal_id: me.id, after: { principal_id: amy.principal_id, allowed: false, reason: 'assistant_weekly_budget_exhausted' } },
-    { id: 72, type: 'assistant.policy_evaluated', at: new Date(now - 60_000).toISOString(), actor_principal_id: me.id, after: { principal_id: amy.principal_id, allowed: true, reason: '' } },
+    { id: 73, type: 'assistant.policy_evaluated', at: new Date(now).toISOString(), actor_principal_id: unknownActor, after: { principal_id: amy.principal_id, allowed: false, reason: 'assistant_weekly_budget_exhausted' } },
+    { id: 72, type: 'assistant.policy_evaluated', at: new Date(now - 60_000).toISOString(), actor_principal_id: amy.principal_id, after: { principal_id: amy.principal_id, allowed: true, reason: '' } },
+    { id: 71, type: 'assistant.policy_updated', at: new Date(now - 86400_000).toISOString(), actor_principal_id: me.id, before: amy, after: { ...amy, policy: { ...amy.policy, weekly_budget: { amount: '15', unit: 'USD' } } } },
   )
   await page.route('**/api/me/permissions*', route => {
     const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
@@ -1325,11 +1327,19 @@ test('assistant policy refusals remain visible in rows and the stable existing a
     await expect(panel).toBeVisible()
     const controls = { tabs: panel.getByRole('tablist'), activity: panel.getByRole('tab', { name: 'Activity', exact: true }), policy: panel.getByRole('tab', { name: 'Policy', exact: true }), close: panel.getByRole('button', { name: 'Close assistant details' }) }
     const guard = await controlStability(page, controls)
-    await guard.check(async () => { await controls.policy.click(); await expect(panel.locator('.policy-audit')).toContainText('Action refused: weekly budget unavailable') })
+    await guard.check(async () => {
+      await controls.policy.click()
+      await expect(panel.locator('.policy-audit')).toContainText('Budget: $10 to $15')
+      await expect(panel.locator('.policy-audit')).not.toContainText('Action admitted within policy')
+      await expect(panel.locator('.policy-audit')).not.toContainText('Action refused: weekly budget unavailable')
+    })
     await guard.check(async () => {
       await panel.getByRole('button', { name: 'View refusals in Activity', exact: true }).click()
       const activity = panel.locator('#assistant-pane-activity')
       await expect(activity).toContainText('Action refused: weekly budget unavailable')
+      await expect(activity).toContainText('Recorded by another member')
+      await expect(activity).not.toContainText(unknownActor.slice(0, 8))
+      await expect(activity.locator(`p[title="${unknownActor}"]`)).toHaveCount(1)
       await expect(activity.getByText('Action admitted within policy', { exact: false })).toHaveCount(0)
     })
     guard.done()

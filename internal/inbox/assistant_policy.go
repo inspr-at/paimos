@@ -15,7 +15,7 @@ import (
 )
 
 // Callers hold the inbox access fence. Execution spend belongs to the receiving
-// assistant. Pure pull transport costs nothing; routines reserve separately.
+// assistant. Transport only checks admission; routines reserve separately.
 func assistantDeliveryPolicyTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, recipient, project, message, key string, collect func(events.Change) error) (string, error) {
 	if key == "" {
 		key = "message/" + message
@@ -25,7 +25,7 @@ func assistantDeliveryPolicyTx(ctx context.Context, tx pgx.Tx, sender tenant.Pri
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_message_targets t JOIN assistant_adapters a ON a.tenant_id=t.tenant_id AND a.target_id=t.id WHERE t.tenant_id=$1::uuid AND t.principal_id=$2::uuid AND t.project_id=nullif($3,'')::uuid AND t.enabled AND t.role='primary' AND t.target_kind='https_webhook')`, sender.TenantID, recipient, project).Scan(&push); err != nil {
 		return "", err
 	}
-	checks = append(checks, assistants.Check{TenantID: sender.TenantID, PrincipalID: recipient, ProjectID: project, Operation: "adapter.accept", Key: key, Scopes: []string{"inbox.read"}, Charge: push})
+	checks = append(checks, assistants.Check{TenantID: sender.TenantID, PrincipalID: recipient, ProjectID: project, Operation: "adapter.accept", Key: key, Scopes: []string{"inbox.read"}, RequireBudget: push})
 	for _, check := range checks {
 		d, err := assistants.EvaluateTx(ctx, tx, check)
 		if err != nil {
@@ -51,19 +51,27 @@ func assistantDeliveryPolicyTx(ctx context.Context, tx pgx.Tx, sender tenant.Pri
 
 // Pickup is another admission boundary for sleeping pull hosts. In particular,
 // revoking project or result scopes after queueing must not leak queued work.
-func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, items []Message) ([]assistants.Decision, string, error) {
+func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, items []Message) ([]Message, []assistants.Decision, error) {
 	if p.Kind != tenant.Agent || len(items) == 0 {
-		return nil, "", nil
+		return items, nil, nil
 	}
 	var assistant bool
 	if err := tx.QueryRow(ctx, `SELECT coalesce(messaging_only,false) OR coalesce(agent_class,'')='assistant' FROM principals WHERE id=$1::uuid`, p.ID).Scan(&assistant); err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	if !assistant {
-		return nil, "", nil
+		return items, nil, nil
+	}
+	ids := make([]string, len(items))
+	for i, msg := range items {
+		ids[i] = msg.ID
+	}
+	// Fence the whole bounded page in one stable order before receipt writes.
+	if _, err := tx.Exec(ctx, `SELECT id FROM inbox_messages WHERE id=ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE`, ids); err != nil {
+		return nil, nil, err
 	}
 	decisions := []assistants.Decision{}
-	refusal := ""
+	kept := make([]Message, 0, len(items))
 	for _, msg := range items {
 		var project, key string
 		var raw, current []byte
@@ -77,7 +85,7 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
  (SELECT agent_owner_config FROM routine_runs WHERE id=nullif($2,'')::uuid),
  (SELECT d.agent_owner_config FROM recurrence_definitions d JOIN routine_runs r ON r.recurrence_id=d.recurrence_id WHERE r.id=nullif($2,'')::uuid)
  FROM inbox_messages m WHERE m.id=$1::uuid`, msg.ID, run).Scan(&project, &key, &raw, &current); err != nil {
-			return nil, "", err
+			return nil, nil, err
 		}
 		scopes := []string{"inbox.read"}
 		grantRefusal := ""
@@ -102,7 +110,7 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 					for _, scope := range scopes[:3] {
 						if err := authz.RequireTx(ctx, tx, actor, scope, authz.Scope{ProjectID: project}); err != nil {
 							if !errors.Is(err, authz.ErrForbidden) {
-								return nil, "", err
+								return nil, nil, err
 							}
 							grantRefusal = "assistant_routine_authority_revoked"
 						}
@@ -112,14 +120,51 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 		}
 		d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.pull", Key: key, Scopes: scopes, RequireBudget: run != "", Refusal: grantRefusal})
 		if err != nil {
-			return nil, "", err
+			return nil, nil, err
+		}
+		if !d.Allowed {
+			changes, err := failAssistantPickupTx(ctx, tx, msg, d.Reason)
+			if err != nil {
+				return nil, nil, err
+			}
+			d.Changes = append(d.Changes, changes...)
+		} else {
+			kept = append(kept, msg)
 		}
 		decisions = append(decisions, d)
-		if !d.Allowed {
-			refusal = d.Reason
-		}
 	}
-	return decisions, refusal, nil
+	return kept, decisions, nil
+}
+
+// The page's message locks serialize acknowledgement and terminal failure.
+// Keep the exact policy reason on the sender's receipt, retire every delivery
+// path, and return audit for append after the permitted rows are handed over.
+// Unlike lifecycle expiry, a policy refusal is terminal even for durable pulls.
+func failAssistantPickupTx(ctx context.Context, tx pgx.Tx, msg Message, reason string) ([]events.Change, error) {
+	var state string
+	err := tx.QueryRow(ctx, `SELECT state FROM inbox_receipts WHERE message_id=$1::uuid`, msg.ID).Scan(&state)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && state != "queued" {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE inbox_message_deliveries d SET state='dead',reason='unavailable',assistant_policy_reason=$2,lease_token=NULL,lease_until=NULL FROM inbox_compat_messages c WHERE c.tenant_id=d.tenant_id AND c.id=d.message_id AND c.inbox_message_id=$1::uuid AND d.state IN ('pending','blocked')`, msg.ID, reason); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE harness_deliveries SET released_at=clock_timestamp() WHERE message_id=$1::uuid AND completed_at IS NULL AND released_at IS NULL`, msg.ID); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE inbox_messages SET expires_at=LEAST(coalesce(expires_at,clock_timestamp()),clock_timestamp()) WHERE id=$1::uuid`, msg.ID); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE inbox_receipts SET state='failed',failure_reason=$2,handed_off_at=NULL WHERE message_id=$1::uuid AND state='queued'`, msg.ID, reason); err != nil {
+		return nil, err
+	}
+	return []events.Change{
+		receiptEvent(msg.ID, "failed", receiptTarget{}, "", reason),
+		{Type: "inbox.delivery_failed", After: map[string]string{"message_id": msg.ID, "reason": reason, "sender_principal_id": msg.SenderPrincipalID, "recipient_principal_id": msg.RecipientPrincipalID}},
+	}, nil
 }
 
 func assistantReceiptErrorTx(ctx context.Context, tx pgx.Tx, id string) error {

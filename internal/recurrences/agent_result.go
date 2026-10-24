@@ -4,6 +4,7 @@ package recurrences
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -180,6 +181,7 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 		policyKey := "routine-run/" + id
 		var delegationRaw []byte
 		var delegation *AgentDelegation
+		leadFailure := ""
 		if err = tx.QueryRow(ctx, `SELECT agent_delegation FROM routine_runs WHERE id=$1`, id).Scan(&delegationRaw); err != nil {
 			return err
 		}
@@ -189,7 +191,12 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 			}
 			policyKey = delegation.BudgetKey
 			if err = validateDelegatingLeadTx(ctx, tx, p.TenantID, item.ProjectID, delegation.LeadPrincipalID, delegation.SessionID, delegation.OwnerPersonID, delegation.LeadKeyID); err != nil {
-				return err
+				if !errors.Is(err, authz.ErrForbidden) {
+					return err
+				}
+				// The person grant and assistant policy authorize the stored
+				// output. Lost lead authority only fails its result pointer.
+				leadFailure = "assistant_delegating_lead_unavailable"
 			}
 		}
 		policy, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: item.ProjectID, Operation: "routine.result", Key: policyKey, Scopes: agentScopes(c), RequireBudget: true})
@@ -218,7 +225,7 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 		if delegation != nil {
 			sender := tenant.Principal{ID: c.GrantedByPrincipalID, TenantID: p.TenantID, Kind: tenant.Person}
 			body := "Assistant routine " + id + ": " + in.Status + "\nResult node: " + out.NodeID + "\nResult receipt: /api/recurrences/" + item.ID + "/runs/" + id + "/agent-result\nThis is a stored result, not approval or execution authority."
-			out.LeadMessageID, leadChanges, err = inbox.QueueAgentLeadResultTx(ctx, tx, sender, delegation.LeadPrincipalID, delegation.SessionID, item.ProjectID, id, body)
+			out.LeadMessageID, leadChanges, err = inbox.QueueAgentLeadResultTx(ctx, tx, sender, delegation.LeadPrincipalID, delegation.SessionID, item.ProjectID, id, body, leadFailure)
 			if err != nil {
 				return err
 			}

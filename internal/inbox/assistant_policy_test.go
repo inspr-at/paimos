@@ -42,6 +42,22 @@ func TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Only a granted run consumes allowance; transport acceptance is free.
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(t.Context(), tx, w.agent.TenantID); err != nil {
+			return err
+		}
+		d, err := assistants.EvaluateTx(t.Context(), tx, assistants.Check{TenantID: w.agent.TenantID, PrincipalID: w.agent.ID, ProjectID: project, Operation: "routine.admit", Key: "reserved-run", Charge: true, Ceiling: &policy.WeeklyBudget})
+		if err != nil {
+			return err
+		}
+		if !d.Allowed {
+			t.Fatalf("run reservation refused: %s", d.Reason)
+		}
+		return assistants.AppendDecisionsTx(t.Context(), tx, w.admin, d)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	denied, err := m.commitMessage(t.Context(), w.sender, project, compatInput("grok_bot:worker", "policy-over-budget"))
 	if err == nil || !strings.Contains(err.Error(), "assistant_weekly_budget_exhausted") || denied.ID == "" {
 		t.Fatalf("send refusal: %v", err)
@@ -92,8 +108,8 @@ func TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff(t *testing.T) {
 	if _, err := dispatcher.DispatchOne(t.Context(), w.agent.TenantID); err != nil || calls != 1 {
 		t.Fatal("handoff replay")
 	}
-	if countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, w.agent.ID) != 2 {
-		t.Fatal("send/claim charged more than once")
+	if countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, w.agent.ID) != 1 {
+		t.Fatal("send/claim created a reservation beyond the granted run")
 	}
 	// Scope revocation also applies to pull pickup after work was queued.
 	if _, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "grok_bot:worker", Adapter: "grok_bot_routine", Kind: "pull", Role: "primary", MaximumLevel: "simple"}); err != nil {
@@ -105,8 +121,11 @@ func TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff(t *testing.T) {
 	}
 	policy.AllowedProjects = []string{}
 	put()
-	if page, err := m.base.pending(t.Context(), w.agent, 0, 100); err == nil || len(page) != 0 || !strings.Contains(err.Error(), "assistant_project_denied") {
+	if page, err := m.base.pending(t.Context(), w.agent, 0, 100); err != nil || len(page) != 0 {
 		t.Fatalf("revoked pull: count=%d err=%v", len(page), err)
+	}
+	if state, reason := receiptState(t, w, pull.ID); state != "failed" || reason != "assistant_project_denied" {
+		t.Fatalf("revoked pull receipt=%s reason=%s", state, reason)
 	}
 	if countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM events WHERE type='inbox.message_fetched' AND after->>'message_id'=$1`, pull.ID) != 0 {
 		t.Fatal("denied pull was marked fetched")

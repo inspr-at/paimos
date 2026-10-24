@@ -3,6 +3,7 @@ package inbox
 
 import (
 	"context"
+	"errors"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
@@ -118,19 +119,28 @@ func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal
 // QueueAgentLeadResultTx returns a pointer to the result to the original lead
 // session. It cannot switch to a successor or a different principal's target.
 // The caller has rechecked the live person grant and owns the access/tree fence.
-func QueueAgentLeadResultTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, lead, session, project, run, body string) (string, []events.Change, error) {
+// An ended session or revoked lead authority retains a failed pointer receipt;
+// it never prevents the independently authorized result from being stored.
+func QueueAgentLeadResultTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, lead, session, project, run, body, failureReason string) (string, []events.Change, error) {
 	if _, err := messageSession(ctx, tx, &session, lead, project); err != nil {
-		return "", nil, err
+		if !errors.Is(err, errSessionEnded) {
+			return "", nil, err
+		}
+		failureReason = ReasonSessionEnded
 	}
 	if _, err := tx.Exec(ctx, `SELECT id FROM principals WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, []string{sender.ID, lead}); err != nil {
 		return "", nil, err
 	}
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO inbox_messages(tenant_id,sender_principal_id,recipient_principal_id,recipient_session_id,body,idempotency_key,sender_label) VALUES($1,$2,$3,$4,$5,$6,'Assistant results') RETURNING id::text`, sender.TenantID, sender.ID, lead, session, body, "assistant-result/"+run).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO inbox_messages(tenant_id,sender_principal_id,recipient_principal_id,recipient_session_id,body,idempotency_key,sender_label,expires_at) VALUES($1,$2,$3,$4,$5,$6,'Assistant results',CASE WHEN $7<>'' THEN clock_timestamp() END) RETURNING id::text`, sender.TenantID, sender.ID, lead, session, body, "assistant-result/"+run, failureReason).Scan(&id); err != nil {
 		return "", nil, err
 	}
 	changes := []events.Change{{NodeID: &project, Type: "inbox.sent", After: map[string]string{"id": id, "sender_principal_id": sender.ID, "recipient_principal_id": lead, "recipient_session_id": session}}}
-	if err := insertReceiptWith(ctx, tx, sender, id, "queued", receiptTarget{}, "", "", func(c events.Change) error { changes = append(changes, c); return nil }); err != nil {
+	state := "queued"
+	if failureReason != "" {
+		state = "failed"
+	}
+	if err := insertReceiptWith(ctx, tx, sender, id, state, receiptTarget{}, "", failureReason, func(c events.Change) error { changes = append(changes, c); return nil }); err != nil {
 		return "", nil, err
 	}
 	return id, changes, nil
