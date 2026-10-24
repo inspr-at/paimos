@@ -237,7 +237,7 @@ func TestAssistantLeadDelegationPolicyAndResults(t *testing.T) {
  (SELECT count(*) FROM nodes WHERE id=$3::uuid AND state='proposed' AND body=$5),
  (SELECT count(*) FROM inbox_messages WHERE idempotency_key='assistant-result/'||$2::text AND (recipient_session_id=$4 OR recipient_session_id IS NULL)),
  (SELECT count(*) FROM events WHERE type='inbox.receipt_failed' AND after->>'message_id'=$1::text)
- FROM inbox_messages m JOIN inbox_receipts r ON r.message_id=m.id WHERE m.id=$1`, completed.LeadMessageID, occurrences[2].Run.ID, completed.NodeID, successor, resultInput.Body).Scan(&state, &reason, &boundSession, &stored, &outputs, &rerouted, &failures); err != nil {
+ FROM inbox_messages m JOIN inbox_receipts r ON r.message_id=m.id WHERE m.id=$1::uuid`, completed.LeadMessageID, occurrences[2].Run.ID, completed.NodeID, successor, resultInput.Body).Scan(&state, &reason, &boundSession, &stored, &outputs, &rerouted, &failures); err != nil {
 			return err
 		}
 		if state != "failed" || reason != "session_ended" || boundSession != session || stored != 1 || outputs != 1 || rerouted != 0 || failures != 1 {

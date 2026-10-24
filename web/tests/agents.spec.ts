@@ -1333,6 +1333,7 @@ test('assistant policy refusals remain visible in rows and the stable existing a
       await expect(panel.locator('.policy-audit')).not.toContainText('Action admitted within policy')
       await expect(panel.locator('.policy-audit')).not.toContainText('Action refused: weekly budget unavailable')
     })
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1706-policy-audit-${width}-${theme}.png`), fullPage: true })
     await guard.check(async () => {
       await panel.getByRole('button', { name: 'View refusals in Activity', exact: true }).click()
       const activity = panel.locator('#assistant-pane-activity')
