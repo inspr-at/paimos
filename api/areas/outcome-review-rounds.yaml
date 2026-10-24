@@ -5,7 +5,7 @@ paths:
     post:
       operationId: recordReviewRoundOutcome
       summary: 'Record a review round outcome'
-      description: 'Requires outcome.write on the ticket, rechecked under the tenant and tree fences. Agents must identify their own submitted review_run_id with the same ticket, kind, artifact head SHA and verdict. A submitted run can back only one observation. This observation grants no review, merge or delivery authority. Person writers may import historical design observations with source imported. One immutable outcome per tenant, ticket, kind and round; an identical retry returns 200, a different observation for that identity returns 409. The tenant event log records type outcome.review_round atomically with the outcome extension; the released AEON-286 outcome kinds stay unchanged.'
+      description: 'Requires outcome.write on the ticket, rechecked under the tenant and tree fences. Agents must identify their own submitted review_run_id with the same ticket, kind, artifact head SHA and verdict. Every supplied run must match the ticket, kind, artifact and verdict. A submitted run can back only one observation. This observation grants no review, merge or delivery authority. Person writers may import historical design observations with source imported. One immutable outcome per tenant, ticket, kind and round; an identical retry returns 200, a different observation for that identity returns 409. The tenant event log records type outcome.review_round atomically with the outcome extension; the released AEON-286 outcome kinds stay unchanged.'
       security: *auth
       parameters:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}

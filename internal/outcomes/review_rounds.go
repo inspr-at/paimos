@@ -163,8 +163,13 @@ func (m *Module) recordReviewRound(w http.ResponseWriter, r *http.Request) {
 		}
 		err = tx.QueryRow(ctx, `INSERT INTO outcome_review_rounds
  (tenant_id,project_id,ticket_node_id,kind,round,verdict,cited_rules,at,reviewer_role,artifact,review_run_id,source,actor_principal_id,idempotency_key,request_digest)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id::text,recorded_at`,
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING RETURNING id::text,recorded_at`,
 			p.TenantID, node.projectID, node.id, in.Kind, in.Round, in.Verdict, in.CitedRules, in.At, in.ReviewerRole, in.Artifact, nilUUID(in.ReviewRunID), in.Source, p.ID, key, digest[:]).Scan(&out.ID, &out.RecordedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// A conflict hidden by project RLS must not expose its row or turn
+			// a normal immutable-identity conflict into an internal error.
+			return &fail{status: 409, msg: "review round or idempotency key already has a different observation"}
+		}
 		if err != nil {
 			return err
 		}
@@ -185,10 +190,11 @@ func (m *Module) recordReviewRound(w http.ResponseWriter, r *http.Request) {
 }
 
 func authorizeReviewRoundTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, node ticketRef, in ReviewRoundRecord) error {
-	if p.Kind == tenant.Person {
+	person := p.Kind == tenant.Person
+	if person && in.ReviewRunID == "" {
 		return nil
 	}
-	if p.Kind != tenant.Agent || in.Source == "imported" || in.ReviewRunID == "" {
+	if !person && (p.Kind != tenant.Agent || in.Source == "imported" || in.ReviewRunID == "") {
 		return &fail{status: 403, msg: "agents may record only their own submitted ticket reviews"}
 	}
 	runKind := "review"
@@ -197,16 +203,16 @@ func authorizeReviewRoundTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	}
 	var matches bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM review_runs
- WHERE id=$1 AND ticket_node_id=$2 AND project_id=$3 AND reviewer_principal_id=$4
+ WHERE id=$1 AND ticket_node_id=$2 AND project_id=$3 AND ($8::boolean OR reviewer_principal_id=$4)
  AND kind=$5 AND head_sha=$6 AND verdict=$7 AND submitted_at IS NOT NULL
- AND NOT EXISTS(SELECT 1 FROM nodes child WHERE child.parent_id=$2 AND child.deleted_at IS NULL
-   AND NOT EXISTS(SELECT 1 FROM work_orders wo WHERE wo.node_id=child.id)))`,
-		in.ReviewRunID, node.id, node.projectID, p.ID, runKind, in.Artifact, in.Verdict).Scan(&matches)
+ AND ($8::boolean OR NOT EXISTS(SELECT 1 FROM nodes child WHERE child.parent_id=$2 AND child.deleted_at IS NULL
+   AND NOT EXISTS(SELECT 1 FROM work_orders wo WHERE wo.node_id=child.id))))`,
+		in.ReviewRunID, node.id, node.projectID, p.ID, runKind, in.Artifact, in.Verdict, person).Scan(&matches)
 	if err != nil {
 		return err
 	}
 	if !matches {
-		return &fail{status: 403, msg: "agents may record only their own submitted ticket reviews"}
+		return &fail{status: 403, msg: "review run does not match this ticket observation"}
 	}
 	return nil
 }

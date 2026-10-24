@@ -104,6 +104,11 @@ func TestReviewRoundOutcomes(t *testing.T) {
 	if got := personPost(changed, "different-rule-key"); got.Code != 409 {
 		t.Fatalf("conflicting round: %d %s", got.Code, got.Body.String())
 	}
+	wrongTarget := in
+	wrongTarget.Ticket = otherTicket
+	if got := personPost(wrongTarget, "wrong-target-run"); got.Code != 403 {
+		t.Fatalf("person cannot consume another ticket's proof: %d %s", got.Code, got.Body.String())
+	}
 	imported := in
 	imported.Ticket, imported.Source, imported.ReviewRunID = otherTicket, "imported", ""
 	if got := personPost(imported, "imported-design-one"); got.Code != 201 {
