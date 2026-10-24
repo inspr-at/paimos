@@ -33,28 +33,28 @@ const tile = (page: Page, label: string) => page.getByRole('listitem').filter({ 
 
 test('AEON-1710: history failure pills stay on one line and expose the full reason', async ({ browser }, testInfo) => {
   // Risk: a full diagnosis wraps inside a pill on phones, or clipping hides
-  // the reason. Every language/theme keeps the head controls in place.
+  // the reason. English copy and German length stress keep controls in place.
   test.setTimeout(180_000)
-  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) for (const lang of ['en', 'de'] as const) {
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme, reducedMotion: 'reduce' })
     const page = await context.newPage()
     try {
-      const world = await setup(page, { theme, lang })
+      const world = await setup(page, { theme })
       const body = deliveryMetrics()
       const setReason = (reason: 'rate_limited' | 'timed_out' | 'github_error' | 'unreachable') => world.answer(200, { ...body, source: { ...body.source,
         last_read_error: { reason, at: body.generated_at, permission: null, reset_at: '2026-10-24T20:14:00Z', status_code: 502 }, retry_at: '2026-10-24T21:14:00Z' } })
       setReason('timed_out')
       await page.goto('/p/AEON/delivery')
-      const chip = page.locator('.sources .go-src').filter({ hasText: lang === 'de' ? 'Historie' : 'History' })
+      const chip = page.locator('.sources .go-src').filter({ hasText: 'History' })
       await expect(chip).toBeVisible()
       const guard = await controlStability(page, {
         windows: head(page).getByRole('radiogroup').first(), levels: head(page).getByRole('radiogroup').last(), views: head(page).getByRole('tablist'),
       })
-      for (const [reason, en, de] of [['timed_out', 'in time', 'rechtzeitig'], ['github_error', 'HTTP 502', 'HTTP 502'], ['unreachable', 'network connection', 'Netzwerkverbindung'], ['rate_limited', 'rate limit', 'Anfragelimits']] as const) {
+      for (const [reason, words] of [['timed_out', 'in time'], ['github_error', 'HTTP 502'], ['unreachable', 'network connection'], ['rate_limited', 'rate limit']] as const) {
         await guard.check(async () => {
           setReason(reason)
           await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
-          await expect(chip).toContainText(lang === 'de' ? de : en)
+          await expect(chip).toContainText(words)
           await chip.hover()
         })
         const fullReason = await chip.innerText()
@@ -69,8 +69,20 @@ test('AEON-1710: history failure pills stay on one line and expose the full reas
         expect(sizes.width).toBeLessThanOrEqual(sizes.available + 0.5)
         await expect(chip).toHaveAttribute('title', fullReason)
       }
+      await page.screenshot({ path: testInfo.outputPath(`history-pill-${width}-${theme}-en.png`), fullPage: true })
+      // The app intentionally stays English (AEON-1609). As in the settings
+      // evidence, German is fixture-only length stress; catalogue copy is
+      // independently asserted in project-delivery-settings.unit.test.ts.
+      await guard.check(async () => {
+        await chip.locator('span').evaluate(element => {
+          element.lastChild!.textContent = ' · Wegen des GitHub-Anfragelimits dieser App pausiert das Lesen der Lieferhistorie bis 20:14. Die zuletzt gespeicherte Historie bleibt erhalten.'
+        })
+        const text = await chip.locator('span').evaluate(element => ({ height: element.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(element).lineHeight) }))
+        expect(text.height).toBeGreaterThan(0)
+        expect(text.height).toBeLessThanOrEqual(text.lineHeight + 0.5)
+      })
+      await page.screenshot({ path: testInfo.outputPath(`history-pill-${width}-${theme}-long-de.png`), fullPage: true })
       guard.done()
-      await page.screenshot({ path: testInfo.outputPath(`history-pill-${width}-${theme}-${lang}.png`), fullPage: true })
     } finally { await context.close() }
   }
 })
