@@ -54,8 +54,8 @@ paths:
   /auth/callback:
     get:
       operationId: authCallback
-      summary: Finish sign-in and start a session
-      description: Resolve the tenant from signed state, then the OIDC issuer and subject to a person principal in that tenant; never choose a tenant by email alone.
+      summary: Finish browser or native sign-in
+      description: "Resolve the tenant from signed state, then the OIDC issuer and subject to a person principal in that tenant; never choose a tenant by email alone. A native transaction replaces browser session creation with a single-use app code, captures and clears app state atomically, and commits before redirecting to the fixed app callback."
       security: []
       parameters:
         - {name: code, in: query, schema: {type: string}}
@@ -63,12 +63,14 @@ paths:
         - {name: error, in: query, schema: {type: string}}
       responses:
         "302":
-          description: Session cookie set and redirect to the app on success; on failure redirect to /signin?error=denied|not_member|imported_account|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member, or imported_account when a verified email matches an unlinked imported person in the signed tenant; provider availability failures use unavailable; other failures use failed.
+          description: "Browser success sets a session cookie and redirects home. Native success redirects to paimos-app://auth/callback with a single-use code and the original app state, without issuing a browser session cookie. On failure redirect to /signin?error=denied|not_member|imported_account|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member, or imported_account when a verified email matches an unlinked imported person in the signed tenant; provider availability failures use unavailable; other failures use failed."
           headers:
             Location:
               schema: {type: string}
             Set-Cookie:
               schema: {type: string}
+        "429":
+          description: "Native callback attempt limit reached. Retry after one minute."
   /auth/dev-login:
     post:
       operationId: authDevLogin

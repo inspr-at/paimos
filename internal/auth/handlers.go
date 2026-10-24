@@ -127,7 +127,6 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if payload.Native != nil && !m.nativeAttempt(w, r, "callback", 60) {
-		m.clearOIDCCookie(w)
 		return
 	}
 	if payload.StepUp != nil || payload.Native != nil {

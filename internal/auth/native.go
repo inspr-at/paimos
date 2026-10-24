@@ -230,6 +230,7 @@ func (l *nativeLimits) allow(key string, now time.Time, limit int) bool {
 }
 
 func nativeRateLimited(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Retry-After", "60")
 	httpapi.WriteError(w, 429, "native sign-in attempt limit reached")
 }

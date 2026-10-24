@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const purgeInterval = time.Minute
+
 // PurgeExpired removes abandoned raw app state as well as completed logins.
 // Directory pages and delete batches are bounded; callers supply a deadline.
 func (s *Service) PurgeExpired(ctx context.Context) error {
@@ -64,8 +66,12 @@ func (s *Service) PurgeExpired(ctx context.Context) error {
 
 // Run purges at startup and every minute. Only the failure class is logged.
 func (s *Service) Run(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(purgeInterval)
 	defer ticker.Stop()
+	s.runPurge(ctx, ticker.C)
+}
+
+func (s *Service) runPurge(ctx context.Context, ticks <-chan time.Time) {
 	for {
 		batch, cancel := context.WithTimeout(ctx, 50*time.Second)
 		err := s.PurgeExpired(batch)
@@ -76,7 +82,7 @@ func (s *Service) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 		}
 	}
 }

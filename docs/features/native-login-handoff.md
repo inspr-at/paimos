@@ -58,3 +58,5 @@ IdP, exact app-state delivery and committed clearing, two independent PKCE
 hops, replay/binding/expiry refusals, active membership and identity checks,
 concurrent callback/exchange winners, membership-revocation interleaving,
 tenant RLS, cleanup, input bounds, rate limits, and content-free logging.
+The device-session package also drives the cleanup loop with an injected clock
+and minute tick to verify deletion by the next sweep across tenants.
