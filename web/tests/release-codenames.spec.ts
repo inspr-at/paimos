@@ -367,22 +367,35 @@ test('phones show the name without horizontal scroll', async ({ page }) => {
 })
 
 test('the footer shows both codename and Pretty version; hover shows seconds in a card', async ({ page }) => {
-  await mockWork(page, fixtures())
-  const history = presentedHistory()
-  await mockReleases(page, history, { codename: CODENAMES[5] })
-  await page.goto('/')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const history = await openNamed(page)
   const pill = page.locator('footer.app-footer .version-pill')
   await expect(page.locator('footer.app-footer .footer-name')).toHaveText('PAIMOS AEON')
   await expect(pill.locator('.footer-codename')).toHaveText(CODENAMES[5])
   await expect(pill).toHaveAccessibleName(new RegExp(`${CODENAMES[5]}, version ${history.current.replace(/\./g, '\\.')}`))
   const version = pill.locator('.calendar-version')
   await expect(version).toHaveAttribute('data-version-view', 'pretty')
-  await pill.hover()
-  await expect(page.locator('.release-hover-card .calendar-version')).toHaveAttribute('data-version-view', 'revealed')
-  await expect(version).toHaveAttribute('data-version-view', 'pretty')
-  await expect(pill.locator('.footer-codename')).toBeVisible()
-  await page.mouse.move(5, 5)
-  await expect(version).toHaveAttribute('data-version-view', 'pretty')
+  // Text attributes can settle before the project view and its font layout.
+  // Activate the page's renderer, then measure the settled control through
+  // the real pointer actions; keep Playwright's actionability checks intact.
+  await page.bringToFront()
+  await expectStableControls({
+    controls: { 'release history': pill },
+    scrollAreas: { page: page.locator('html') },
+    interactions: [
+      { name: 'hover release history', run: async () => {
+        await pill.hover()
+        await expect(page.locator('.release-hover-card .calendar-version')).toHaveAttribute('data-version-view', 'revealed')
+        await expect(version).toHaveAttribute('data-version-view', 'pretty')
+        await expect(pill.locator('.footer-codename')).toBeVisible()
+      } },
+      { name: 'leave release history', run: async () => {
+        await page.mouse.move(5, 5)
+        await expect(page.locator('.release-hover-card')).toHaveCount(0)
+        await expect(version).toHaveAttribute('data-version-view', 'pretty')
+      } },
+    ],
+  })
   await pill.click()
   await expect(sheet(page)).toBeVisible()
 })
