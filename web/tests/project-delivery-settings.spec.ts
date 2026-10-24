@@ -104,6 +104,51 @@ async function bannerContainsAction(page: Page, name: string) {
   return { passed: true, message: `${name}: banner contains its ${bounds.height}px action on all four sides` }
 }
 
+test('AEON-1710: repository retry text follows the schedule after checking again', async ({ page }, testInfo) => {
+  // Risk: a stale GitHub reset contradicts the current retry line, including
+  // when Check again clears the deadline but retains the diagnostic, or the
+  // rate-limit notice repeats its deadline while other causes lose theirs.
+  const { world, errors } = await setup(page)
+  const reset = new Date(2026, 9, 12, 19, 14).toISOString()
+  const retry = new Date(2026, 9, 12, 20, 14).toISOString()
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: { choice: theme } } }))
+    world.source = { ...source('done')!, last_read_error: { reason: 'rate_limited', at: reset, permission: null, reset_at: reset }, retry_at: retry }
+    await page.goto('/p/AEON/settings/delivery')
+    const card = page.locator('#repository'), reason = card.locator('.ds-h'), detail = card.locator('.ds-b')
+    await expect(reason).toContainText('20:14')
+    await expect(reason).not.toContainText('19:14')
+    await expect(detail).toHaveText('The last stored history is kept.')
+    const guard = await controlStability(page, { change: card.locator('[data-act=change]'), more: card.locator('[data-act=repo-more]'), check: card.locator('[data-act=check]') })
+    await guard.check(async () => {
+      world.source!.last_read_error = { reason: 'timed_out', at: reset, permission: null }
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(reason).toContainText('GitHub did not answer in time.')
+      await expect(detail).toContainText('The last stored history is kept. The server retries')
+      await expect(detail).toContainText('20:14')
+    })
+    await guard.check(async () => {
+      world.source!.last_read_error = { reason: 'rate_limited', at: reset, permission: null, reset_at: reset }
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(reason).toContainText('20:14')
+      await expect(detail).toHaveText('The last stored history is kept.')
+    })
+    await guard.check(async () => {
+      // Model the server's Check again result: keep the last diagnostic,
+      // clear retry_at, and let the next worker attempt run immediately.
+      world.source!.retry_at = null
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(detail).toHaveText('The last stored history is kept.')
+      await expect(reason).toContainText('rate-limited')
+      await expect(reason).not.toContainText(/19:14|20:14/)
+    })
+    guard.done()
+    await page.screenshot({ path: testInfo.outputPath(`history-retry-${width}-${theme}.png`), fullPage: true })
+  }
+  expect(errors).toEqual([])
+})
+
 test('AEON-1253: repository shows the history source without moving its controls', async ({ page }, testInfo) => {
   // Risk: a successful least-privilege history still asks for Actions, conceals
   // incomplete metrics, or shifts controls when the source changes.

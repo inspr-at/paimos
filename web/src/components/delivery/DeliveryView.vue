@@ -20,7 +20,7 @@ import TicketsSection from './TicketsSection.vue'
 import TrendChart from './TrendChart.vue'
 import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
-import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, numbersOf, openingPrefs, readDefaults, readDeliveryMetrics, shortDate, type DeliveryDefaults, type DeliveryMetrics, type DeliveryPrefs, type Level, type StoredDeliveryPrefs, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
+import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, historyReadReason, numbersOf, openingPrefs, readDefaults, readDeliveryMetrics, shortDate, type DeliveryDefaults, type DeliveryMetrics, type DeliveryPrefs, type Level, type StoredDeliveryPrefs, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
 import { deliveryText, fill } from '../../lib/deliveryNumbersText'
 import { FLOW_MODES, type FlowMode } from '../../lib/deliveryFlowModes'
 import { timeLabel } from '../../lib/deliveryFlow'
@@ -197,8 +197,8 @@ const chips = computed(() => {
   const day = (iso: string | null) => iso ? shortDate(iso.slice(0, 10), lang.value) : ''
   const stale = repositoryState(s, Date.parse(data.value?.generated_at ?? '')) === 'stale'
   const readError = s.last_read_error?.reason
-  const historyProblem = lang.value === 'de' ? { actions_read_missing: 'Actions-Lesezugriff fehlt', not_installed: 'App nicht installiert', github_unavailable: 'GitHub nicht erreichbar' } : { actions_read_missing: 'Actions read access missing', not_installed: 'App not installed', github_unavailable: 'GitHub unavailable' }
-  const back = readError ? { icon: 'history' as const, b: lang.value === 'de' ? 'Historie' : 'History', rest: ` · ${historyProblem[readError]}` }
+
+  const back = readError ? { icon: 'history' as const, b: lang.value === 'de' ? 'Historie' : 'History', rest: ` · ${historyReadReason(s, lang.value)}` }
     : s.backfill === 'done' ? { icon: 'history' as const, b: t.srcBack[0], rest: fill(t.srcBack[1], { d: day(s.backfill_since) }) }
     : s.backfill === 'running' ? { icon: 'history' as const, b: t.srcRun[0], rest: s.covered_since ? fill(t.srcRun[1], { d: day(s.covered_since) }) : t.srcRunNone[1] }
       : { icon: 'history' as const, b: t.srcNone[0], rest: t.srcNone[1] }
@@ -333,7 +333,7 @@ watch(state, (next, prev) => {
           <RouterLink class="btn sm" :to="repositoryLink">{{ settingsLabel }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
         </div>
         <div v-else class="sources">
-          <template v-for="chip in chips" :key="chip.b"><RouterLink v-if="chip.problem" class="src go-src" :to="repositoryLink"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span><AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span></template>
+          <template v-for="chip in chips" :key="chip.b"><RouterLink v-if="chip.problem" class="src go-src" :to="repositoryLink" :title="`${chip.b}${chip.rest}`"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span><AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="src" :title="`${chip.b}${chip.rest}`"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span></template>
         </div>
       </div>
 
@@ -427,7 +427,8 @@ watch(state, (next, prev) => {
 /* The read alert owns the right half, the save alert the left half: always, so a retry never moves or resizes (AEON-541). */
 .dl-status .banner.half { margin-left: calc(50% + 6px); }
 .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; margin-top: 12px; }
-.src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
+.src { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.src > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .src svg { flex: none; color: var(--teal-ink); }
 .src b { font-weight: 600; color: var(--ink); }
 .chip-sk { height: 26px; border-radius: 999px; }

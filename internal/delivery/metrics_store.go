@@ -426,6 +426,29 @@ type metricSourceRow struct {
 	LastEventAt, RetryAt                    *time.Time
 }
 
+// Only a contiguous attempt history may skip older attempts. A lone latest
+// webhook fact does not prove the earlier attempts have already been read.
+func storedMetricAttemptsTx(ctx context.Context, tx pgx.Tx, repository string, ids []int64, known map[int64]int) error {
+	if len(ids) > 100 {
+		return errRead
+	}
+	rows, err := tx.Query(ctx, `SELECT run_id,max(attempt) FROM delivery_metric_runs WHERE repository=$1 AND run_id=ANY($2::bigint[])
+		GROUP BY run_id HAVING min(attempt)=1 AND count(*)=max(attempt) LIMIT 100`, repository, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var attempt int
+		if err := rows.Scan(&id, &attempt); err != nil {
+			return err
+		}
+		known[id] = attempt
+	}
+	return rows.Err()
+}
+
 func loadMetricSourceTx(ctx context.Context, tx pgx.Tx, project string, lock bool) (*metricSourceRow, error) {
 	var s metricSourceRow
 	var raw, readError []byte

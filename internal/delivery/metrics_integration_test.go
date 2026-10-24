@@ -381,12 +381,12 @@ func TestDeliveryMetricsWebhookRecordsEachEventKind(t *testing.T) {
 func ptrInt(n int64) *int64 { return &n }
 
 func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
-	// Risk: a backfill that fails midway loses its place or writes half a
-	// step, a repeat duplicates facts, or one call reads without bound.
+	// Risk: a failed read loses validated progress, advances past its failed
+	// page, duplicates facts on retry, or reads without bound.
 	f, g := newMetricsFixture(t)
 	day := f.at.AddDate(0, 0, -3) // 2026-10-04
-	ci := "/actions/workflows/ci.yml/runs?created=" + day.Format("2006-01-02") + "&status=completed&per_page=100&page=1"
-	nightly := "/actions/workflows/nightly-full.yml/runs?created=" + day.Format("2006-01-02") + "&status=completed&per_page=100&page=1"
+	ci := "/actions/workflows/ci.yml/runs?created=" + day.Format("2006-01-02") + "&per_page=100&page=1"
+	nightly := "/actions/workflows/nightly-full.yml/runs?created=" + day.Format("2006-01-02") + "&per_page=100&page=1"
 	rerun := githubRunBody(601, 2, defaultCIWorkflow, "pull_request", "work/a", strings.Repeat("1", 40), day.Add(2*time.Hour), 9*time.Minute, "success", 0)
 	failOn := ""
 	g.respond = func(path string) (any, error) {
@@ -436,8 +436,8 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 		f.at = *step.RetryAt
 	}
 	anchor := step
-	// The next step fails on the pulls page: nothing is written and the
-	// stored position stays where the previous step left it.
+	// The next step fails on pulls. Validated run pages remain committed;
+	// the durable cursor names exactly the failed pulls page, never its successor.
 	failOn = "/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"
 	f.call(t, f.person, "POST", backfillPath, map[string]any{}, 502, nil)
 	runsBefore, pullsBefore, _ := metricCounts(t, f)
@@ -446,8 +446,8 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 		return tx.QueryRow(t.Context(), `SELECT backfill_cursor FROM delivery_metric_sources WHERE project_id=$1`, f.project).Scan(&cursor)
 	})
 	var stored backfillCursor
-	if err := json.Unmarshal(cursor, &stored); err != nil || stored.Phase != "runs" || stored.Day != *anchor.Day {
-		t.Fatalf("failed step moved the cursor: %s (%v)", cursor, err)
+	if err := json.Unmarshal(cursor, &stored); err != nil || stored.Phase != "pulls" || stored.Page != 1 || !stored.Since.Equal(anchor.Since) || stored.ReadUntil == nil {
+		t.Fatalf("failed step lost its safe retry position: %s (%v)", cursor, err)
 	}
 	if pullsBefore != 0 {
 		t.Fatalf("failed step wrote %d pulls", pullsBefore)

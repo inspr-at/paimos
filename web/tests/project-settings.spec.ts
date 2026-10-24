@@ -20,7 +20,7 @@ async function setup(page: Page, readOnly = false) {
   const writes: { id: string; body: Record<string, unknown>; expected: string }[] = [], assignments: unknown[] = []
   const nodes = new Map(data.projects.map(p => [p.id, { id: p.id, key: p.key, title: p.title, body: p.description, state: p.state, fields: { classic: { key: p.classic, description: p.description }, preserved: 'keep me' }, updated_at: p.last, created_at: p.last, parent_id: null, kind_id: 'k-project', position: '0', deleted_at: null }]))
   const groups = [{ id: 'g-platform', name: 'Platform', project_ids: ['p-pharos'] }, { id: 'g-product', name: 'Product', project_ids: ['p-aeon'] }]
-  const control = { fail: false, contextFail: false, held: null as null | { entered: () => void; until: Promise<void> } }
+  const control = { fail: false, contextFail: false, historyReason: 'rate_limited' as 'rate_limited' | 'timed_out' | 'github_error' | 'unreachable', held: null as null | { entered: () => void; until: Promise<void> } }
   await page.route('**/api/nodes/p-*', async route => {
     const request = route.request(), id = new URL(request.url()).pathname.split('/').at(-1)!, node = nodes.get(id)
     if (!node) return route.fulfill({ status: 404, json: { error: 'Not found' } })
@@ -47,12 +47,19 @@ async function setup(page: Page, readOnly = false) {
     return route.fulfill({ json: { items: groups } })
   })
   await page.route('**/api/events/41/undo', route => { groups.splice(0, groups.length, ...inverse); return route.fulfill({ json: { event_id: 42 } }) })
+  await page.route('**/api/projects/*/definitions/context', route => route.fulfill({ json: { project_id: new URL(route.request().url()).pathname.split('/')[3], definition: null, workspace_default: null, copied_from_checks: null, can_manage: !readOnly, pending_changes: [], admins: [] } }))
+  await page.route('**/api/projects/*/delivery/metrics', route => route.fulfill({ json: {
+    project_id: 'p-pharos', generated_at: '2026-09-23T12:00:00Z', metrics: [],
+    source: { repository: 'example/delivery', ci_workflow: '.github/workflows/ci.yml', nightly_workflow: '.github/workflows/nightly-full.yml', history_source: 'actions', app_connected: true, backfill: 'running', backfill_since: '2026-08-24T00:00:00Z', backfill_done_at: null, covered_since: null, last_read_error: { reason: control.historyReason, permission: null, at: '2026-09-23T11:59:00Z', reset_at: '2026-09-23T12:14:00Z', status_code: control.historyReason === 'github_error' ? 503 : 403 }, retry_at: '2026-09-23T12:14:00Z' },
+  } }))
+  await page.route('**/api/projects/*/delivery-settings**', route => route.fulfill({ json: new URL(route.request().url()).searchParams.has('view') ? {} : { required_workflow: 'CI', required_checks: ['go test'], deadlines: { reviewed: 30, pushed: 60, ci_green: 20, in_queue: 60, queue_failed: 120 } }, headers: { ETag: '"1"' } }))
   await page.route('**/api/recurrences**', route => route.fulfill({ json: { items: [], next_cursor: null } }))
   await page.route('**/api/projects/*/routine-execution-settings', route => route.fulfill({ status: 404, json: { error: 'not configured' } }))
   await page.route('**/api/me/permissions**', route => {
     const project = new URL(route.request().url()).searchParams.get('project_id') ?? undefined
     const answer = mockEffectivePermissions(readOnly ? 'viewer' : 'admin', project)
-    if (!readOnly) answer.workspace.permissions.push('account.use.manage')
+    answer.workspace.permissions.push('delivery.read')
+    if (!readOnly) answer.workspace.permissions.push('account.use.manage', 'delivery.manage')
     return route.fulfill({ json: answer })
   })
   // The existing Work context card remains the owner of this API.
@@ -328,6 +335,7 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
 
 test('AEON-1233: approved P1 reference states and check.mjs audit against the build', async ({ browser }, testInfo) => {
   test.setTimeout(240_000)
+  const settingsChecks: { width: number; theme: string; state: string; gap: number; expected: number; passed: boolean }[] = []
   const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.', 'The public-source guard requires the approved Lead example’s operator host to become {C}, filled from the selected computer; other approved explainer text is retained.', 'Freeze dates/actors are absent from the project API: show the confirmed Frozen state without inventing a date or person. FIX3: the key example uses the project’s newest ticket key, or KEY-1 when there is none; the description hint explicitly supports Markdown.', 'FIX2: the approved Delete sheet is retained with an unavailable message and disabled final action until authorized, revision-checked project-and-ticket deletion exists.']
   for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
@@ -342,6 +350,14 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PHAROS-15.')
       await expect(page.locator('#description-help')).toHaveText('Shown under the name in the header; Markdown works.')
       async function capture(state: string) {
+        await expect(page.locator('.toast')).toHaveCount(0)
+        const spacing = await page.locator('.project-settings').evaluate(element => {
+          const nav = document.querySelector('.project-navigation')!
+          return { gap: element.getBoundingClientRect().top - nav.getBoundingClientRect().bottom, expected: parseFloat(getComputedStyle(element).getPropertyValue('--section-gap')) }
+        })
+        const passed = Math.abs(spacing.gap - spacing.expected) <= .5
+        settingsChecks.push({ width, theme, state, ...spacing, passed })
+        expect(passed, `${state}: tab-to-settings gap follows the section token`).toBe(true)
         const checks = await checkProjectSettings(page, `${state}/${width}/${theme}`, width < 600)
         for (const check of checks) expect(check.passed, check.message).toBe(true)
         lines.push(`${state}-${width}-${theme}: ${checks.length} approved audit checks PASS`)
@@ -389,6 +405,22 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       if (width <= 1000) { await nav.click(); await capture('nav-open'); await page.keyboard.press('Escape') }
       await navigate(page, '/p/AEON/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: AEON-1.'); await capture('general-aeon')
       await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PRJ-26-1.'); await capture('general-prj26')
+      await navigate(page, '/p/PHAROS/settings/definitions'); await expect(page.locator('#definitions .origin')).toContainText('No definition yet'); await capture('definitions-pharos')
+      await navigate(page, '/p/PHAROS/settings/delivery'); await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', 'unavailable'); await expect(page.locator('#checks .frow').first()).toBeVisible(); await expect(page.locator('#repository .ds-h')).toContainText('GitHub’s rate limit'); await capture('delivery-pharos')
+      // AEON-1710: longer reasons use the existing scrolling notice; its actions
+      // stay in place at every evidence width, including the phone layout.
+      const repository = page.locator('#repository')
+      const historyStable = await controlStability(page, { change: repository.locator('[data-act=change]'), more: repository.locator('[data-act=repo-more]'), check: repository.locator('[data-act=check]') })
+      for (const [reason, words] of [['timed_out', 'did not answer in time'], ['github_error', 'HTTP 503'], ['unreachable', 'network connection'], ['rate_limited', 'GitHub’s rate limit']] as const) {
+        await historyStable.check(async () => {
+          world.control.historyReason = reason
+          await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+          await expect(repository.locator('.ds-h')).toContainText(words)
+        })
+      }
+      await historyStable.check(() => repository.locator('.ds-h').evaluate(element => { element.textContent = 'Wegen des GitHub-Anfragelimits dieser App pausiert das Lesen der Lieferhistorie bis 20:14. Die zuletzt gespeicherte Historie bleibt erhalten.' }))
+      historyStable.done()
+      await capture('delivery-long-de')
       await navigate(page, '/p/PHAROS/settings/agents'); await expect(page.getByText('This project has no context yet, so no account may work on it. Choose one.', { exact: true })).toBeVisible(); await capture('agents-pharos')
       world.control.contextFail = true
       await navigate(page, '/p/PHAROS/settings/access'); await navigate(page, '/p/PHAROS/settings/agents')
@@ -421,5 +453,6 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await longPage.screenshot({ path: testInfo.outputPath(`general-long-text-${width}-${theme}.png`), fullPage: true })
     } finally { await context.close() }
   }
+  writeFileSync(testInfo.outputPath('settings-spacing-checks.json'), JSON.stringify(settingsChecks, null, 2))
   writeFileSync(testInfo.outputPath('check-result.md'), `${lines.join('\n')}\n`)
 })

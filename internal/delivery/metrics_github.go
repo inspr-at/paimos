@@ -31,8 +31,23 @@ func (g AppReader) MetricsRead(ctx context.Context, tenantID string, read func(f
 	if !g.App.Configured(tenantID, g.App.Config.Repository) {
 		return errRead
 	}
-	return g.observeGitHub(func(app *crossreview.GitHubApp) error {
-		return app.ReadHistoryInstallation(ctx, read)
+	return g.observeGitHubRead(true, func(app *crossreview.GitHubApp, observed func(error) error) error {
+		return app.ReadHistoryInstallation(ctx, func(get func(string, any) error, source string) error {
+			return read(func(endpoint string, out any) error {
+				started := time.Now()
+				err := observed(get(endpoint, out))
+				if err == nil {
+					return nil
+				}
+				metadata := webhookGitHubError{cause: err, class: webhookErrorClass(err), endpoint: historyEndpoint(endpoint)}
+				var upstream *webhookGitHubError
+				if errors.As(err, &upstream) {
+					metadata = *upstream
+				}
+				metadata.duration = time.Since(started)
+				return &metadata
+			}, source)
+		})
 	})
 }
 
@@ -58,6 +73,11 @@ type githubRun struct {
 	HeadCommit struct {
 		Tree string `json:"tree_id"`
 	} `json:"head_commit"`
+}
+
+type githubRunsPage struct {
+	Total int         `json:"total_count"`
+	Runs  []githubRun `json:"workflow_runs"`
 }
 
 // metricRunFrom validates one workflow run attempt. An incomplete run is not
@@ -145,7 +165,7 @@ func readRunAttempts(get func(string, any) error, r githubRun, from int, include
 		}
 		var body githubRun
 		if err := get(fmt.Sprintf("/actions/runs/%d/attempts/%d", latest.ID, n), &body); err != nil {
-			return nil, 0, err
+			return out, n, err
 		}
 		if body.ID != latest.ID || body.Attempt != n || body.Head != latest.Head || !sameWorkflow(metricRun{Workflow: body.Path}, latest.Workflow) || body.Suite != r.Suite {
 			return nil, 0, errRead
@@ -400,6 +420,13 @@ type backfillCursor struct {
 	Workflow   int           `json:"workflow"`
 	Day        string        `json:"day"`
 	Page       int           `json:"page"`
+	// These watermarks live with the durable cursor, not in process memory.
+	// Since remains the coverage boundary; RefreshSince bounds a later read.
+	ReadUntil    *time.Time `json:"read_until,omitempty"`
+	ReadThrough  *time.Time `json:"read_through,omitempty"`
+	RefreshSince *time.Time `json:"refresh_since,omitempty"`
+	PendingRuns  []int64    `json:"pending_runs,omitempty"`
+	WaitingRuns  []int64    `json:"waiting_runs,omitempty"`
 	// Truncated records a day with more runs than GitHub lists (1 000), or a
 	// pull-request listing that hit GitHub's last page while recent pulls remain.
 	Truncated bool `json:"truncated,omitempty"`
@@ -494,22 +521,50 @@ const (
 // upserts the listed attempt, so a newer attempt that landed between steps is
 // kept, including one for a run this page already finished. That gap waits
 // until a paused run on the same page is stored, and a pause keeps that run's
-// identity. A failed step leaves the stored cursor alone. Pulls into other
+// identity. On failure, the caller can commit validated facts and the failed
+// page/attempt position together. Pulls into other
 // base branches are not facts. Hitting the last pull page while recent pulls
 // remain is truncated, not done.
-func backfillStep(get func(string, any) error, repository string, workflows []string, cursor backfillCursor, now time.Time) (backfillCursor, backfillBatch, error) {
+func backfillStep(get func(string, any) error, repository string, workflows []string, cursor backfillCursor, now time.Time, known ...func(int64) int) (backfillCursor, backfillBatch, error) {
 	batch := backfillBatch{}
 	today := dayStart(now)
+	if cursor.ReadUntil != nil {
+		today = dayStart(*cursor.ReadUntil)
+	}
 	for batch.Calls < backfillCallBudget {
+		// Runs still queued at the previous watermark are followed by identity;
+		// a late completion must not fall behind the next created-time filter.
+		if len(cursor.PendingRuns) > 0 {
+			var run githubRun
+			batch.Calls++
+			if err := get(fmt.Sprintf("/actions/runs/%d", cursor.PendingRuns[0]), &run); err != nil {
+				return cursor, batch, err
+			}
+			if run.ID != cursor.PendingRuns[0] {
+				return cursor, batch, errRead
+			}
+			if run.Status == "completed" {
+				var stop bool
+				var err error
+				cursor, stop, err = absorbListedRun(get, cursor, &batch, run, known...)
+				if err != nil || stop {
+					return cursor, batch, err
+				}
+			} else {
+				cursor = rememberWaitingRun(cursor, run.ID)
+			}
+			cursor.PendingRuns = cursor.PendingRuns[1:]
+			continue
+		}
 		switch cursor.Phase {
 		case "runs":
 			if cursor.Workflow >= len(workflows) {
 				if cursor.ResumePhase != "" {
 					// A preflight catch-up returns to jobs or done. It must
 					// not walk pulls again. A confirmed absence is not listed.
-					return backfillCursor{Since: cursor.Since, Phase: cursor.ResumePhase, Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.ThenWorkflows), PreflightAbsent: cursor.PreflightAbsent}, batch, nil
+					return carryReadCursor(cursor, backfillCursor{Since: cursor.Since, Phase: cursor.ResumePhase, Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.ThenWorkflows), PreflightAbsent: cursor.PreflightAbsent}), batch, nil
 				}
-				cursor = backfillCursor{Since: cursor.Since, Phase: "pulls", Page: 1, Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.Workflows), PreflightAbsent: cursor.PreflightAbsent}
+				cursor = carryReadCursor(cursor, backfillCursor{Since: cursor.Since, Phase: "pulls", Page: 1, Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.Workflows), PreflightAbsent: cursor.PreflightAbsent})
 				continue
 			}
 			day, err := time.Parse("2006-01-02", cursor.Day)
@@ -517,20 +572,29 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 				return cursor, batch, errRead
 			}
 			if day.After(today) {
-				cursor = backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows, PreflightAbsent: cursor.PreflightAbsent}
+				cursor = carryReadCursor(cursor, backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(historyReadSince(cursor)).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows, PreflightAbsent: cursor.PreflightAbsent})
 				continue
 			}
-			var response struct {
-				Total int         `json:"total_count"`
-				Runs  []githubRun `json:"workflow_runs"`
-			}
+			var response githubRunsPage
 			batch.Calls++
 			file := url.PathEscape(path.Base(workflows[cursor.Workflow]))
-			if err := get(fmt.Sprintf("/actions/workflows/%s/runs?created=%s&status=completed&per_page=100&page=%d", file, cursor.Day, cursor.Page), &response); err != nil {
+			created, status := cursor.Day, "&status=completed"
+			if cursor.ReadUntil != nil {
+				from := maxTime(day, historyReadSince(cursor))
+				until := *cursor.ReadUntil
+				if end := day.Add(24*time.Hour - time.Second); end.Before(until) {
+					until = end
+				}
+				if cursor.RefreshSince != nil || !day.Before(today) {
+					created = url.QueryEscape(from.UTC().Format(time.RFC3339) + ".." + until.UTC().Format(time.RFC3339))
+				}
+				status = "" // keep unfinished identities for the next incremental read
+			}
+			if err := get(fmt.Sprintf("/actions/workflows/%s/runs?created=%s%s&per_page=100&page=%d", file, created, status, cursor.Page), &response); err != nil {
 				// Only a confirmed absence of the preflight file is skipped.
 				// Any other miss, including a 404 of CI or nightly, stops the step.
 				if errors.Is(err, crossreview.ErrNotFound) && isPreflightFile(workflows[cursor.Workflow]) {
-					cursor = backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows, PreflightAbsent: true}
+					cursor = carryReadCursor(cursor, backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(historyReadSince(cursor)).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows, PreflightAbsent: true})
 					continue
 				}
 				return cursor, batch, err
@@ -547,6 +611,13 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 			foundResume := cursor.AttemptRun == 0
 			var pending []githubRun
 			for _, r := range response.Runs {
+				if cursor.ReadUntil != nil && r.Status != "completed" {
+					if r.ID <= 0 || r.Created.IsZero() {
+						return cursor, batch, errRead
+					}
+					cursor = rememberWaitingRun(cursor, r.ID)
+					continue
+				}
 				stored, seen := doneAttempt(cursor.DoneRuns, r.ID)
 				if seen && r.Attempt <= stored {
 					if r.ID == cursor.AttemptRun {
@@ -563,7 +634,7 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 				}
 				wasPaused := cursor.AttemptRun == r.ID
 				var stop bool
-				cursor, stop, err = absorbListedRun(get, cursor, &batch, r)
+				cursor, stop, err = absorbListedRun(get, cursor, &batch, r, known...)
 				if err != nil {
 					return cursor, batch, err
 				}
@@ -579,7 +650,7 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 			}
 			for _, r := range pending {
 				var stop bool
-				cursor, stop, err = absorbListedRun(get, cursor, &batch, r)
+				cursor, stop, err = absorbListedRun(get, cursor, &batch, r, known...)
 				if err != nil {
 					return cursor, batch, err
 				}
@@ -621,7 +692,7 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 			}
 			older := false
 			for _, p := range pulls {
-				if p.Updated.Before(cursor.Since) {
+				if p.Updated.Before(historyReadSince(cursor)) {
 					older = true
 					continue
 				}
@@ -640,7 +711,7 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 				if capped {
 					cursor.Truncated = true
 				}
-				cursor = backfillCursor{Since: cursor.Since, Phase: "done", Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.Workflows), PreflightAbsent: cursor.PreflightAbsent}
+				cursor = carryReadCursor(cursor, backfillCursor{Since: cursor.Since, Phase: "done", Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.Workflows), PreflightAbsent: cursor.PreflightAbsent})
 				return cursor, batch, nil
 			}
 			cursor.Page++
@@ -651,6 +722,40 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 		}
 	}
 	return cursor, batch, nil
+}
+
+func historyReadSince(cursor backfillCursor) time.Time {
+	if cursor.RefreshSince != nil {
+		return *cursor.RefreshSince
+	}
+	return cursor.Since
+}
+
+func carryReadCursor(from, next backfillCursor) backfillCursor {
+	next.ReadSource = from.ReadSource
+	if next.DefaultBranch == "" {
+		next.DefaultBranch = from.DefaultBranch
+	}
+	next.ReadUntil, next.ReadThrough, next.RefreshSince = from.ReadUntil, from.ReadThrough, from.RefreshSince
+	next.PendingRuns, next.WaitingRuns = from.PendingRuns, from.WaitingRuns
+	if next.Phase == "done" && next.ReadUntil != nil {
+		next.ReadThrough = next.ReadUntil
+	}
+	return next
+}
+
+func rememberWaitingRun(cursor backfillCursor, id int64) backfillCursor {
+	for _, known := range cursor.WaitingRuns {
+		if known == id {
+			return cursor
+		}
+	}
+	if len(cursor.WaitingRuns) >= 1000 {
+		cursor.Truncated = true
+		return cursor
+	}
+	cursor.WaitingRuns = append(cursor.WaitingRuns, id)
+	return cursor
 }
 
 func isPreflightFile(name string) bool {
@@ -701,8 +806,13 @@ func rememberDone(runs doneRuns, id int64, attempt int) doneRuns {
 // stored yet. A stored attempt reads only the gap up to the listing. stop
 // means the call budget paused the read; the cursor then names that run and
 // the next attempt. The listed attempt is upserted on every visit.
-func absorbListedRun(get func(string, any) error, cursor backfillCursor, batch *backfillBatch, r githubRun) (backfillCursor, bool, error) {
+func absorbListedRun(get func(string, any) error, cursor backfillCursor, batch *backfillBatch, r githubRun, known ...func(int64) int) (backfillCursor, bool, error) {
 	stored, seen := doneAttempt(cursor.DoneRuns, r.ID)
+	if len(known) > 0 && known[0] != nil {
+		if previous := known[0](r.ID); previous > stored {
+			stored, seen = previous, true
+		}
+	}
 	from := 1
 	if seen && stored >= 1 {
 		from = stored + 1
@@ -717,13 +827,15 @@ func absorbListedRun(get func(string, any) error, cursor backfillCursor, batch *
 		batch.Calls++
 		return true
 	}
-	runs, next, err := readRunAttempts(get, r, from, true, allow)
-	if err != nil {
-		return cursor, false, err
-	}
+	runs, next, err := readRunAttempts(get, r, from, !seen || r.Attempt > stored, allow)
 	batch.Runs = append(batch.Runs, runs...)
 	if next != 0 {
 		cursor.AttemptRun, cursor.Attempt = r.ID, next
+	}
+	if err != nil {
+		return cursor, false, err
+	}
+	if next != 0 {
 		return cursor, true, nil
 	}
 	cursor.DoneRuns = rememberDone(cursor.DoneRuns, r.ID, r.Attempt)

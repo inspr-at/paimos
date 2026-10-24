@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/project-delivery-settings.spec.ts",
-    "listedTests": 12,
+    "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
         "max": 42.27,

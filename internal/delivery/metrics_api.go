@@ -24,9 +24,11 @@ import (
 )
 
 type MetricReadError struct {
-	Reason     string    `json:"reason"`
-	Permission *string   `json:"permission"`
-	At         time.Time `json:"at"`
+	Reason     string     `json:"reason"`
+	Permission *string    `json:"permission"`
+	At         time.Time  `json:"at"`
+	ResetAt    *time.Time `json:"reset_at,omitempty"`
+	StatusCode *int       `json:"status_code,omitempty"`
 }
 
 type MetricSource struct {
@@ -436,7 +438,7 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 	cursor := source.Cursor
 	if cursor == nil || in.Restart {
 		since := dayStart(now.AddDate(0, 0, -days))
-		cursor = &backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1, Workflows: fullBackfillWorkflows(source)}
+		cursor = &backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1, ReadUntil: &now, Workflows: fullBackfillWorkflows(source)}
 	}
 	// A finished backfill that never listed preflight catches that workflow up
 	// once, then returns to the jobs pass. It does not read CI again and it
@@ -456,7 +458,7 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 		changedSource = cursor.ReadSource != readSource && (cursor.ReadSource != "" || readSource == historyChecks)
 		if changedSource {
 			// Capabilities changed: do not reuse a position from the other API.
-			next = backfillCursor{Since: cursor.Since, Phase: "runs", Day: cursor.Since.Format("2006-01-02"), Page: 1, Workflows: fullBackfillWorkflows(source)}
+			next = backfillCursor{Since: cursor.Since, Phase: "runs", Day: cursor.Since.Format("2006-01-02"), Page: 1, ReadUntil: &now, Workflows: fullBackfillWorkflows(source)}
 		}
 		next.ReadSource = readSource
 		if readSource == historyChecks {
@@ -471,20 +473,58 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 			return err
 		}
 		workflows := backfillWorkflowList(source, &next)
+		// One bounded local lookup per listed page avoids fetching attempts that
+		// are already durable (also when webhooks got there before the reader).
+		known := map[int64]int{}
+		read := get
+		get = func(endpoint string, out any) error {
+			if err := read(endpoint, out); err != nil {
+				return err
+			}
+			var ids []int64
+			switch page := out.(type) {
+			case *githubRunsPage:
+				if len(page.Runs) > 100 {
+					return errRead
+				}
+				for _, run := range page.Runs {
+					ids = append(ids, run.ID)
+				}
+			case *githubRun:
+				ids = append(ids, page.ID)
+			}
+			if len(ids) == 0 {
+				return nil
+			}
+			return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+				if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
+					return err
+				}
+				return storedMetricAttemptsTx(ctx, tx, source.Repository, ids, known)
+			})
+		}
 		var err error
-		next, batch, err = backfillStep(get, source.Repository, workflows, next, now)
+		next, batch, err = backfillStep(get, source.Repository, workflows, next, now, func(id int64) int { return known[id] })
 		next.ReadSource = readSource
 		return err
 	})
 	if jobsPass {
 		return result, err
 	}
-	if err != nil {
+	readFailure := err
+	if err != nil && batch.Calls <= 1 && len(batch.Runs) == 0 && len(batch.Pulls) == 0 {
 		// Preserve the cursor while recording the failed read and next retry.
 		if saveErr := m.metricReadFailed(ctx, p, project, source, err); saveErr != nil {
 			return BackfillResult{}, saveErr
 		}
 		return BackfillResult{}, fail(502, "GitHub could not be read; the backfill resumes from its last stored position")
+	}
+	if readFailure != nil {
+		logMetricFailure(ctx, readFailure, metricError(readFailure, now))
+		// A timed-out HTTP request must still commit its validated earlier pages.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
 	}
 	var retryAt *time.Time
 	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -505,7 +545,17 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 			return fail(409, "the backfill moved or the source changed meanwhile; call again to continue")
 		}
 		at := m.now()
-		if next.Phase != "done" && (next.ReadSource == historyChecks || batch.Calls >= backfillCallBudget) {
+		var diagnostic []byte
+		if readFailure != nil {
+			readError := metricError(readFailure, at)
+			diagnostic, err = json.Marshal(readError)
+			if err != nil {
+				return err
+			}
+			retry := metricRetry(readFailure, readError, current)
+			retryAt = &retry
+		}
+		if retryAt == nil && next.Phase != "done" && (next.ReadSource == historyChecks || batch.Calls >= backfillCallBudget) {
 			paced := at.Add(time.Minute)
 			retryAt = &paced
 		}
@@ -542,8 +592,10 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 		case !changedSource && cursor.ResumePhase != "" && current.DoneAt != nil:
 			// A preflight catch-up still walking days keeps the finished time.
 			done = current.DoneAt
+		case next.RefreshSince != nil && !changedSource:
+			done = current.DoneAt
 		}
-		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,backfill_since=$3,backfill_done_at=$4,last_read_error=NULL,backfill_retry_at=$5,backfill_pending=$6 WHERE project_id=$1`, project, raw, next.Since, done, retryAt, next.Phase != "done")
+		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,backfill_since=$3,backfill_done_at=$4,last_read_error=$7,backfill_retry_at=$5,backfill_pending=$6 WHERE project_id=$1`, project, raw, next.Since, done, retryAt, next.Phase != "done" || readFailure != nil, diagnostic)
 		if err != nil {
 			return err
 		}
@@ -563,6 +615,9 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 	})
 	if err != nil {
 		return BackfillResult{}, err
+	}
+	if readFailure != nil {
+		return BackfillResult{}, fail(502, "GitHub could not be read; the backfill resumes from its last stored position")
 	}
 	result = BackfillResult{State: "running", Since: next.Since, Phase: next.Phase, Calls: batch.Calls, Runs: len(batch.Runs), Pulls: len(batch.Pulls), Truncated: next.Truncated, RetryAt: retryAt}
 	if next.Phase == "runs" && next.ReadSource != historyChecks {
@@ -780,11 +835,13 @@ func needsPreflightCatchup(cursor *backfillCursor) bool {
 }
 
 func startPreflightCatchup(cursor *backfillCursor, source *metricSourceRow) backfillCursor {
-	return backfillCursor{
+	next := carryReadCursor(*cursor, backfillCursor{
 		Since: cursor.Since, Phase: "runs", Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1,
 		Truncated: cursor.Truncated, Workflows: []string{defaultPreflightWorkflow},
 		ResumePhase: "jobs", ThenWorkflows: fullBackfillWorkflows(source),
-	}
+	})
+	next.RefreshSince = nil // the newly added workflow needs the original window
+	return next
 }
 
 // fillJobs reads the jobs of attempt 1 of pull-request and merge-queue runs of
@@ -856,6 +913,7 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 					break // leave the whole attempt eligible for the next step
 				}
 				if err != nil {
+					logMetricFailure(ctx, err, metricError(err, now))
 					failedRuns = append(failedRuns, id)
 					if metricRateLimited(err) {
 						readFailure = err
