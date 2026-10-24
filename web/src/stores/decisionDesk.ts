@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
+import { waitingCount } from '../lib/deskElsewhere'
+import { displayLanguage } from '../lib/displayLanguage'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { onAccessRevalidate } from '../lib/authz'
@@ -7,11 +9,13 @@ import { deskReadAborted, loadDeskProjection, type DeskProjection } from '../lib
 import { onProjectionLive, onProjectionWake } from '../lib/agents'
 import { getDoctrineInbox } from '../lib/doctrine'
 import { readDoctrineProjects } from '../lib/decisionDeskApi'
+import { useDeskConnections } from './deskConnections'
 
 // The badge uses the server's total, never session presence or a loaded page.
 const wakeWindow = 3000
 export const useDecisionDesk = defineStore('decisionDesk', () => {
   const session = useSession()
+  const connections = useDeskConnections()
   const owner = computed(() => session.identity?.principal.kind === 'person' ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
   const projection = ref<DeskProjection | null>(null), error = ref(''), loading = ref(false)
   const failures = ref(0), failedSince = ref<number | null>(null), refreshedAt = ref<number | null>(null)
@@ -81,6 +85,7 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   }
   function refresh(): Promise<boolean> {
     if (!owner.value || !session.authenticationCurrent()) return Promise.resolve(false)
+    void connections.refresh()
     if (flight) return flight
     const identity = owner.value, turn = generation
     // A read that starts now covers every live event so far.
@@ -137,6 +142,9 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   const stopWakes = onProjectionWake(event => requestRefresh(event))
   const stopLive = onProjectionLive(value => { live.value = value })
   onScopeDispose(() => { stopWakes(); stopLive(); stopAccess(); invalidate() })
-  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, count: computed(() => projection.value?.counts.open ?? null),
-    live, liveEvents, changeArrived, notePoll, nextPollAt }
+  const hereCount = computed(() => projection.value?.counts.open ?? null)
+  const count = computed(() => hereCount.value === null ? null : hereCount.value + connections.count)
+  const countTip = computed(() => [count.value === null ? (displayLanguage() === 'de' ? 'Decision Desk wird gelesen' : 'Reading Decision Desk') : waitingCount(count.value), hereCount.value === null ? (displayLanguage() === 'de' ? 'Hier wird gelesen' : 'Reading here') : `${hereCount.value} ${displayLanguage() === 'de' ? 'hier' : 'here'}`, ...connections.breakdown, ...(connections.discovery === 'unknown' ? [displayLanguage() === 'de' ? 'Andere Instanzen konnten nicht gelesen werden' : 'Other instances could not be read'] : [])].join(' · '))
+  const allClear = computed(() => hereCount.value === 0 && failures.value === 0 && connections.allClear)
+  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, hereCount, count, countTip, allClear, live, liveEvents, changeArrived, notePoll, nextPollAt }
 })

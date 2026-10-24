@@ -381,7 +381,9 @@ test('AEON-1683: portal publishing and moderation retain the current binding aft
     await page.getByRole('button', { name: 'Add aspect' }).click()
     await page.getByLabel('Aspect').fill('Statutory deadlines')
     await page.getByRole('button', { name: 'Add', exact: true }).click()
-    await page.getByLabel('Stance').selectOption('yes')
+    const stance = page.getByRole('combobox', { name: 'Stance', exact: true })
+    await stance.selectOption('yes')
+    await expect(stance).toHaveValue('yes')
     await page.getByLabel('Quote').fill('Every deadline is on the public help page.')
     await page.getByLabel('Source page').fill('https://northwind.example/deadlines')
     await page.getByLabel('Read on').fill('2026-09-01')
@@ -395,9 +397,25 @@ test('AEON-1683: portal publishing and moderation retain the current binding aft
     // The catalogue was rendered from Pharos revision 1. Another person changes
     // that binding before this action, so this exact request must be refused.
     portal.retarget('p-aeon', 'Aeon')
+    // Finish check() before the rejection replaces the input. Otherwise its
+    // post-click state check can retry on the refreshed binding and publish it.
+    let releaseStaleWrite!: () => void
+    const pendingStaleWrite = new Promise<void>(resolve => { releaseStaleWrite = resolve })
+    await page.route('**/api/portal/pace', async route => {
+      if (route.request().method() === 'PUT') await pendingStaleWrite
+      await route.fallback()
+    })
     const sent = page.waitForRequest(request => request.method() === 'PUT' && request.url().includes('/api/portal/pace') && (request.postData() ?? '').includes('release_history'))
-    await history.check()
-    expect((await sent).postDataJSON()).toEqual({ release_history: true, project_id: 'p-pharos', revision: 1 })
+    try {
+      await history.check()
+      await expect(history).toBeChecked()
+      await expect(history).toBeDisabled()
+    } finally {
+      releaseStaleWrite()
+    }
+    const staleWrite = await sent
+    expect(staleWrite.postDataJSON()).toEqual({ release_history: true, project_id: 'p-pharos', revision: 1 })
+    expect((await staleWrite.response())?.status()).toBe(409)
     await expect(page.getByRole('alert').filter({ hasText: 'The linked project changed, so release history was not changed.' })).toBeVisible()
     await expect(page.getByLabel('Releases from')).toHaveValue('p-aeon')
     await expect(history).toBeEnabled()
@@ -405,8 +423,14 @@ test('AEON-1683: portal publishing and moderation retain the current binding aft
     expect(portal.historyWrites()).toBe(1)
     const retry = page.waitForRequest(request => request.method() === 'PUT' && request.url().includes('/api/portal/pace') && (request.postData() ?? '').includes('release_history'))
     await history.check()
-    expect((await retry).postDataJSON()).toEqual({ release_history: true, project_id: 'p-aeon', revision: 2 })
+    const retriedWrite = await retry
+    expect(retriedWrite.postDataJSON()).toEqual({ release_history: true, project_id: 'p-aeon', revision: 2 })
+    const accepted = await retriedWrite.response()
+    expect(accepted?.status()).toBe(200)
+    expect(await accepted?.json()).toMatchObject({ release_history: true, project_id: 'p-aeon', revision: 3 })
     await expect(history).toBeChecked()
+    await expect(history).toBeEnabled()
+    await expect(page.getByRole('alert').filter({ hasText: 'The linked project changed, so release history was not changed.' })).toHaveCount(0)
     expect(portal.historyWrites()).toBe(2)
     await expectFits(page)
 })

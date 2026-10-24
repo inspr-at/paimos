@@ -14,6 +14,7 @@ beforeEach(() => {
   // Keep the real route records and guards; lazy views are outside this routing test.
   const views = (routes: RouteRecordRaw[]): RouteRecordRaw[] => routes.map(route => ({ ...route, ...(route.component ? { component: empty } : {}), ...(route.children ? { children: views(route.children) } : {}) })) as RouteRecordRaw[]
   router = sourceModule<{ router: Router }>('router.ts', {
+    './lib/instanceConnect': {},
     './lib/projectSettings': sourceModule('lib/projectSettings.ts', {}),
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
     './lib/brand': { setPageTitle() {} }, './stores/projects': { useProjects: () => ({ load: async () => {}, byId: (id: string) => id === 'p-pharos' ? { routeKey: 'PHAROS' } : null }) }, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: loadVocabulary }) },

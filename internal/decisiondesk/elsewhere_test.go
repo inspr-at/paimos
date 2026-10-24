@@ -11,14 +11,12 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
-// AEON-1495 risks: the cross-instance summary reaches someone other than the
-// workspace owner (another person, an agent or a key), it carries more than
-// first lines, a sibling origin outside the configuration may read it, or the
-// projection drops the asker or the person's upcoming human check.
-func TestOwnerSummaryStaysWithTheOwnerAndCarriesFirstLinesOnly(t *testing.T) {
+// Risk: discovery remains owner-only, or projecting a person loses the asker
+// and exposes another person's upcoming human check.
+func TestPersonDiscoveryAndProjectionRetainOwnAskersAndUpcoming(t *testing.T) {
 	f := setup(t)
 	sibling := config.Sibling{Tag: "pma", Origin: "https://pma.example"}
-	f.m.WithInstances(config.Instances{Here: "ppm", Siblings: []config.Sibling{sibling}}, nil)
+	f.m.WithInstances(config.Instances{Here: "ppm", Siblings: []config.Sibling{sibling}})
 	q := f.ask(t, f.project, "carries_on", nil)
 	f.exec(t, `UPDATE nodes SET human_check='Hand-check the voice session',fields=jsonb_set(fields,'{assignee}',to_jsonb($2::text)) WHERE id=$1`, f.ticket, f.person.ID)
 	var projectKey, ticketKey string
@@ -57,63 +55,20 @@ func TestOwnerSummaryStaysWithTheOwnerAndCarriesFirstLinesOnly(t *testing.T) {
 		t.Fatalf("reader projection %d upcoming %+v", w.Code, readerPage.Upcoming)
 	}
 
-	// Siblings are named to the owner only.
+	// Every active signed-in person, including a project-only member, discovers siblings.
 	var listed, readerListed Instances
-	if w = get(owner, "/api/decision-desk/instances", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &listed) != nil || listed.Here != "ppm" || !slices.Equal(listed.Siblings, []config.Sibling{sibling}) {
-		t.Fatalf("owner instances %d %s", w.Code, w.Body.String())
+	if w = get(owner, "/api/decision-desk/instances", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &listed) != nil || !slices.Equal(listed.Siblings, []config.Sibling{sibling}) {
+		t.Fatal("owner discovery failed")
 	}
-	if w = get(reader, "/api/decision-desk/instances", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &readerListed) != nil || readerListed.Here != "ppm" || len(readerListed.Siblings) != 0 {
-		t.Fatalf("reader learned the siblings: %s", w.Body.String())
+	if w = get(reader, "/api/decision-desk/instances", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &readerListed) != nil || !slices.Equal(readerListed.Siblings, listed.Siblings) {
+		t.Fatalf("member discovery failed: %d %s", w.Code, w.Body.String())
 	}
-
-	// The configured sibling reads the owner's first lines with credentials.
-	w = get(owner, "/api/decision-desk/owner-summary", sibling.Origin)
-	if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != sibling.Origin || w.Header().Get("Access-Control-Allow-Credentials") != "true" || w.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("owner summary %d %v", w.Code, w.Header())
-	}
-	var raw struct {
-		Instance string             `json:"instance"`
-		Items    []map[string]any   `json:"items"`
-		Counts   struct{ Open int } `json:"counts"`
-		Upcoming *UpcomingStep      `json:"upcoming"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil || raw.Instance != "ppm" || raw.Counts.Open != 1 || len(raw.Items) != 1 || raw.Upcoming == nil || raw.Upcoming.Label != "Hand-check the voice session" {
-		t.Fatalf("summary %s", w.Body.String())
-	}
-	line := raw.Items[0]
-	if line["id"] != q.ID || line["title"] != q.Input.Question || line["asked_by"] != "agent" || line["project_key"] != projectKey || line["held"] != false || line["href"] != "/decision-desk?item=q:"+q.ID {
-		t.Fatalf("summary line %+v", line)
-	}
-	keys := []string{}
-	for key := range line {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	if !slices.Equal(keys, []string{"asked_by", "held", "href", "id", "kind", "project_key", "title"}) {
-		t.Fatalf("summary carries more than first lines: %v", keys)
-	}
-	// Any other origin gets no CORS grant, so its page cannot read the answer.
-	if w = get(owner, "/api/decision-desk/owner-summary", "https://elsewhere.example"); w.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatal("unconfigured origin received a CORS grant")
-	}
-	// Owner only: another person and an agent are refused.
-	if w = get(reader, "/api/decision-desk/owner-summary", sibling.Origin); w.Code != 403 {
-		t.Fatalf("non-owner summary %d %s", w.Code, w.Body.String())
-	}
-	for _, path := range []string{"/api/decision-desk/owner-summary", "/api/decision-desk/instances"} {
-		if w = get(agent, path, sibling.Origin); w.Code != 403 {
-			t.Fatalf("agent reached %s: %d", path, w.Code)
+	for _, p := range []tenant.Principal{owner, reader, agent} {
+		if w = get(p, "/api/decision-desk/owner-summary", sibling.Origin); w.Code != 401 {
+			t.Fatalf("summary accepted context without a capability: %d", w.Code)
 		}
 	}
-	// A key acting for the owner is not the owner's browser.
-	delegated := owner
-	delegated.KeyCreatorID = owner.ID
-	if w = get(delegated, "/api/decision-desk/owner-summary", sibling.Origin); w.Code != 403 {
-		t.Fatalf("delegated key summary %d", w.Code)
-	}
-	// An instance without siblings answers no summary.
-	f.m.WithInstances(config.Instances{Here: "ppm"}, nil)
-	if w = get(owner, "/api/decision-desk/owner-summary", sibling.Origin); w.Code != 404 {
-		t.Fatalf("summary without siblings %d", w.Code)
+	if w = get(agent, "/api/decision-desk/instances", ""); w.Code != 403 {
+		t.Fatalf("agent discovered siblings: %d", w.Code)
 	}
 }

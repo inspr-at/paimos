@@ -5,6 +5,8 @@
 // projection behind the header badge; every row opens its item on the Desk.
 import { computed, onMounted, ref, watch } from 'vue'
 import { useDecisionDesk } from '../../stores/decisionDesk'
+import { useDeskConnections } from '../../stores/deskConnections'
+import DeskInstanceItems from '../DeskInstanceItems.vue'
 import { useProjects } from '../../stores/projects'
 import { deskItemID, deskLinkOut, type DeskProjectionItem } from '../../lib/decisionDesk'
 import { plural, relativeTime } from '../../lib/work'
@@ -13,7 +15,7 @@ import AppIcon, { type IconName } from '../AppIcon.vue'
 // On phones the preview is a full-height sheet with its link pinned at the foot.
 defineProps<{ phone?: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
-const desk = useDecisionDesk(), projects = useProjects()
+const desk = useDecisionDesk(), projects = useProjects(), elsewhere = useDeskConnections()
 // A preview, not the Desk: the first rows, and how many the Desk holds.
 const ROWS = 12
 const KIND: Record<DeskProjectionItem['kind'], string> = {
@@ -52,9 +54,9 @@ const groups = computed(() => [
   { label: 'Waiting on you', note: 'Something is held up until an answer.', rows: shown.value.filter(row => row.held) },
   { label: 'When you’re ready', note: 'The agents carry on meanwhile.', rows: shown.value.filter(row => !row.held) },
 ].filter(group => group.rows.length))
-const status = computed(() => desk.error ? 'Count unavailable' : desk.count === null ? 'Reading' : desk.count ? `${plural(desk.count, 'thing')} for you` : 'Nothing for you')
+const status = computed(() => desk.error ? 'Count unavailable' : desk.count === null ? 'Reading' : desk.count ? `${plural(desk.count, 'thing')} for you` : desk.allClear ? 'Nothing for you' : 'No items here · checking other instances')
 // Honest coverage: the Desk's own total, never this list's length.
-const partial = computed(() => desk.count !== null && shown.value.length < desk.count ? `${shown.value.length} of ${desk.count} shown here.` : '')
+const partial = computed(() => desk.count !== null && shown.value.length < (desk.hereCount ?? 0) ? `${shown.value.length} of ${desk.hereCount} shown here.` : '')
 </script>
 
 <!-- Controls never move (AEON-541): reads, failures and refreshes change only the
@@ -65,14 +67,14 @@ const partial = computed(() => desk.count !== null && shown.value.length < desk.
     <div class="dp-head">
       <div class="dp-title">
         <h3>Decision Desk</h3>
-        <span class="dp-count" role="status">{{ status }}</span>
+        <span class="dp-count" role="status" :data-tip="desk.countTip">{{ status }}</span>
       </div>
       <RouterLink v-if="!phone" class="dp-go" to="/decision-desk" @click="emit('navigate')">Open the Decision Desk<AppIcon name="chevron-right" :size="13" /></RouterLink>
     </div>
     <div class="dp-body">
       <p v-if="desk.error" class="dp-note dp-error" role="alert"><AppIcon name="alert" :size="14" /><span>Couldn’t load the desk</span><span class="dp-sep">·</span><button type="button" class="dp-retry" :disabled="desk.loading" @click="desk.refresh()">Try again</button></p>
       <p v-else-if="desk.count === null" class="dp-note">Reading the Desk…</p>
-      <p v-else-if="!groups.length" class="dp-note">Nothing waits on you.</p>
+      <p v-else-if="!groups.length" class="dp-note">{{ desk.allClear ? 'Nothing waits on you.' : 'Nothing waits here. Other instances are shown below.' }}</p>
       <section v-for="group in groups" :key="group.label" class="dp-group" :aria-label="group.label">
         <p class="dp-group-title">{{ group.label }}<small>{{ group.note }}</small></p>
         <ul>
@@ -85,6 +87,8 @@ const partial = computed(() => desk.count !== null && shown.value.length < desk.
           </li>
         </ul>
       </section>
+      <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" variant="preview" @navigate="emit('navigate')" />
+      <p v-if="elsewhere.discovery === 'unknown'" class="dp-note">Other instances could not be read. <button class="dp-retry" @click="elsewhere.refresh(true)">Try again</button></p>
       <p v-if="projectError" class="dp-note">{{ projectError }}</p>
       <p v-if="partial && !phone" class="dp-partial">{{ partial }}</p>
     </div>

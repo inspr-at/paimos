@@ -33,7 +33,7 @@ case "${1:-}" in
       exit 1
     fi
     gh workflow run ci.yml --repo inspr-at/paimos --ref "$probe_ref" -f "visual_probe=$checkpoint_ids"
-    echo 'Diagnostic probe only: six parallel runner machines, baseline vs disabled Skia runtime opts plus determinism flags, six repeats each. Read visual-raster-probe-matrix-SHA-ATTEMPT/matrix-report.json and .md; per-runner PNGs, CPU flags and logs remain separate artifacts. No pin plan is produced.'
+    echo 'Diagnostic probe only: six parallel runner machines, baseline vs disabled Skia runtime opts plus determinism flags, six repeats each with all eight temporal frames retained. Complete acquisition can report byte identity as no. Read visual-raster-probe-matrix-SHA-ATTEMPT/matrix-report.json and .md; per-runner PNGs, CPU flags and logs remain separate artifacts. No pin plan is produced.'
     ;;
   dispatch-candidate)
     capture_ref=${2:?usage: lead-commands.sh dispatch-candidate COORDINATOR_PUBLISHED_REF PREPARED_SETTING}

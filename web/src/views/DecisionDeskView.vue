@@ -27,6 +27,9 @@ import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
 import type { KeyTrimCursors } from '../lib/keyTrim'
 import { useDecisionDesk } from '../stores/decisionDesk'
+import { useDeskConnections } from '../stores/deskConnections'
+import DeskInstanceItems from '../components/DeskInstanceItems.vue'
+const elsewhere = useDeskConnections()
 import { revokeApproval } from '../lib/agents'
 import { getRun } from '../lib/agentRows'
 import { undoKnowledge } from '../lib/knowledge'
@@ -170,6 +173,7 @@ const emptyCopy = computed(() => {
   if (scopeActive.value && scopeKind.value === 'lesson') return place ? `No lessons wait in ${place}.` : 'No lessons are waiting.'
   if (scopeActive.value && place) return `Nothing waits for you in ${place}`
   if (scopeActive.value) return 'Nothing in this view is waiting.'
+  if (!desk.allClear) return 'Nothing waits here'
   return 'Nothing is waiting in the available sources.'
 })
 const showAllTo = computed(() => {
@@ -192,8 +196,9 @@ const openCountLabel = computed(() => {
   if (reading.value) return ''
   if (!scopeActive.value) return desk.count ?? '?'
   if (state.value !== 'ready' || desk.count === null) return '?'
-  return openItems.value.length
+  return openItems.value.length + elsewhere.count
 })
+const openCountTip = computed(() => scopeActive.value ? [`${openItems.value.length} here`, ...elsewhere.breakdown].join(' · ') : desk.countTip)
 const groupOpenCount = (rows: DeskItem[]) => rows.filter(item => openItems.value.includes(item)).length
 const decidedCountLabel = computed(() => reading.value ? '' : items.value.filter(item => item.decided && (!scopeActive.value || inScope(item))).length)
 const visible = computed(() => items.value.filter(item => inScope(item) && (item.decided === (filter.value === 'decided') || filter.value === 'open' && item.personStep && settledSteps.value.has(item.id)) && (filter.value === 'open' || !outcomeFilter.value
@@ -327,13 +332,13 @@ const silent = computed<DeskSource[]>(() => !desk.projection && desk.error && !u
 // AEON-1406: the empty Open tab. A minor source that did not answer gives B, never A. AEON-1631: the desk, its
 // questions or its approvals not answering, or a badge count beside an empty list, is never all clear.
 const emptyState = computed(() => filter.value === 'open' ? deskEmptyState({ reading: reading.value, open: visible.value.length, scoped: scopeActive.value, unanswered: silent.value, failed: failedLines.value.length > 0,
-  waiting: desk.count, checking: (loading.value || desk.loading) && retryPhase.value === 'idle' }) : null)
+  waiting: desk.hereCount, checking: (loading.value || desk.loading) && retryPhase.value === 'idle' }) : null)
 // Reading, all clear and a silent source share one frame, so switching between them moves nothing.
-const clearFrame = computed(() => !scopeActive.value && (emptyState.value === 'reading' || emptyState.value === 'clear' || emptyState.value === 'incomplete'))
+const clearFrame = computed(() => !scopeActive.value && (emptyState.value === 'reading' || desk.allClear && (emptyState.value === 'clear' || emptyState.value === 'incomplete')))
 const unansweredLine = computed(() => deskUnansweredLine(unanswered.value))
 // AEON-1631 (Tick): a desk that did not answer takes the list's first-row slot with the count the badge knows.
 const failedPanel = computed(() => (!desk.projection && !!desk.error) || emptyState.value === 'failed')
-const failedWords = computed(() => deskFailedWords(scopeActive.value ? null : desk.count, noticeDe.value))
+const failedWords = computed(() => deskFailedWords(scopeActive.value ? null : desk.hereCount, noticeDe.value))
 // In that frame the quiet line names the failed sources once; truncation and link lines stay listed below.
 // The failed panel already says the list did not load, so it lists nothing more.
 const listedLines = computed(() => failedPanel.value ? [] : clearFrame.value ? sourceLines.value.filter(line => !failedLines.value.some(failed => failed.text === line.text)) : sourceLines.value)
@@ -379,11 +384,14 @@ watch(() => [desk.loading || loading.value || desk.changeArrived, desk.changeArr
   if (!activity.value || activityTimer) return
   activityTimer = setTimeout(() => { activityTimer = undefined; activity.value = null }, Math.max(0, activity.value.since + CHECKING_MIN_MS - Date.now()))
 }, { immediate: true })
-const sync = computed(() => deskSyncLine({
-  now: now.value, checkedAt: lastGoodAt.value, busy: !!activity.value, change: !!activity.value?.change,
-  failures: refreshFailures.value, notice: refreshHint.value, stale: stale.value, retry: retryPhase.value,
-  online: networkUp.value, visible: pageShown.value, live: desk.live, pollAt: desk.nextPollAt, retryAt: retryDue.value,
-}, displayLanguage()))
+const sync = computed(() => {
+  const line = deskSyncLine({
+    now: now.value, checkedAt: lastGoodAt.value, busy: !!activity.value, change: !!activity.value?.change,
+    failures: refreshFailures.value, notice: refreshHint.value, stale: stale.value, retry: retryPhase.value,
+    online: networkUp.value, visible: pageShown.value, live: desk.live, pollAt: desk.nextPollAt, retryAt: retryDue.value,
+  }, displayLanguage())
+  return { ...line, tip: [line.tip, elsewhere.syncTooltip(now.value)].filter(Boolean).join('\n') }
+})
 // The empty Open card holds the line under its message; everywhere else it sits in the tab row (§1).
 const syncInCard = computed(() => clearFrame.value)
 // §5: one polite region hears only failures turning quiet, escalation, recovery and new items; never a tick or a check.
@@ -798,7 +806,7 @@ onBeforeUnmount(() => {
     <div ref="tabRow" class="dp-tabrow">
       <div class="dp-bar">
         <div class="seg view-tabs" role="radiogroup" aria-label="Show">
-          <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
+          <button type="button" role="radio" :aria-checked="filter === 'open'" :data-tip="openCountTip" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
           <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
         </div>
         <!-- AEON-1700: the sync line takes the row's free end on a wide row and its own line under the tabs on a narrow one.
@@ -830,7 +838,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-else-if="clearFrame" class="all-clear" :class="{ reading: emptyState === 'reading' }" :data-state="emptyState" data-testid="desk-clear">
         <span class="art" aria-hidden="true"><template v-if="emptyState !== 'reading'"><img class="light" :src="deskLight" alt="" width="840" height="560" decoding="async" loading="lazy"><img class="dark" :src="deskDark" alt="" width="840" height="560" decoding="async" loading="lazy"></template></span>
-        <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />Nothing waits for you</template></p>
+        <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />{{ desk.allClear ? 'Nothing waits for you' : 'Nothing waits here · other instances are shown below' }}</template></p>
         <DeskSyncLine v-if="syncInCard" class="card-sync" :line="sync" :pulse="desk.liveEvents" :busy="loading || desk.loading" @retry="tryAgain" />
         <p class="quiet" role="status" data-testid="desk-unanswered"><template v-if="emptyState === 'incomplete'"><AppIcon name="clock" :size="14" /><span>{{ unansweredLine }}</span><span class="sep" aria-hidden="true">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
         <p v-if="emptyState === 'reading'" class="reading-note" role="status">Reading the desk…</p>
@@ -895,11 +903,20 @@ onBeforeUnmount(() => {
     <p v-if="opened && fresh.length" class="arrival-line" role="status">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
     <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :undo="undoLesson" :who="who" :ticket="ticketOf" :run-pending="runPending" :change="changeId || undefined" @recorded="recorded" @close="closed" />
     <DoctrineProposalDialog v-if="ruleEdit" :key="owner" :source="ruleEdit.source" :file="ruleEdit.file" :rule="ruleEdit.rule" :draft="ruleEdit.draft" @close="ruleEdit = undefined" @saved="editedRule" />
+    <div v-if="filter === 'open'" class="desk-instances">
+      <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" :variant="read.state === 'not connected' ? 'goals' : 'desk'" />
+      <p v-if="elsewhere.discovery === 'unknown'">Other instances could not be read. <button type="button" class="linkish" @click="elsewhere.refresh(true)">Try again</button></p>
+    </div>
+    <div v-else class="desk-instance-history">
+      <a v-for="read in elsewhere.reads.filter(row => ['ok', 'reading', 'unreachable'].includes(row.state))" :key="read.tag" :href="`${read.origin}/decision-desk?view=decided`" target="_blank" rel="noopener noreferrer">Decisions made on {{ read.tag }} are listed there<AppIcon name="external" :size="13" /></a>
+    </div>
   </main>
 </template>
 
 <style scoped>
 .definition-project-key { white-space: nowrap; overflow-wrap: normal; }
+.desk-instance-history { display: grid; }
+.desk-instance-history a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--ink-3); font-size: 13px; text-decoration: none; }
 /* AEON-1339: the Desk page as the approved rev 11 artifact draws it. */
 .scope-line { display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; min-height: 44px; margin: 0; font-size: 12px; color: var(--ink-3); }.scope-line a { color: var(--teal-ink); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }.scope-line a:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .desk-page { width: 100%; max-width: 1060px; margin: 0 auto; padding: 34px max(16px, min(4vw, 40px)) 72px; color: var(--ink); }

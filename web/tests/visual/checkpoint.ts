@@ -10,7 +10,7 @@ import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/v
 import { visualReportOnly, visualCheckResult } from '../../../scripts/test-prune/check.mjs'
 import { assertVisualContainer, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, captureVisual, rendererIdentity, verifyFontAssets, installRendererFonts, sampleRenderedFont } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
-import { visualProbe } from '../../../scripts/test-prune/visual-probe.mjs'
+import { sampleRasterFrames, visualProbe } from '../../../scripts/test-prune/visual-probe.mjs'
 
 const manifest = captureVisual(JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8')))
 // Only tests/visual imports this fixture. Fontconfig belongs to this browser's
@@ -132,9 +132,14 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       const fonts = await fontEvidence(page, gate.state)
       await sampleClock('before-capture')
       console.log(`${checkpoint.id}: font guard ok; computed body: ${fonts.body.computedFamily}; resolved: ${fonts.body.renderedFamilies.join(', ')}; profile faces loaded: ${fonts.profile.length}`)
-      const settled = capture || reportOnly || gate.mode === 'compare' ? await settleVisualCapture(page) : null
+      const settled = capture || reportOnly || gate.mode === 'compare' ? await settleVisualCapture(page, { diagnosticProbe: !!probe }) : null
       const png = settled?.png ?? null
       if (png) writeFileSync(info.outputPath(`${checkpoint.id}.png`), png)
+      const probeFrames = probe ? settled!.frames!.map((frame: Buffer, index: number) => {
+        const file = `${checkpoint.id}-probe-${index}.png`
+        writeFileSync(info.outputPath(file), frame)
+        return { index, file, sha256: createHash('sha256').update(frame).digest('hex') }
+      }) : undefined
       const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
       const violations = axe.violations.map(row => ({ id: row.id, impact: row.impact, nodes: row.nodes.map(node => node.target) }))
@@ -150,7 +155,7 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
         reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, clock, requirementsRun: true,
         quality: { status: 'pending' }, comparison: { status: gate.mode === 'deferred' && !visualReportOnly(visual) ? 'not run: deferred reference' : 'not run' },
         captureMode: capture && !probe, ...(probe ? { diagnosticProbe: { setting: probe.id, args: renderer.browser.args,
-          repeatIndex: info.repeatEachIndex } } : {}), layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
+          repeatIndex: info.repeatEachIndex, frames: probeFrames } } : {}), layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
       Object.assign(report, { captureSettling: settled?.evidence ?? null })
       const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
       saveReport()
@@ -186,7 +191,7 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
 // transitions, then require three consecutive byte-identical whole viewports.
 // This is bounded readiness, with no pixel tolerance, crop, mask or reference.
 // The separate same-commit captures still have to agree before any pin is usable.
-export async function settleVisualCapture(page: Page) {
+export async function settleVisualCapture(page: Page, { diagnosticProbe = false } = {}) {
   const paint = await page.evaluate(async () => {
     const animations = document.getAnimations()
     if (animations.length > 512) throw new Error('Visual animation readiness exceeds its bound')
@@ -210,17 +215,11 @@ export async function settleVisualCapture(page: Page) {
     }))
     return { finiteTransitions: finite.length, surfaces }
   })
-  let previous: Buffer | undefined, consecutive = 0
-  const samples: string[] = []
-  for (let attempt = 0; attempt < 8; attempt++) {
+  const sampled = await sampleRasterFrames(async () => {
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
-    const png = await page.screenshot({ animations: 'disabled', caret: 'hide' })
-    samples.push(createHash('sha256').update(png).digest('hex'))
-    consecutive = previous?.equals(png) ? consecutive + 1 : 1
-    if (consecutive === 3) return { png, evidence: { ...paint, samples, consecutive } }
-    previous = png
-  }
-  throw new Error(`Visual viewport did not settle to three byte-identical samples within eight captures: ${samples.join(', ')}`)
+    return page.screenshot({ animations: 'disabled', caret: 'hide' })
+  }, { diagnosticProbe })
+  return { ...sampled, evidence: { ...paint, ...sampled.evidence } }
 }
 
 async function reportReference(info: TestInfo, checkpoint: { id: string }, visual = manifest, capture = false) {
