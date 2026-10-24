@@ -168,10 +168,7 @@ const emptyCopy = computed(() => {
   if (scopeActive.value && scopeKind.value === 'lesson') return place ? `No lessons wait in ${place}.` : 'No lessons are waiting.'
   if (scopeActive.value && place) return `Nothing waits for you in ${place}`
   if (scopeActive.value) return 'Nothing in this view is waiting.'
-  if (!desk.allClear) {
-    const unavailable = elsewhere.reads.filter(row => row.state === 'unreachable').map(row => row.tag).join(', ')
-    return unavailable ? `Nothing waits here · ${unavailable} couldn't be reached` : 'Nothing waits here'
-  }
+  if (!desk.allClear) return 'Nothing waits here'
   return 'Nothing is waiting in the available sources.'
 })
 const showAllTo = computed(() => {

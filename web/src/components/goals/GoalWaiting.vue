@@ -84,9 +84,9 @@ const reading = computed(() => hereCount.value === null)
         </div>
       </li>
     </ul>
-    <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" variant="goals" />
     <RouterLink v-if="more" class="w-more" to="/decision-desk">{{ more }}</RouterLink>
     <p v-if="coming" v-clip-tip class="coming"><b>Coming</b> · {{ comingLabel }}</p>
+    <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" variant="goals" />
   </section>
 </template>
 

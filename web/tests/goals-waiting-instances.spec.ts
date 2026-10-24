@@ -81,7 +81,38 @@ async function openBand(page: Page) {
   await expect(band.locator('.waiting-title')).toBeVisible()
   return band
 }
-async function shot(page: Page, info: TestInfo, name: string) { await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true }) }
+// Risk: hydration is done but AEON-1700's minimum checking hold is still
+// visible. Capture the idle line and freeze its clock for each shot pair.
+async function shot(page: Page, info: TestInfo, name: string) {
+  const sync = page.getByTestId('desk-sync')
+  if (await sync.count()) {
+    await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+    await expect(sync).toHaveAttribute('data-state', /^(just|normal)$/)
+    await expect(sync.locator('.sync-words')).not.toHaveText(/Checking now|Checking again|updating/)
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
+    await expect(sync).toHaveAttribute('data-state', /^(just|normal)$/)
+    expect(await sync.locator('.sync-mark, .sync-icon').evaluateAll(elements => elements.flatMap(el => el.getAnimations()).length)).toBe(0)
+  }
+  const frozenAt = await page.evaluate(() => Date.now())
+  const words = await sync.count() ? await sync.locator('.sync-words').innerText() : ''
+  await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true })
+  if (await sync.count()) {
+    expect(await page.evaluate(() => Date.now()), 'Desk evidence clock is frozen').toBe(frozenAt)
+    await expect(sync.locator('.sync-words')).toHaveText(words)
+    await page.clock.resume()
+  }
+}
+
+async function goalActionEdge(page: Page) {
+  const band = page.getByRole('region', { name: 'Waiting on you' }), row = band.getByTestId('instance-pma')
+  const action = await row.locator('.instance-action').boundingBox(), line = await row.locator('.instance-line').boundingBox()
+  const open = await band.locator('.waiting-open').boundingBox()
+  expect(action!.width).toBeGreaterThan(0)
+  expect(Math.abs(action!.x + action!.width - line!.x - line!.width), 'instance action reaches the block’s right edge').toBeLessThanOrEqual(0.5)
+  expect(Math.abs(action!.x + action!.width - open!.x - open!.width), 'instance and local actions share the right edge').toBeLessThanOrEqual(0.5)
+  const ink = await row.locator('.instance-action').evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect().right })
+  expect(Math.abs(ink - action!.x - action!.width), 'action label is right aligned').toBeLessThanOrEqual(0.5)
+}
 
 for (const width of [1440, 1024, 390] as const) {
   test(`shared sibling counts, exact home links and stable Goals controls at ${width}`, async ({ page }, info) => {
@@ -93,16 +124,33 @@ for (const width of [1440, 1024, 390] as const) {
     await expect(row).toContainText('2 wait for you')
     expect(mock.reads.sibling).toBe(1); expect(mock.reads.cookie).toBe(false); expect(mock.reads.bearer).toBe(true)
     const action = row.locator('.instance-action'), line = row.locator('.instance-line')
+    await goalActionEdge(page)
     await expectStableControls({ controls: { action, line, openDesk: band.getByRole('link', { name: /Open Desk/ }) }, scrollAreas: { band }, interactions: [
       { name: 'show home items', run: async () => { await action.click(); await expect(row.locator('.instance-item')).toHaveCount(2) } },
       { name: 'hide home items', run: async () => { await action.click(); await expect(row.locator('.instance-item')).toHaveCount(0) } },
       { name: 'show again', run: async () => { await action.click(); await expect(row.locator('.instance-item')).toHaveCount(2) } },
     ] })
     const home = row.locator('.instance-item').first()
+    await goalActionEdge(page)
+    await expect(row.getByRole('link', { name: /^Show all/ })).toHaveCount(0)
     await expect(home).toHaveAttribute('href', `${SIBLING}/decision-desk?item=q:00000000-0000-4000-8000-0000000000a1`)
     await expect(home).toHaveAttribute('target', '_blank')
     await expect(home).toHaveAttribute('rel', 'noopener noreferrer')
     await expect(band.locator('.coming')).toContainText('Your Aithema test session')
+    expect(await band.evaluate(el => !!(el.querySelector('.coming')!.compareDocumentPosition(el.querySelector('.instance-waiting')!) & Node.DOCUMENT_POSITION_FOLLOWING)), 'local Coming precedes the remote group').toBe(true)
+    const coming = await band.locator('.coming').boundingBox(), remoteLine = await line.boundingBox()
+    expect(remoteLine!.y, 'instance groups follow every local item').toBeGreaterThanOrEqual(coming!.y + coming!.height)
+    if (width === 390) {
+      const title = home.locator('.instance-title'), project = home.locator('.instance-project'), age = home.locator('time')
+      const titleBox = await title.boundingBox(), projectBox = await project.boundingBox(), ageBox = await age.boundingBox(), end = await home.locator('.instance-decide').boundingBox()
+      expect(Math.abs(titleBox!.x + titleBox!.width - end!.x + 10), 'title uses the full text line').toBeLessThanOrEqual(0.5)
+      expect(projectBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height)
+      expect(Math.abs(projectBox!.y - ageBox!.y)).toBeLessThanOrEqual(0.5)
+      await expect(home.locator('.instance-separator')).toHaveText('·')
+      await expect(title).toHaveCSS('white-space', 'nowrap')
+      await expect(title).toHaveAttribute('data-clip-tip', '')
+      await expect(title).toHaveAttribute('data-tip', await title.innerText())
+    }
     await shot(page, info, `goals-${width}-light`)
     await page.emulateMedia({ colorScheme: 'dark' }); await shot(page, info, `goals-${width}-dark`)
     await expect.poll(() => page.title()).toMatch(/^\(5\)/)
@@ -405,11 +453,18 @@ for (const width of [1440, 1024, 390] as const) {
   test(`confirmation shows the account, keeps actions stable and Cancel shares nothing at ${width}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 950 })
     await mockBand(page, { connected: false, sibling: 'ok' })
+    // A signed-in OIDC person has both account fields. The old name-only
+    // fixture hid the email that this production view already renders.
+    const email = 'markus@example.test'
+    await page.route('**/api/me', route => route.fulfill({ json: { principal: { ...me, kind: 'person', roles: ['member'] }, identity: { display_name: me.name, email }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
     let writes = 0
     await page.route('**/api/decision-desk/connections', async route => { writes++; await route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } }) })
     await page.goto(`/instances/connect?origin=${encodeURIComponent(SIBLING)}&state=${'a'.repeat(43)}&code_challenge=${'c'.repeat(43)}`)
     await expect(page.getByRole('heading', { name: 'Show your waiting decisions on pma?' })).toBeVisible()
     await expect(page.locator('.connect-account')).toContainText(me.name)
+    await expect(page.locator('.connect-account small')).toHaveText(email)
+    const nameBox = await page.locator('.connect-account b').boundingBox(), emailBox = await page.locator('.connect-account small').boundingBox()
+    expect(emailBox!.y, 'email appears under the account name').toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height)
     await expect(page.locator('.connect-account .avatar')).toHaveCSS('width', '36px')
     await expect(page.locator('.connect-account .avatar')).toHaveCSS('height', '36px')
     const switchAccount = page.getByRole('button', { name: 'Not you? Switch account', exact: true })
@@ -507,6 +562,7 @@ for (const width of [1440, 390] as const) {
       }
     }
     await expect(row).toContainText('see what waits for you there too'); await capture('not-connected')
+    await goalActionEdge(page)
     await row.getByRole('button', { name: 'Connect', exact: true }).click()
     await expect(row).toContainText('confirm in the tab that opened'); await capture('confirming')
     await row.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -516,6 +572,8 @@ for (const width of [1440, 390] as const) {
     await expect(row).toContainText('4 wait for you'); await capture('four-collapsed')
     await row.getByRole('button', { name: 'Show', exact: true }).click()
     await expect(row.locator('.instance-item')).toHaveCount(4); await capture('four-shown')
+    await expect(row.getByRole('link', { name: /^Show all/ })).toHaveCount(0)
+    await goalActionEdge(page)
     mock.set('down'); await page.clock.fastForward(30_000)
     await expect(row).toContainText("couldn't be reached"); await capture('unreachable-cached')
     mock.set('ended'); await page.clock.fastForward(30_000)
@@ -536,6 +594,16 @@ for (const width of [1440, 390] as const) {
     mock.set('ok'); await page.reload()
     await expect(row).toContainText('checking…'); await capture('reading')
     release(); await expect(row).toContainText('nothing waits for you')
+    // The link introduces items hidden by the five-row preview only.
+    mock.setLines(5); await page.clock.fastForward(30_000)
+    await expect(row).toContainText('5 wait for you')
+    if (await row.getByRole('button', { name: 'Show', exact: true }).count()) await row.getByRole('button', { name: 'Show', exact: true }).click()
+    await expect(row.locator('.instance-item')).toHaveCount(5)
+    await expect(row.getByRole('link', { name: /^Show all/ })).toHaveCount(0)
+    mock.setLines(6); await page.clock.fastForward(30_000)
+    await expect(row).toContainText('6 wait for you')
+    await expect(row.locator('.instance-item')).toHaveCount(5)
+    await expect(row.getByRole('link', { name: 'Show all 6 on pma' })).toHaveAttribute('href', `${SIBLING}/decision-desk`)
   })
 }
 
@@ -569,7 +637,9 @@ test('Desk coverage matrix, header tooltip and preview evidence in both themes',
     if (scenario.sibling === 'down') {
       await expect(remote).toContainText("couldn't be reached")
       await expect(page.getByTestId('desk-clear')).toHaveCount(0)
-      await expect(page.getByTestId('desk-empty')).toHaveText("Nothing waits here · pma couldn't be reached")
+      await expect(page.getByTestId('desk-empty')).toHaveText('Nothing waits here')
+      await expect(page.getByTestId('desk-empty')).not.toContainText("couldn't be reached")
+      await expect(remote.locator('.instance-copy')).toContainText("pma · couldn't be reached")
     } else {
       await expect(remote.locator('.instance-item')).toHaveCount(scenario.lines)
       if (scenario.local === 0) await expect(page.getByTestId('desk-empty')).toHaveText(scenario.lines ? 'Nothing waits here' : 'Nothing waits for you')
