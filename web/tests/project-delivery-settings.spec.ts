@@ -106,7 +106,8 @@ async function bannerContainsAction(page: Page, name: string) {
 
 test('AEON-1710: repository retry text follows the schedule after checking again', async ({ page }, testInfo) => {
   // Risk: a stale GitHub reset contradicts the current retry line, including
-  // when Check again clears the deadline but retains the diagnostic.
+  // when Check again clears the deadline but retains the diagnostic, or the
+  // rate-limit notice repeats its deadline while other causes lose theirs.
   const { world, errors } = await setup(page)
   const reset = new Date(2026, 9, 12, 19, 14).toISOString()
   const retry = new Date(2026, 9, 12, 20, 14).toISOString()
@@ -118,14 +119,27 @@ test('AEON-1710: repository retry text follows the schedule after checking again
     const card = page.locator('#repository'), reason = card.locator('.ds-h'), detail = card.locator('.ds-b')
     await expect(reason).toContainText('20:14')
     await expect(reason).not.toContainText('19:14')
-    await expect(detail).toContainText('20:14')
+    await expect(detail).toHaveText('The last stored history is kept.')
     const guard = await controlStability(page, { change: card.locator('[data-act=change]'), more: card.locator('[data-act=repo-more]'), check: card.locator('[data-act=check]') })
+    await guard.check(async () => {
+      world.source!.last_read_error = { reason: 'timed_out', at: reset, permission: null }
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(reason).toContainText('GitHub did not answer in time.')
+      await expect(detail).toContainText('The last stored history is kept. The server retries')
+      await expect(detail).toContainText('20:14')
+    })
+    await guard.check(async () => {
+      world.source!.last_read_error = { reason: 'rate_limited', at: reset, permission: null, reset_at: reset }
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(reason).toContainText('20:14')
+      await expect(detail).toHaveText('The last stored history is kept.')
+    })
     await guard.check(async () => {
       // Model the server's Check again result: keep the last diagnostic,
       // clear retry_at, and let the next worker attempt run immediately.
       world.source!.retry_at = null
       await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
-      await expect(detail).toContainText('The server will try again.')
+      await expect(detail).toHaveText('The last stored history is kept.')
       await expect(reason).toContainText('rate-limited')
       await expect(reason).not.toContainText(/19:14|20:14/)
     })

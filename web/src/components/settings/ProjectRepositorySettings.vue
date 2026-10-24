@@ -8,6 +8,7 @@ import { deliveryLanguage } from '../../lib/delivery'
 import { can, onAccessRevalidate } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { historyReadReason, readDeliveryMetrics, type MetricSource } from '../../lib/deliveryNumbers'
+import { deliveryText, fill } from '../../lib/deliveryNumbersText'
 import { HISTORY_DAYS, checkRepositoryHistory, linkProjectRepository, readRepositoryHistory, repositoryState, workflowFile, type HistoryPosition } from '../../lib/projectDeliverySettings'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
@@ -37,6 +38,7 @@ const checked = computed(() => source.value?.last_read_error?.at ? `Checked ${da
 const staleDays = computed(() => source.value?.last_event_at ? Math.floor((observedAt.value - Date.parse(source.value.last_event_at)) / 86_400_000) : 0)
 const historyDays = computed(() => source.value?.backfill_since ? Math.max(1, Math.floor((observedAt.value - Date.parse(source.value.backfill_since)) / 86_400_000)) : days.value)
 const progressDay = computed(() => position.value?.day ? Math.max(0, Math.min(historyDays.value, Math.floor((Date.parse(position.value.day) - Date.parse(position.value.since)) / 86_400_000))) : null)
+const historyWords = computed(() => deliveryText(deliveryLanguage()).historyRead)
 const phases = [['runs', 'CI runs'], ['pulls', 'Pull requests'], ['jobs', 'Job results']] as const
 function date(value: string, clock = false) { return new Date(value).toLocaleString('en-GB', { day: 'numeric', month: 'short', ...(clock ? { hour: '2-digit', minute: '2-digit' } : {}) }) }
 function load(initial = false) {
@@ -130,7 +132,7 @@ onBeforeUnmount(() => { poller.stop(); stopAccess(); scope.dispose(); closeMenu(
             <ul v-else-if="state === 'done'" class="facts"><li><AppIcon name="pulse" :size="13" /><span><b>GitHub App events</b> · live</span></li><li><AppIcon name="history" :size="13" /><span><b>History</b> · back to {{ source.backfill_since ? date(source.backfill_since) : 'the recorded start' }}</span></li><li><AppIcon name="merge" :size="13" /><span><b>Reported by tooling</b> · merge rounds, releases</span></li></ul>
             <div v-else-if="state === 'noactions' || state === 'appoff'" class="fix"><p class="fix-r"><span class="fix-l">Who can fix it</span><span>An owner of <b>{{ repoOwner }}</b> on GitHub.</span></p><p class="fix-r"><span class="fix-l">How</span><span>On GitHub, <b>{{ repoOwner }}</b> <AppIcon name="chevron-right" :size="12" /> Settings <AppIcon name="chevron-right" :size="12" /> GitHub Apps <AppIcon name="chevron-right" :size="12" /> this workspace’s App <AppIcon name="chevron-right" :size="12" /> Configure, then <template v-if="state === 'noactions'">accept <b>Actions: Read</b>.</template><template v-else>add <b>{{ repoName }}</b> under Repository access.</template> <ProjectSettingsExplainer :id="state === 'noactions' ? 'actions' : 'events'" :project-key="project.routeKey" :repository="source.repository" /></span></p></div>
             <p v-else-if="state === 'stale'" class="ds-b">The last one arrived {{ source.last_event_at ? date(source.last_event_at) : 'at an unknown time' }}. That’s expected for a quiet repository<template v-if="project.frozen">, and {{ project.routeKey }} is frozen</template>. If people still push to {{ source.repository }}, the App may have lost access.</p>
-            <p v-else class="ds-b">The last stored history is kept. <template v-if="source.retry_at">The server retries {{ date(source.retry_at, true) }}.</template><template v-else>The server will try again.</template></p>
+            <p v-else class="ds-b">{{ historyWords.kept }} <template v-if="source.last_read_error?.reason !== 'rate_limited'"><template v-if="source.retry_at">{{ fill(historyWords.retry, { t: date(source.retry_at, true) }) }}</template><template v-else>The server will try again.</template></template></p>
             <p v-if="source.history_source" class="ds-source" :data-history-source="source.history_source">History source: <template v-if="source.history_source === 'actions'">GitHub Actions</template><template v-else>GitHub checks · partial history; attempt and runner wait metrics unavailable.</template></p>
             </div>
             <div class="ds-acts">
