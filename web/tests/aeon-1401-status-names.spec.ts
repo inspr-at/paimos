@@ -210,16 +210,36 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
         checks.push({ assert: 'Title keeps 240 px beside renamed statuses and Parent through a stale card resize delivery', width: 1024, theme, ok: true })
         await page.evaluate(() => { (window as unknown as { aeon1401CardResize: { holding: boolean } }).aeon1401CardResize.holding = false })
         await page.setViewportSize({ width: 1440, height: 900 })
-        await page.goto('/p/PHAROS?group=status&status=in_progress,qa,open')
-        await expect(row).toContainText('Building')
-        // Whole-project figures decide Parent after the rows have painted.
-        // Wait for that column before measuring the rename: columns-settled
-        // only covers the columns already present, not the pending figures.
+        // AEON-1661: force whole-project figures to arrive after the initial
+        // column fit. Their idle request decides Parent independently of the
+        // rename; columns-settled alone can still describe the set without it.
+        let releaseWhole!: () => void, wholeHeld = false
+        const wholeGate = new Promise<void>(resolve => { releaseWhole = resolve })
+        await page.route('**/api/projects/p-pharos/figures**', async route => {
+          const query = new URL(route.request().url()).searchParams
+          if (!query.get('state') && !query.get('work_state') && !query.get('work_bucket')) {
+            wholeHeld = true
+            await wholeGate
+          }
+          await route.fallback()
+        })
         const parent = grid.locator('thead th.c-parent')
+        const head = grid.locator('thead th[data-column-id="status"]'), title = grid.locator('thead th[data-column-id="title"]')
+        let beforeParent: Awaited<ReturnType<typeof head.boundingBox>>
+        try {
+          await page.goto('/p/PHAROS?group=status&status=in_progress,qa,open')
+          await expect(row).toContainText('Building')
+          await expect.poll(() => wholeHeld).toBe(true)
+          await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
+          await expect(parent).toHaveCount(0)
+          beforeParent = await head.boundingBox()
+        } finally { releaseWhole() }
+        // Wait for both the asynchronously chosen column and its fit before
+        // taking the rename baseline (the AEON-1653 fix).
         await expect(parent).toBeVisible()
         await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
+        await testInfo.attach('aeon1661-late-parent', { body: JSON.stringify({ beforeParent, afterParent: await head.boundingBox(), parent: await parent.boundingBox() }), contentType: 'application/json' })
         // A live rename re-renders the words in place: no header cell or row moves.
-        const head = grid.locator('thead th[data-column-id="status"]'), title = grid.locator('thead th[data-column-id="title"]')
         await expectStableControls({
           controls: { head, title, parent, row, next: grid.locator('tr.ticket-row', { hasText: 'PHAROS-13' }), group: grid.locator('tr.group-row').first() },
           interactions: [{ name: 'live rename event', run: async () => {
