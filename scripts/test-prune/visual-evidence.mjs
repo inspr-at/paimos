@@ -38,7 +38,14 @@ export function collectVisualEvidence(directory, visual, { sha, bounds = visualE
         need(++entries <= bounds.entries, 'Visual evidence entry bound')
         const child = join(path, entry.name)
         need(!entry.isSymbolicLink(), 'Visual evidence must not follow symlinks')
-        if (entry.isDirectory()) { pending.push({ path: child, depth: depth + 1 }); continue }
+        if (entry.isDirectory()) {
+          // checkpoint.ts creates one private fontconfig workspace per worker.
+          // Its fonts link and cache are renderer inputs, never checkpoint
+          // evidence. Exclude the whole workspace before visiting any child;
+          // the symlink check above still rejects linked workspace directories.
+          if (/^visual-fontconfig-[0-9]+$/.test(entry.name)) continue
+          pending.push({ path: child, depth: depth + 1 }); continue
+        }
         const id = entry.name.replace(/\.md$/, '')
         if (!entry.isFile() || !entry.name.endsWith('.md') || !checkpoints.has(id)) continue
         scanBytes += regularFile(child, bounds.reportBytes).size

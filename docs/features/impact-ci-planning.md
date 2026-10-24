@@ -12,6 +12,9 @@ most 64 MiB of PNG payload, retained for seven days. Missing checkpoints are
 listed explicitly; traces, fixture screenshots, baseline/diff PNGs and reports
 are excluded from this additional artifact. The existing visual gate remains
 responsible for test completeness and comparison failures.
+Renderer `visual-fontconfig-N` workspaces are excluded before traversal: their
+private font symlink and caches are inputs, not checkpoint evidence. Links at
+checkpoint paths or masquerading as workspace directories are still rejected.
 
 Read-only packing evidence uses the current committed catalogue and the
 runner's whole-file packing and weights:

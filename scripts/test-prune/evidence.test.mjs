@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { fullWebShardCount, webShardPlan } from '../test-tiers/core.mjs'
 import { repackEvidence, sourceProvenance } from './ci-repack.mjs'
 import { collectVisualEvidence, writeVisualEvidence, visualEvidenceBounds } from './visual-evidence.mjs'
+import { installRendererFonts } from './visual-renderer.mjs'
 
 const sha = 'a'.repeat(40)
 const visual = JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8'))
@@ -133,6 +134,29 @@ test('AEON-1730 review artifacts retain the 80 passing checkpoint PNGs and exclu
   assert.ok(readdirSync(output).every(name => /^V-[a-z0-9-]+\.png$/.test(name)))
   assert.deepEqual(readFileSync(join(output, `${id}.png`)), readFileSync(join(input, id, `${id}.png`)))
   assert.throws(() => writeVisualEvidence(input, output, visual, { sha }), /EEXIST/, 'an old artifact cannot fill missing evidence')
+})
+
+test('AEON-1730 checkpoint collection excludes renderer font workspaces without accepting evidence symlinks', t => {
+  const root = mkdtempSync(join(tmpdir(), 'aeon-1730-renderer-evidence-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const input = join(root, 'input'), output = join(root, 'output')
+  mkdirSync(input); visualFixture(input)
+  // Use the production renderer layout. Its private fontconfig needs a link
+  // to the pinned fonts, but neither fonts nor cache files are checkpoint data.
+  const fonts = join(input, 'visual-fontconfig-0')
+  installRendererFonts(visual, fonts, { run: (command, args) => command === 'fc-match'
+    ? visual.renderer.fontconfig.aliases[args[1].slice(':family='.length)] : '' })
+  // Reports in an excluded workspace cannot replace or duplicate real captures.
+  visualFixture(join(fonts, 'cache'))
+  const result = writeVisualEvidence(input, output, visual, { sha })
+  assert.equal(result.checkpoints, 80)
+  assert.deepEqual(result.missing, [])
+  assert.equal(readdirSync(output).length, 80)
+  assert.ok(readdirSync(output).every(name => /^V-[a-z0-9-]+\.png$/.test(name)))
+  const id = visual.states[0].checkpoints[0].id
+  assert.deepEqual(readFileSync(join(output, `${id}.png`)), readFileSync(join(input, id, `${id}.png`)))
+  symlinkSync(fonts, join(input, 'visual-fontconfig-1'), 'dir')
+  assert.throws(() => collectVisualEvidence(input, visual, { sha }), /must not follow symlinks/)
 })
 
 test('AEON-1730 missing, stale, altered, duplicate or oversized visual captures cannot look complete', t => {
