@@ -331,6 +331,16 @@ func checkVisualCapture(workflow map[string]any) error {
 	if !regexp.MustCompile(`^mcr\.microsoft\.com/playwright:[^@\s]+@sha256:[a-f0-9]{64}$`).MatchString(image) || container["credentials"] != nil {
 		return fmt.Errorf("fixed capture requires the digest-pinned Playwright container without credentials")
 	}
+	if !reflect.DeepEqual(container["volumes"], []any{"/nix/store:/nix/store:ro"}) {
+		return fmt.Errorf("fixed capture requires exactly the read-only /nix/store:/nix/store:ro volume")
+	}
+	// Pin options too: Docker flags must not bypass the volume allowlist.
+	if container["options"] != "--ipc=host --init" {
+		return fmt.Errorf("fixed capture requires exactly --ipc=host --init container options")
+	}
+	if job["services"] != nil {
+		return fmt.Errorf("fixed capture must not add service containers or volumes")
+	}
 	env := mapping(job["env"])
 	if env["AEON_VISUAL_RUNNER"] != "agm2" || env["AEON_VISUAL_CAPTURE"] != "1" || env["AEON_VISUAL_RENDERER_SETTING"] != "${{ inputs.visual_renderer }}" {
 		return fmt.Errorf("fixed capture must bind the prepared renderer and runner identity")
