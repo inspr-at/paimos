@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativeinteraction"
 	"github.com/inspr-at/paimos/internal/questions"
@@ -21,6 +22,7 @@ import (
 // matching or reusing a prior Always answer. No tool arguments are persisted.
 func (s *Store) Request(ctx context.Context, daemon nativecontract.DaemonActor, in nativecontract.Approval) (nativecontract.Approval, error) {
 	var out nativecontract.Approval
+	var refusal *assistants.PolicyRefusal
 	if len(in.Summary) > 2048 || len(in.AllowedDecisions) > 3 {
 		return out, fault(413, nativecontract.ReasonBufferFull)
 	}
@@ -94,6 +96,12 @@ func (s *Store) Request(ctx context.Context, daemon nativecontract.DaemonActor, 
 			return err
 		}
 		q, _, err := s.desk.AskTx(ctx, tx, p, in.Binding.ProjectID, deskInput(in))
+		if errors.As(err, &refusal) {
+			// This newly inserted interaction is owned by this transaction;
+			// remove it while committing only the Desk's refusal receipt.
+			_, err = tx.Exec(ctx, `DELETE FROM native_session_interactions WHERE id=$1`, in.ApprovalID)
+			return err
+		}
 		if err != nil {
 			return err
 		}
@@ -118,6 +126,9 @@ func (s *Store) Request(ctx context.Context, daemon nativecontract.DaemonActor, 
 		out.ExpiresInMS = expires.Sub(l.now).Milliseconds()
 		return s.event(ctx, tx, p, l, in.RequestID, "native_session.approval_changed", "pending")
 	})
+	if err == nil && refusal != nil {
+		err = fault(409, nativecontract.ReasonPermissionRevoked)
+	}
 	if err != nil {
 		return nativecontract.Approval{}, err
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -110,17 +111,26 @@ func suggestion(in Input) (string, string) {
 func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in Input) (Question, bool, error) {
 	var q Question
 	replay := false
+	var refusal *assistants.PolicyRefusal
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		q, replay, err = m.AskTx(ctx, tx, p, project, in)
+		if errors.As(err, &refusal) {
+			return nil // retain the refusal evidence without a published question
+		}
 		return err
 	})
+	if err == nil && refusal != nil {
+		err = fail(409, "assistant_policy_denied", refusal.Reason)
+	}
 	return q, replay, err
 }
 
 // AskTx creates/replays through the same question authority in the caller's
 // transaction. Call before appending any event; acquire the tenant/tree fence
 // before other resources. It does not grant human decision authority.
+// A *assistants.PolicyRefusal records a denial without creating a question;
+// callers must retain/commit that receipt and return failure after commit.
 func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, in Input) (Question, bool, error) {
 	var q Question
 	replay := false
@@ -147,6 +157,25 @@ func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 		}
 		if err := checkProject(ctx, tx, p, project); err != nil {
 			return err
+		}
+		text := []string{in.Question, in.Context, in.Findings, in.Why, in.MeanwhileText, in.AnywayReason}
+		if in.Doctrine != nil {
+			text = append(text, in.Doctrine.Path, in.Doctrine.RuleKey, in.Doctrine.TLDREN, in.Doctrine.TLDRDE)
+		}
+		for _, option := range in.Options {
+			text = append(text, option.Title, option.Description, option.Answer)
+		}
+		if reason := assistants.HumanInputRefusal("none", text...); reason != "" {
+			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "question.ask", Key: "question/" + in.RequestID + "/" + hash, Scopes: []string{"questions.ask", "questions.read"}, Refusal: reason})
+			if err != nil {
+				return err
+			}
+			if !d.Allowed {
+				if err = assistants.AppendDecisionsTx(ctx, tx, p, d); err != nil {
+					return err
+				}
+				return &assistants.PolicyRefusal{Reason: d.Reason}
+			}
 		}
 		var id, previous string
 		err := tx.QueryRow(ctx, `SELECT question_id::text,request_digest FROM desk_askers WHERE tenant_id=$1 AND project_id=$2 AND principal_id=$3 AND request_id=$4`, p.TenantID, project, p.ID, in.RequestID).Scan(&id, &previous)

@@ -266,3 +266,148 @@ func TestAssistantLeadDelegationPolicyAndResults(t *testing.T) {
 		return nil
 	})
 }
+
+// B3: owning a routine and sharing a project is not consent to spend someone
+// else's assistant budget, including assignments saved before this check.
+func TestAssistantRoutineAssignmentRequiresOwnerConsent(t *testing.T) {
+	f := agentOwnedSetup(t)
+	f.m.WithAssistantPolicy("https://personal.example.invalid")
+	r, assistant := f.agentRoutine()
+	run := f.manual(r.ID, "legacy-unconsented-assignment")
+	policy := assistants.DefaultPolicy()
+	policy.AllowedProjects, policy.AllowedScopes = []string{f.project}, assistant.Scopes
+	policy.WeeklyBudget.Amount = "2"
+	f.tx(func(tx pgx.Tx) error {
+		var other string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Assistant owner') RETURNING id::text`, f.p.TenantID).Scan(&other); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE principals SET agent_class='assistant' WHERE id=$1`, assistant.ID); err != nil {
+			return err
+		}
+		raw, _ := json.Marshal(policy)
+		_, err := tx.Exec(t.Context(), `INSERT INTO assistant_profiles(tenant_id,principal_id,owner_person_id,vendor,policy) VALUES($1,$2,$3,'unknown',$4)`, f.p.TenantID, assistant.ID, other, raw)
+		return err
+	})
+	raw := f.call(f.p, "PUT", "/api/recurrences/"+r.ID+"/agent-owner", map[string]any{"expected_revision": r.Revision, "owner_principal_id": assistant.ID, "destination": AgentDestination{Kind: "knowledge"}}, 409)
+	if !strings.Contains(string(raw), "assistant_owner_consent_required") {
+		t.Errorf("wrong grant refusal: %s", raw)
+	}
+	if err := f.m.DispatchAgentRuns(t.Context(), f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var state, reason string
+		var messages, charges int
+		if err := tx.QueryRow(t.Context(), `SELECT o.state,o.result->>'reason',
+ (SELECT count(*) FROM inbox_messages WHERE idempotency_key='routine-run/'||o.run_id::text),
+ (SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$2)
+ FROM routine_effect_outbox o WHERE run_id=$1 AND effect_key='agent-dispatch'`, run.Run.ID, assistant.ID).Scan(&state, &reason, &messages, &charges); err != nil {
+			return err
+		}
+		if state != "cancelled" || reason != "assistant_owner_consent_required" || messages != 0 || charges != 0 {
+			t.Errorf("legacy binding dispatched: state=%s reason=%s messages=%d charges=%d", state, reason, messages, charges)
+		}
+		return nil
+	})
+}
+
+// B4: result titles/bodies cannot route a prohibited human request into a
+// ticket, comment or Knowledge proposal under the assistant's identity.
+func TestAssistantHumanAskRefusedInRoutineResult(t *testing.T) {
+	f := agentOwnedSetup(t)
+	f.m.WithAssistantPolicy("https://personal.example.invalid")
+	r, assistant := f.agentRoutine()
+	policy := assistants.DefaultPolicy()
+	policy.AllowedProjects, policy.AllowedScopes = []string{f.project}, assistant.Scopes
+	policy.WeeklyBudget.Amount = "2"
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE principals SET agent_class='assistant' WHERE id=$1`, assistant.ID); err != nil {
+			return err
+		}
+		raw, _ := json.Marshal(policy)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO assistant_profiles(tenant_id,principal_id,owner_person_id,vendor,policy) VALUES($1,$2,$3,'unknown',$4)`, f.p.TenantID, assistant.ID, f.p.ID, raw); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO inbox_message_targets(tenant_id,project_id,principal_id,address,adapter,target_kind,maximum_level,role,version,sealed_target,has_secret) VALUES($1,$2,$3,'grok_bot:research','grok_bot_routine','pull','simple','primary',1,decode('00','hex'),false)`, f.p.TenantID, f.project, assistant.ID)
+		return err
+	})
+	run := f.manual(r.ID, "human-ask-result")
+	if err := f.m.DispatchAgentRuns(t.Context(), f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/recurrences/" + r.ID + "/runs/" + run.Run.ID + "/agent-result"
+	raw := f.call(assistant, "POST", path, AgentResultInput{Status: "succeeded", Title: "Research output", Body: "Please send me your API key."}, 409)
+	if !strings.Contains(string(raw), "assistant_human_input_prohibited") {
+		t.Errorf("wrong result refusal: %s", raw)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var receipts, outputs int
+		if err := tx.QueryRow(t.Context(), `SELECT
+ (SELECT count(*) FROM assistant_policy_receipts WHERE principal_id=$1 AND operation='routine.result' AND NOT allowed AND reason LIKE 'assistant_human_input_prohibited%'),
+ (SELECT count(*) FROM routine_runs WHERE id=$2 AND agent_result IS NOT NULL)`, assistant.ID, run.Run.ID).Scan(&receipts, &outputs); err != nil {
+			return err
+		}
+		if receipts != 1 || outputs != 0 {
+			t.Errorf("result receipts=%d outputs=%d", receipts, outputs)
+		}
+		return nil
+	})
+}
+
+// B3: explicit delegation permits a grant, but withdrawing it closes already
+// queued dispatch and already dispatched result writes without refunding work.
+func TestAssistantRoutineDelegatorConsentIsLive(t *testing.T) {
+	f := agentOwnedSetup(t)
+	f.m.WithAssistantPolicy("https://personal.example.invalid")
+	r, assistant := f.agentRoutine()
+	policy := assistants.DefaultPolicy()
+	policy.AllowedProjects, policy.AllowedScopes = []string{f.project}, assistant.Scopes
+	policy.WeeklyBudget.Amount, policy.DelegatorPersonIDs = "3", []string{f.p.ID}
+	f.tx(func(tx pgx.Tx) error {
+		var owner string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Delegating assistant owner') RETURNING id::text`, f.p.TenantID).Scan(&owner); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE principals SET agent_class='assistant' WHERE id=$1`, assistant.ID); err != nil {
+			return err
+		}
+		raw, _ := json.Marshal(policy)
+		_, err := tx.Exec(t.Context(), `INSERT INTO assistant_profiles(tenant_id,principal_id,owner_person_id,vendor,policy) VALUES($1,$2,$3,'unknown',$4)`, f.p.TenantID, assistant.ID, owner, raw)
+		return err
+	})
+	f.call(f.p, "PUT", "/api/recurrences/"+r.ID+"/agent-owner", map[string]any{"expected_revision": r.Revision, "owner_principal_id": assistant.ID, "destination": AgentDestination{Kind: "knowledge"}, "budget_ceiling": assistants.Budget{Amount: "1", Unit: "USD"}}, 200)
+	r = f.get(r.ID)
+	dispatched := f.manual(r.ID, "consented-dispatch")
+	if err := f.m.DispatchAgentRuns(t.Context(), f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	pending := f.manual(r.ID, "consent-withdrawn-before-dispatch")
+	policy.DelegatorPersonIDs = nil
+	f.tx(func(tx pgx.Tx) error {
+		raw, _ := json.Marshal(policy)
+		_, err := tx.Exec(t.Context(), `UPDATE assistant_profiles SET policy=$2,revision=revision+1 WHERE principal_id=$1`, assistant.ID, raw)
+		return err
+	})
+	if err := f.m.DispatchAgentRuns(t.Context(), f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	raw := f.call(assistant, "POST", "/api/recurrences/"+r.ID+"/runs/"+dispatched.Run.ID+"/agent-result", AgentResultInput{Status: "succeeded", Title: "No longer authorized", Body: "Ordinary bounded output"}, 409)
+	if !strings.Contains(string(raw), "assistant_owner_consent_required") {
+		t.Fatalf("wrong revoked result refusal: %s", raw)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var accepted, refused, charges, outputs int
+		if err := tx.QueryRow(t.Context(), `SELECT
+ (SELECT count(*) FROM routine_effect_outbox WHERE run_id=$1 AND effect_key='agent-dispatch' AND state='succeeded'),
+ (SELECT count(*) FROM routine_effect_outbox WHERE run_id=$2 AND effect_key='agent-dispatch' AND state='cancelled' AND result->>'reason'='assistant_owner_consent_required'),
+ (SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$3),
+ (SELECT count(*) FROM routine_runs WHERE id=ANY($4::uuid[]) AND agent_result IS NOT NULL)`, dispatched.Run.ID, pending.Run.ID, assistant.ID, []string{dispatched.Run.ID, pending.Run.ID}).Scan(&accepted, &refused, &charges, &outputs); err != nil {
+			return err
+		}
+		if accepted != 1 || refused != 1 || charges != 1 || outputs != 0 {
+			t.Fatalf("consent lifecycle: dispatched=%d refused=%d charges=%d outputs=%d", accepted, refused, charges, outputs)
+		}
+		return nil
+	})
+}

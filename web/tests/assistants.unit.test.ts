@@ -142,11 +142,13 @@ it('assistant policy refusals reach row activity without claiming execution or d
   expect(policyChange({ ...event, after: { ...event.after, reason: 'assistant_project_denied' } })).toBe(assistantCopy().policyProjectDenied)
   expect(policyChange({ ...event, after: { ...event.after, reason: 'assistant_scope_denied: nodes.write' } })).toBe(assistantCopy().policyScopeDenied)
   const { cloneAssistantPolicy } = await import('../src/lib/assistants')
-  const original = { ...amy.policy, approver_person_ids: ['owner'], weekly_reset_day: 0 }
+  const original = { ...amy.policy, approver_person_ids: ['owner'], weekly_reset_day: 0, message_cost: '0.25', delegator_person_ids: ['delegator'] }
   const draft = cloneAssistantPolicy(original)
   expect(draft).toEqual(original)
   draft.approver_person_ids!.push('another')
   expect(original.approver_person_ids).toEqual(['owner'])
+  draft.delegator_person_ids!.push('another')
+  expect(original.delegator_person_ids).toEqual(['delegator'])
 })
 
 it('assistant partial approval links expose explanations to the shared tooltip', async () => {

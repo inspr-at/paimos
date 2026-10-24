@@ -223,6 +223,9 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 		if err != nil {
 			return err
 		}
+		if err := assistantPickupUnchanged(items, alive, decisions); err != nil {
+			return err
+		}
 		kept := items[:0]
 		for _, msg := range items {
 			if alive[msg.ID] {

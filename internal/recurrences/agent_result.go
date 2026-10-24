@@ -199,7 +199,7 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 				leadFailure = "assistant_delegating_lead_unavailable"
 			}
 		}
-		policy, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: item.ProjectID, Operation: "routine.result", Key: policyKey, Scopes: agentScopes(c), RequireBudget: true})
+		policy, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: item.ProjectID, Operation: "routine.result", Key: policyKey, Scopes: agentScopes(c), RequireBudget: true, Refusal: assistants.HumanInputRefusal("none", in.Title, in.Body)})
 		if err != nil {
 			return err
 		}

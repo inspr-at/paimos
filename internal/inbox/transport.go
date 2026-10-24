@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,21 +24,22 @@ import (
 // DeliveryWork is returned only to the authenticated recipient. TargetRef is
 // never part of the redacted ledger, event stream, or a person inspection page.
 type DeliveryWork struct {
-	retryAfter     time.Duration
-	ProjectKey     string         `json:"-"`
-	ID             string         `json:"delivery_id"`
-	LeaseToken     string         `json:"lease_token,omitempty"`
-	TenantID       string         `json:"tenant_id,omitempty"`
-	PrincipalID    string         `json:"principal_id,omitempty"`
-	Cursor         int64          `json:"cursor"`
-	State          string         `json:"state"`
-	Adapter        string         `json:"adapter,omitempty"`
-	TargetKind     string         `json:"target_kind,omitempty"`
-	TargetRef      string         `json:"target_ref,omitempty"`
-	TargetSecret   string         `json:"-"`
-	MaximumLevel   string         `json:"maximum_level,omitempty"`
-	FallbackReason string         `json:"fallback_reason,omitempty"`
-	Message        *CompatMessage `json:"message,omitempty"`
+	retryAfter       time.Duration
+	budgetReleaseKey string         // fresh push hold only; never sent to an API caller
+	ProjectKey       string         `json:"-"`
+	ID               string         `json:"delivery_id"`
+	LeaseToken       string         `json:"lease_token,omitempty"`
+	TenantID         string         `json:"tenant_id,omitempty"`
+	PrincipalID      string         `json:"principal_id,omitempty"`
+	Cursor           int64          `json:"cursor"`
+	State            string         `json:"state"`
+	Adapter          string         `json:"adapter,omitempty"`
+	TargetKind       string         `json:"target_kind,omitempty"`
+	TargetRef        string         `json:"target_ref,omitempty"`
+	TargetSecret     string         `json:"-"`
+	MaximumLevel     string         `json:"maximum_level,omitempty"`
+	FallbackReason   string         `json:"fallback_reason,omitempty"`
+	Message          *CompatMessage `json:"message,omitempty"`
 }
 
 type claimInput struct {
@@ -237,7 +240,12 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 			if err := tx.QueryRow(ctx, `SELECT coalesce(assistant_policy_key,'message/'||id::text) FROM inbox_messages WHERE id=$1::uuid`, messageID).Scan(&policyKey); err != nil {
 				return err
 			}
-			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.send", Key: policyKey, Scopes: []string{"inbox.read"}, RequireBudget: true, Now: now})
+			// A retry can incur another vendor charge even after an error or
+			// timeout. Every new lease therefore needs its own positive hold.
+			if attempts > 0 || !strings.HasPrefix(policyKey, "routine-run/") && !strings.HasPrefix(policyKey, "delegation/") {
+				policyKey += "/push/" + strconv.Itoa(attempts+1)
+			}
+			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.send", Key: policyKey, Scopes: []string{"inbox.read"}, Charge: true, MessageCost: true, Now: now})
 			if err != nil {
 				return err
 			}
@@ -256,6 +264,9 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 				if err = authz.RequireTx(ctx, tx, actor, "inbox.read", authz.Scope{ProjectID: project}); err != nil {
 					return err
 				}
+			}
+			if d.Charged {
+				work.budgetReleaseKey = policyKey
 			}
 			// Append this audit with the claim after every receipt/resource write.
 			policyChanges = d.Changes

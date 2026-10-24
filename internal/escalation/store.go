@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -190,6 +191,12 @@ func decisionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, proj
 		if canAsk {
 			in := questions.Input{RequestID: s.EpisodeID, TicketID: ticket, Question: "How should this stuck work continue?", Context: fmt.Sprintf("Bounded model escalation stopped: %s. %d automatic attempts; %d cost micros held. Work item %s.", s.Reason, s.Attempts, s.HeldCost, ticket), Options: []questions.Option{{ID: "park", Title: "Keep parked", Answer: "Keep this work parked until its scope or allowed route is revised."}, {ID: "revise", Title: "Revise scope or policy", Answer: "A person will revise the work scope or its allowed execution policy before another attempt."}}, Recommend: "park", Why: "The automatic attempt or route budget is exhausted; further execution needs a separate authorized lifecycle decision.", Meanwhile: "parked", MeanwhileText: "Automatic retries are parked; current processes retain the existing lifecycle and exit checks.", BlockedNodeIDs: []string{ticket}, SuggestedOutcome: "once"}
 			q, _, err := questions.New(nil).AskTx(ctx, tx, p, project, in)
+			var refusal *assistants.PolicyRefusal
+			if errors.As(err, &refusal) {
+				s.QuestionPending = false
+				s.Reason = refusal.Reason
+				return nil
+			}
 			if err != nil {
 				return err
 			}

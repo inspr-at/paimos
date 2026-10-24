@@ -121,6 +121,7 @@ func testAssistantIdentityPolicy(t *testing.T) {
 	wantDefault := assistants.Policy{
 		AllowedProjects: []string{}, AllowedScopes: []string{"inbox.read", "inbox.receipt", "inbox.send"},
 		WeeklyBudget: assistants.Budget{Amount: "0", Unit: "USD"}, OutwardActionRule: "approval_required",
+		MessageCost:                           "0.01",
 		NeverAskPersonForSecretsOrManualSteps: true,
 	}
 	if legacy.PrincipalID != amy.PrincipalID || legacy.Kind != "assistant" || legacy.PrincipalKind != "agent" || legacy.OwnerPersonID != owner.ID || legacy.Revision != 0 || !reflect.DeepEqual(legacy.Policy, wantDefault) {

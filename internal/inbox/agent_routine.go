@@ -94,7 +94,7 @@ func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal
 			return "", nil, err
 		}
 	} else {
-		refusal, err := assistantDeliveryPolicyTx(ctx, tx, sender, owner, project, id, policyKey, collect)
+		refusal, err := assistantDeliveryPolicyTx(ctx, tx, sender, owner, project, id, policyKey, body, collect)
 		if err != nil {
 			return "", nil, err
 		}

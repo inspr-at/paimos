@@ -39,7 +39,7 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
     put:
       operationId: setRoutineAgentOwner
-      description: 'An interactive canonical person with current recurrence management and destination authority grants an active same-tenant agent ownership at expected_revision. Requires a project-scoped definition in the output project with no native assignment or queue_each. The canonical definition owner remains the accountable person; this separate grant names the agent owner. Pauses the routine, increments its revision and creates no run. Existing routine editing, resume and consent rules apply. Edits invalidate the grant until renewed. No keys, roles, policy or approval bypass is created.'
+      description: 'An interactive canonical person with current recurrence management and destination authority grants an active same-tenant agent ownership at expected_revision. For an assistant, the granting person must be its canonical owner or a person listed in its current delegator_person_ids policy; consent is rechecked at grant, dispatch, pickup and result. Requires a project-scoped definition in the output project with no native assignment or queue_each. The canonical definition owner remains the accountable person; this separate grant names the agent owner. Pauses the routine, increments its revision and creates no run. Existing routine editing, resume and consent rules apply. Edits invalidate the grant until renewed. No keys, roles, policy or approval bypass is created.'
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/RoutineAgentOwnerInput'}}}
@@ -48,7 +48,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'Stale revision or incompatible routine'}
+        '409': {description: 'Stale revision, incompatible routine or assistant_owner_consent_required'}
   /recurrences/{recurrenceId}/runs/{runId}/agent-result:
     parameters:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -62,7 +62,7 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
     post:
       operationId: completeRoutineAgentResult
-      description: 'Only the dispatched agent owner can submit a bounded terminal result. Live person grant, owner authority, definition identity and result destination are rechecked under the final tenant/tree fence. The configured result becomes one ordinary ticket comment, new ticket or proposed Knowledge entry. Exact retries return the same receipt; changed results conflict. Cost is agent-reported micro-USD, never independently measured billing. An omitted cost remains unknown. No ticket completion, acceptance, outward action, merge or deployment is authorized.'
+      description: 'Only the dispatched agent owner can submit a bounded terminal result. Live person grant, owner consent, owner authority, definition identity and result destination are rechecked under the final tenant/tree fence. Assistant titles and bodies containing requests for secrets, tokens or manual steps recognized by the shared human-input classifier are refused with a policy receipt before publication. The configured result becomes one ordinary ticket comment, new ticket or proposed Knowledge entry. Exact retries return the same receipt; changed results conflict. Cost is agent-reported micro-USD, never independently measured billing. An omitted cost remains unknown. No ticket completion, acceptance, outward action, merge or deployment is authorized.'
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/RoutineAgentResultInput'}}}
@@ -71,7 +71,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'Changed definition, revoked dispatch or conflicting result'}
+        '409': {description: 'Changed definition, revoked dispatch, owner-consent or human-input policy refusal, or conflicting result'}
 components:
   schemas:
     RoutineAgentDestination:

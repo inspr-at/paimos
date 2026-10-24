@@ -111,6 +111,11 @@ func agentOwnerAuthority(ctx context.Context, tx pgx.Tx, tid string, r Recurrenc
 	if err = tx.QueryRow(ctx, `SELECT name FROM principals WHERE id=$1 AND kind='agent' AND status='active' AND linked_to IS NULL`, owner.ID).Scan(&owner.Name); err != nil {
 		return person, owner, err
 	}
+	if reason, err := assistants.RoutineGrantRefusalTx(ctx, tx, tid, owner.ID, person.ID); err != nil {
+		return person, owner, err
+	} else if reason != "" {
+		return person, owner, workorders.Fail(409, reason)
+	}
 	if err = validateDefinition(ctx, tx, person, r.Input); err != nil {
 		return person, owner, err
 	}

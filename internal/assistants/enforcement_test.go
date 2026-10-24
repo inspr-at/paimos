@@ -16,6 +16,44 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Message execution must have a positive bounded price, even for older stored
+// policies; consent lists must be validated and copied without aliasing drafts.
+func TestAssistantMessagePolicyDefaultsAndBounds(t *testing.T) {
+	for _, unit := range []string{"USD", "EUR", "tokens", "credits"} {
+		p := DefaultPolicy()
+		p.MessageCost, p.WeeklyBudget.Unit = "", unit
+		got, err := cleanPolicy(p)
+		want := "0.01"
+		if unit == "tokens" || unit == "credits" {
+			want = "1"
+		}
+		if err != nil || got.MessageCost != want {
+			t.Fatalf("%s default=%s err=%v", unit, got.MessageCost, err)
+		}
+	}
+	for _, amount := range []string{"0", "-1", "0.0000001", "1000000000000", "NaN"} {
+		p := DefaultPolicy()
+		p.MessageCost = amount
+		if _, err := cleanPolicy(p); err == nil {
+			t.Errorf("accepted message_cost=%s", amount)
+		}
+	}
+	p := DefaultPolicy()
+	p.DelegatorPersonIDs = []string{"10000000-0000-4000-8000-000000000001"}
+	got, err := cleanPolicy(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.DelegatorPersonIDs[0] = "changed draft"
+	if p.DelegatorPersonIDs[0] == "changed draft" {
+		t.Fatal("delegator draft aliases policy")
+	}
+	p.DelegatorPersonIDs = append(p.DelegatorPersonIDs, p.DelegatorPersonIDs[0])
+	if _, err := cleanPolicy(p); err == nil {
+		t.Fatal("duplicate delegation accepted")
+	}
+}
+
 // Risk: policy scopes are mistaken for grants, admissions overspend,
 // retries are charged twice, unknown costs become free, or a clock reset lets
 // an assistant spend in another tenant. Every instant derives from DB now().

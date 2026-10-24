@@ -13,6 +13,8 @@ export interface AssistantPolicy {
   never_ask_person_for_secrets_or_manual_steps: true
   approver_person_ids?: string[]
   weekly_reset_day?: number
+  message_cost?: string
+  delegator_person_ids?: string[]
 }
 export interface AssistantSnapshot {
   principal_id: string; owner_person_id: string; status: 'active' | 'deactivated'; revision: number; policy: AssistantPolicy
@@ -26,6 +28,8 @@ export const cloneAssistantPolicy = (policy: AssistantPolicy): AssistantPolicy =
   never_ask_person_for_secrets_or_manual_steps: policy.never_ask_person_for_secrets_or_manual_steps,
   ...(policy.approver_person_ids ? { approver_person_ids: [...policy.approver_person_ids] } : {}),
   ...(policy.weekly_reset_day === undefined ? {} : { weekly_reset_day: policy.weekly_reset_day }),
+  ...(policy.message_cost === undefined ? {} : { message_cost: policy.message_cost }),
+  ...(policy.delegator_person_ids ? { delegator_person_ids: [...policy.delegator_person_ids] } : {}),
 })
 export interface AssistantEvent {
   id: number; type: string; at: string; actor_principal_id: string

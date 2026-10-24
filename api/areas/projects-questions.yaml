@@ -23,6 +23,8 @@ paths:
         An anyway question stays separate while open; a later human-approved Always can be reused.
         Returns immediately. No inbox send, outcome materialization or permission grant occurs here.
         Inputs are UTF-8, NUL-free and bounded in bytes as well as by the schema (body at most 64 KiB).
+        Assistant-authored requests for secrets, tokens or manual steps recognized by the shared
+        human-input classifier are refused with a policy receipt before any question is published.
       security: [{session: []}, {agentKey: []}]
       requestBody:
         required: true
@@ -36,7 +38,7 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {description: 'Project, ticket, blocked work or source not accessible'}
-        '409': {description: 'code replay_conflict or session_ended'}
+        '409': {description: 'code replay_conflict, session_ended or assistant_policy_denied; policy refusal retains its receipt without publishing a question'}
         '413': {description: Body exceeds 64 KiB}
     get:
       operationId: listQuestions

@@ -15,17 +15,24 @@ import (
 )
 
 // Callers hold the inbox access fence. Execution spend belongs to the receiving
-// assistant. Transport only checks admission; routines reserve separately.
-func assistantDeliveryPolicyTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, recipient, project, message, key string, collect func(events.Change) error) (string, error) {
+// assistant. Acceptance checks affordability; the final exposure reserves it.
+func assistantDeliveryPolicyTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, recipient, project, message, key, body string, collect func(events.Change) error) (string, error) {
 	if key == "" {
 		key = "message/" + message
 	}
 	checks := []assistants.Check{{TenantID: sender.TenantID, PrincipalID: sender.ID, ProjectID: project, Operation: "message.send", Key: "send/" + message, Scopes: []string{"inbox.send"}}}
+	var person bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='person')`, sender.TenantID, recipient).Scan(&person); err != nil {
+		return "", err
+	}
+	if person {
+		checks[0].Refusal = assistants.HumanInputRefusal("none", body)
+	}
 	var push bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_message_targets t JOIN assistant_adapters a ON a.tenant_id=t.tenant_id AND a.target_id=t.id WHERE t.tenant_id=$1::uuid AND t.principal_id=$2::uuid AND t.project_id=nullif($3,'')::uuid AND t.enabled AND t.role='primary' AND t.target_kind='https_webhook')`, sender.TenantID, recipient, project).Scan(&push); err != nil {
 		return "", err
 	}
-	checks = append(checks, assistants.Check{TenantID: sender.TenantID, PrincipalID: recipient, ProjectID: project, Operation: "adapter.accept", Key: key, Scopes: []string{"inbox.read"}, RequireBudget: push})
+	checks = append(checks, assistants.Check{TenantID: sender.TenantID, PrincipalID: recipient, ProjectID: project, Operation: "adapter.accept", Key: key, Scopes: []string{"inbox.read"}, RequireBudget: push, MessageCost: true})
 	for _, check := range checks {
 		d, err := assistants.EvaluateTx(ctx, tx, check)
 		if err != nil {
@@ -89,6 +96,16 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 		}
 		scopes := []string{"inbox.read"}
 		grantRefusal := ""
+		if err := authz.RequireTx(ctx, tx, p, "inbox.read", authz.Scope{ProjectID: project}); err != nil {
+			if !errors.Is(err, authz.ErrForbidden) {
+				return nil, nil, err
+			}
+			// Policy ceilings get their precise reason from EvaluateTx below;
+			// ordinary role revocation must also refuse before charging/pickup.
+			if reason, _ := authz.AssistantPolicyDenial(err); reason == "" {
+				grantRefusal = "assistant_inbox_authority_revoked"
+			}
+		}
 		if run != "" {
 			var owner struct {
 				GrantedBy   string `json:"granted_by_principal_id"`
@@ -99,6 +116,13 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 			if len(raw) > 8192 || json.Unmarshal(raw, &owner) != nil || string(raw) != string(current) {
 				grantRefusal = "assistant_routine_grant_changed"
 			} else {
+				consent, err := assistants.RoutineGrantRefusalTx(ctx, tx, p.TenantID, p.ID, owner.GrantedBy)
+				if err != nil {
+					return nil, nil, err
+				}
+				if consent != "" {
+					grantRefusal = consent
+				}
 				permission := "nodes.write"
 				if owner.Destination.Kind == "knowledge" {
 					permission = "knowledge.write"
@@ -118,7 +142,10 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 				}
 			}
 		}
-		d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.pull", Key: key, Scopes: scopes, RequireBudget: run != "", Refusal: grantRefusal})
+		if run == "" {
+			key += "/pull"
+		}
+		d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.pull", Key: key, Scopes: scopes, Charge: true, MessageCost: true, Refusal: grantRefusal})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -141,6 +168,20 @@ func assistantReceiptErrorTx(ctx context.Context, tx pgx.Tx, id string) error {
 	}
 	if strings.HasPrefix(reason, "assistant_") {
 		return &httpError{409, "assistant_policy_denied", reason + "; message receipt: " + id}
+	}
+	return nil
+}
+
+// A deadline can elapse while a page is being prepared. If handOver drops an
+// item after a new hold, abort this unexposed page so its holds and audit roll
+// back together. The next poll omits the expired item and admits the survivors.
+func assistantPickupUnchanged(items []Message, alive map[string]bool, decisions []assistants.Decision) error {
+	if len(alive) != len(items) {
+		for _, d := range decisions {
+			if d.Charged {
+				return &httpError{409, "pickup_changed", "message availability changed; retry pickup"}
+			}
+		}
 	}
 	return nil
 }
