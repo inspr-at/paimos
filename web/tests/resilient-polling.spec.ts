@@ -43,7 +43,7 @@ test('Agents retries a stalled session read and keeps the loaded table through t
     // Observe its action without starting a read, so a missing online handler fails.
     const error = await page.evaluate(async () => {
       const agents = (await import('/src/stores/agents.ts')).useAgents()
-      await new Promise<void>((resolve, reject) => {
+      const refresh = new Promise<void>((resolve, reject) => {
         const stop = agents.$onAction(({ name, after, onError }) => {
           if (name !== 'loadAll') return
           stop()
@@ -52,6 +52,13 @@ test('Agents retries a stalled session read and keeps the loaded table through t
         })
         window.dispatchEvent(new Event('online'))
       })
+      // Project-tree readers can finish while the table GET is in backoff.
+      // Complete both readers as well as the table action: their transports
+      // cannot stand in for the table's completed failure.
+      await Promise.all([
+        refresh,
+        ...['p-pharos', 'p-aeon'].map(project => fetch(`/api/harness-sessions?view=current&project=${project}`).catch(() => {})),
+      ])
       return agents.sessionsError
     })
     expect(error).toBe('No connection')
