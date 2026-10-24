@@ -727,6 +727,19 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 // its actual commands and immutable image before adapting old workflow pins.
 func checkAEON1692VisualJob(t *testing.T) {
 	t.Helper()
+	for _, workflow := range []string{"ci.yml", "nightly-full.yml"} {
+		job := treeMap(treeMap(treeWorkflow(t, workflow)["jobs"])["visual-comparison"])
+		collect := reuseStep(t, job, "Collect deliberate visual checkpoint PNGs")
+		upload := reuseStep(t, job, "Preserve passing and failing visual checkpoint PNGs")
+		want := map[string]any{"name": "visual-checkpoints-${{ github.run_attempt }}", "path": "${{ runner.temp }}/visual-checkpoints/*.png",
+			"if-no-files-found": "warn", "retention-days": 7, "overwrite": true}
+		if collect["if"] != "always()" || collect["continue-on-error"] != nil ||
+			collect["run"] != `node scripts/test-prune/visual-evidence.mjs web/test-results "$RUNNER_TEMP/visual-checkpoints"` ||
+			upload["if"] != "always()" || upload["uses"] != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" ||
+			!reflect.DeepEqual(treeMap(upload["with"]), want) {
+			t.Fatalf("%s must retain passing and failing checkpoint PNGs through the bounded collector", workflow)
+		}
+	}
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	comparison, capture := treeMap(jobs["visual-comparison"]), treeMap(jobs["visual-reference-capture"])
 	body, err := os.ReadFile(filepath.Join(root(t), "scripts/test-prune/visual-manifest.json"))

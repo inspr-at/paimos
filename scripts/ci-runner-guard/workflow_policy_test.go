@@ -156,6 +156,43 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		return w
 	}
 	ciGroup := mapping(parse(workflows["ci.yml"])["concurrency"])["group"]
+	for _, file := range []string{"ci.yml", "nightly-full.yml"} {
+		for _, change := range []string{"missing-collector", "success-only", "unbounded-command", "all-screenshots", "long-retention", "nonblocking-collector", "reordered"} {
+			add("visual-checkpoint-evidence/"+file+"/"+change, file, "visual checkpoint evidence", func(w map[string]any) {
+				job := mapping(mapping(w["jobs"])["visual-comparison"])
+				steps := job["steps"].([]any)
+				for i, value := range steps {
+					step := mapping(value)
+					if step["name"] == "Collect deliberate visual checkpoint PNGs" {
+						switch change {
+						case "missing-collector":
+							job["steps"] = append(steps[:i], steps[i+1:]...)
+							return
+						case "unbounded-command":
+							step["run"] = "cp web/test-results/*.png /tmp/evidence"
+							return
+						case "nonblocking-collector":
+							step["continue-on-error"] = true
+							return
+						case "reordered":
+							steps[i], steps[i+1] = steps[i+1], steps[i]
+							return
+						}
+					}
+					if step["name"] == "Preserve passing and failing visual checkpoint PNGs" {
+						switch change {
+						case "success-only":
+							step["if"] = "success()"
+						case "all-screenshots":
+							mapping(step["with"])["path"] = "web/test-results/"
+						case "long-retention":
+							mapping(step["with"])["retention-days"] = 8
+						}
+					}
+				}
+			})
+		}
+	}
 	shared := map[string]any{"group": "shared", "cancel-in-progress": true}
 	var files []string
 	for file := range workflows {
