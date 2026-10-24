@@ -303,6 +303,21 @@ func (m *Module) runMetrics(ctx context.Context) {
 
 const metricRefreshInterval = 15 * time.Minute
 
+func (m *Module) deferMetricRefresh(ctx context.Context, p tenant.Principal, project string, revision int64) error {
+	// Service maintenance only postpones an unchanged finished source. It
+	// grants no read/write authority to the actor whose refresh was refused.
+	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_retry_at=$5,backfill_revision=backfill_revision+1
+    WHERE project_id=$1 AND backfill_actor_id=$2 AND backfill_key_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+    AND backfill_revision=$4 AND NOT coalesce(backfill_pending,false) AND backfill_cursor->>'phase'='done'`,
+			project, p.ID, p.KeyID, revision, m.now().UTC().Add(metricRefreshInterval))
+		return err
+	})
+}
+
 // A short bounded page and one bounded step per project keep history work from
 // monopolising the server. The session lock prevents duplicate replica reads;
 // foreground steps still use revision checks and re-authorize their final write.
@@ -353,10 +368,11 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 		type job struct {
 			project, actor, key string
 			refresh             bool
+			revision            int64
 		}
 		var jobs []job
 		err = db.InTenant(service, m.pool, tid, func(tx pgx.Tx) error {
-			rows, err := tx.Query(op, `SELECT s.project_id::text,s.backfill_actor_id::text,coalesce(s.backfill_key_id::text,''),NOT coalesce(s.backfill_pending,false)
+			rows, err := tx.Query(op, `SELECT s.project_id::text,s.backfill_actor_id::text,coalesce(s.backfill_key_id::text,''),NOT coalesce(s.backfill_pending,false),s.backfill_revision
     FROM delivery_metric_sources s JOIN nodes n ON n.id=s.project_id
     WHERE (s.backfill_pending OR (s.backfill_cursor->>'phase'='done'
       AND coalesce((s.backfill_cursor->>'read_through')::timestamptz,s.backfill_done_at)<=$3))
@@ -368,7 +384,7 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 			defer rows.Close()
 			for rows.Next() {
 				var j job
-				if err = rows.Scan(&j.project, &j.actor, &j.key, &j.refresh); err != nil {
+				if err = rows.Scan(&j.project, &j.actor, &j.key, &j.refresh, &j.revision); err != nil {
 					return err
 				}
 				jobs = append(jobs, j)
@@ -403,14 +419,16 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 				}
 				return nil
 			})
-			if err == nil {
-				step := tenant.WithPrincipal(op, p)
-				if j.refresh {
-					err = m.scheduleMetricBackfill(step, p, j.project, backfillInput{}, true)
+			step := tenant.WithPrincipal(op, p)
+			if err == nil && j.refresh {
+				err = m.scheduleMetricBackfill(step, p, j.project, backfillInput{}, true)
+			}
+			if err != nil && j.refresh {
+				if deferErr := m.deferMetricRefresh(service, p, j.project, j.revision); deferErr != nil {
+					err = deferErr
 				}
-				if err == nil {
-					_, err = m.metricBackfillStep(step, p, j.project, backfillInput{})
-				}
+			} else if err == nil {
+				_, err = m.metricBackfillStep(step, p, j.project, backfillInput{})
 			}
 			if err != nil && op.Err() == nil {
 				slog.WarnContext(op, "delivery history step incomplete", "project_id", j.project)

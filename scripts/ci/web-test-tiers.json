@@ -7952,6 +7952,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"light 390: own posts read Sent, Delivered, Read or Not delivered, live","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"AEON-1710: history failure pills stay on one line and expose the full reason","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery is absent without delivery.read, and its address leads to the tickets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -11173,6 +11175,8 @@
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1326: nr3b-learn-slot stays put when the phone summary title wraps","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1326: nr3b-scroll-returns keeps the Actions explainer open so Escape focuses its trigger","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1710: repository retry text follows the schedule after checking again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -18869,6 +18873,8 @@
     {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: continued edits stay bounded and a missing revision is not called a concurrent edit","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: history copy names each known reason and its rate reset in English and German","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: history retry copy follows only the current scheduled deadline","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
     ,

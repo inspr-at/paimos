@@ -333,7 +333,7 @@ watch(state, (next, prev) => {
           <RouterLink class="btn sm" :to="repositoryLink">{{ settingsLabel }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
         </div>
         <div v-else class="sources">
-          <template v-for="chip in chips" :key="chip.b"><RouterLink v-if="chip.problem" class="src go-src" :to="repositoryLink"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span><AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span></template>
+          <template v-for="chip in chips" :key="chip.b"><RouterLink v-if="chip.problem" class="src go-src" :to="repositoryLink" :title="`${chip.b}${chip.rest}`"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span><AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="src" :title="`${chip.b}${chip.rest}`"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span></template>
         </div>
       </div>
 
@@ -427,7 +427,8 @@ watch(state, (next, prev) => {
 /* The read alert owns the right half, the save alert the left half: always, so a retry never moves or resizes (AEON-541). */
 .dl-status .banner.half { margin-left: calc(50% + 6px); }
 .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; margin-top: 12px; }
-.src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
+.src { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.src > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .src svg { flex: none; color: var(--teal-ink); }
 .src b { font-weight: 600; color: var(--ink); }
 .chip-sk { height: 26px; border-radius: 999px; }

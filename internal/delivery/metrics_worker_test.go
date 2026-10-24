@@ -636,6 +636,66 @@ func TestDeliveryHistoryWorkerRechecksRevokedAuthority(t *testing.T) {
 	}
 }
 
+func TestDeliveryHistoryRefreshDefersRevokedAuthority(t *testing.T) {
+	// Risk: finished sources whose linking authority has expired retry on every
+	// sweep, locking the tenant and logging forever without reaching GitHub.
+	for _, scenario := range []string{"inactive principal", "expired key", "revoked permission"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, g := newMetricsFixture(t)
+			f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+			through := f.at.Add(-metricRefreshInterval - time.Minute)
+			raw, err := json.Marshal(backfillCursor{Since: dayStart(through), Phase: "done", ReadThrough: &through})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_done_at=$3,backfill_pending=false WHERE project_id=$1`, f.project, raw, through); err != nil {
+					return err
+				}
+				switch scenario {
+				case "inactive principal":
+					_, err = tx.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, f.person.ID)
+				case "expired key":
+					var key string
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id,expires_at) VALUES($1,$2,'History fixture','history-fixture',decode(repeat('00',32),'hex'),$3,$4,$5) RETURNING id::text`, f.person.TenantID, f.agent.ID, f.agent.Scopes, f.person.ID, f.at.Add(-time.Hour)).Scan(&key); err != nil {
+						return err
+					}
+					_, err = tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_actor_id=$2,backfill_key_id=$3 WHERE project_id=$1`, f.project, f.agent.ID, key)
+				case "revoked permission":
+					_, err = tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+				}
+				return err
+			})
+			var output bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+			defer slog.SetDefault(previous)
+			for range 2 {
+				// A new process has no in-memory cursor that could hide a hot loop.
+				fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+				fresh.now = f.m.now
+				fresh.sweepMetrics(t.Context())
+			}
+			if attempts := bytes.Count(output.Bytes(), []byte("delivery history step incomplete")); attempts != 1 {
+				t.Errorf("refresh attempts = %d, want one", attempts)
+			}
+			if g.reads != 0 || len(g.calls) != 0 {
+				t.Fatal("revoked authority reached GitHub")
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				stored, err := loadMetricSourceTx(t.Context(), tx, f.project, false)
+				if err != nil {
+					return err
+				}
+				if stored.RetryAt == nil || !stored.RetryAt.Equal(f.at.Add(metricRefreshInterval)) || stored.Pending || stored.Cursor.Phase != "done" || !stored.Cursor.ReadThrough.Equal(through) || stored.LastReadError != nil {
+					t.Fatalf("revoked refresh lost its durable delay or changed history: %+v", stored)
+				}
+				return nil
+			})
+		})
+	}
+}
+
 func historyTestApp(t *testing.T, handle func(*http.Request) (*http.Response, error)) AppReader {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

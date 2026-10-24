@@ -42,7 +42,7 @@ export function historyReadReason(source: MetricSource | null, lang: DeliveryLan
   if (!error) return ''
   const words = deliveryText(lang).historyRead
   if (error.reason === 'rate_limited') {
-    const reset = error.reset_at ?? source?.retry_at
+    const reset = source?.retry_at
     return reset && Number.isFinite(Date.parse(reset)) ? fill(words.rate_limited, { t: clockTime(reset, lang) }) : words.rate_limited_unknown
   }
   return fill(words[error.reason], { status: error.status_code ?? '?' })

@@ -46,7 +46,7 @@ test('AEON-1710: history copy names each known reason and its rate reset in Engl
     ['actions_read_missing', 'Actions read access', 'Actions-Lesezugriff'], ['not_installed', 'not connected', 'nicht mit'],
   ] as const
   for (const [reason, en, de] of cases) {
-    const failed: MetricSource = { ...source, last_read_error: { reason, at: reset, permission: null, status_code: 503, reset_at: reset } }
+    const failed: MetricSource = { ...source, last_read_error: { reason, at: reset, permission: null, status_code: 503, reset_at: reset }, retry_at: reset }
     expect(historyReadReason(failed, 'en')).toContain(en)
     expect(historyReadReason(failed, 'de')).toContain(de)
     expect(historyReadReason(failed, 'en')).not.toContain('unavailable')
@@ -58,6 +58,20 @@ test('AEON-1710: history copy names each known reason and its rate reset in Engl
   expect(historyReadReason({ ...limited, retry_at: null }, 'de')).toContain('begrenzt')
   expect(deliveryText('en').historyRead.kept).toBe('The last stored history is kept.')
   expect(deliveryText('de').historyRead.kept).toBe('Die zuletzt gespeicherte Historie bleibt erhalten.')
+})
+
+test('AEON-1710: history retry copy follows only the current scheduled deadline', () => {
+  // Risk: an older rate-limit reset disagrees with the scheduled retry, or
+  // survives Check again after the server clears that schedule.
+  const reset = new Date(2026, 9, 24, 19, 14).toISOString()
+  const retry = new Date(2026, 9, 24, 20, 14).toISOString()
+  const source: MetricSource = { repository: 'example/delivery', ci_workflow: 'ci.yml', nightly_workflow: 'nightly.yml', app_connected: true, backfill: 'done', backfill_since: null, backfill_done_at: null, covered_since: null,
+    last_read_error: { reason: 'rate_limited', at: reset, permission: null, reset_at: reset }, retry_at: retry }
+  for (const lang of ['en', 'de'] as const) {
+    expect(historyReadReason(source, lang)).toContain('20:14')
+    expect(historyReadReason(source, lang)).not.toContain('19:14')
+    expect(historyReadReason({ ...source, retry_at: null }, lang)).toBe(deliveryText(lang).historyRead.rate_limited_unknown)
+  }
 })
 
 test('AEON-1710: a settings revision race is reread once without losing sparse overrides', async () => {
