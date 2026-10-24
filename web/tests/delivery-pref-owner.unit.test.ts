@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { sessionEnded } from '../src/lib/api'
 import * as deliveryNumbers from '../src/lib/deliveryNumbers'
+import * as reviewRounds from '../src/lib/deliveryReviewRounds'
 import * as preferences from '../src/lib/preferences'
 import * as statusTiming from '../src/lib/statusTiming'
 import * as viewSwitch from '../src/lib/viewSwitch'
@@ -85,6 +86,9 @@ it('a delayed delivery default never writes one person\'s choice into the next p
     // AEON-1493: Building it reads on its own; still loading here.
     '../../lib/deliveryBuilding': { buildingView: () => ({ head: { kind: 'loading', text: '' }, tiles: [], summary: [] }) },
     '../../lib/useDeliveryBuilding': { useDeliveryBuilding: () => ({ data: ref(null), status: ref('loading'), busy: ref(false), retry() {} }) },
+    // AEON-1718: the separate review read remains loading while the preference owner changes.
+    '../../lib/deliveryReviewRounds': reviewRounds,
+    '../../lib/useDeliveryReviewRounds': { useDeliveryReviewRounds: () => ({ data: ref(null), state: ref('loading'), retry() {} }) },
   })
   stopped.push(made.stop)
   for (let turn = 0; turn < 8 && made.state.prefs.value.window !== 90; turn++) await flush()

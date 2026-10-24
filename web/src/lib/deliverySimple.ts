@@ -25,7 +25,7 @@ export interface SparkModel {
 }
 export interface SimpleTileModel {
   // Building it (AEON-1493) tiles carry their own key.
-  key: MetricTextKey | `building-${string}`; name: string; up: boolean; hasTarget: boolean; value: { text: string; unit: string }[] | null; empty: string
+  key: MetricTextKey | 'review-rounds' | `building-${string}`; name: string; up: boolean; hasTarget: boolean; value: { text: string; unit: string }[] | null; empty: string
   verdict: Verdict; trend: Trend; say: string; partial: boolean; foot: string; spark: SparkModel
   // `facts` replace the Expert name and Arion target lines in Learn (Building it's own targets and source).
   learn: { body: string; expert: string; target: string; facts?: string[] }

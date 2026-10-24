@@ -1,7 +1,8 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "project_decided": {
-    "POST /api/outcomes": true
+    "POST /api/outcomes": true,
+    "POST /api/outcomes/review-rounds": true
   },
   "project_filtered": {
     "GET /api/outcomes": true,
@@ -11,6 +12,8 @@
     "GET /api/nodes/{nodeId}/escalation": "outcome.read",
     "GET /api/outcomes": "outcome.read",
     "GET /api/outcomes/measurement": "outcome.read",
-    "POST /api/outcomes": "outcome.write"
+    "GET /api/projects/{projectId}/delivery/review-rounds": "outcome.read",
+    "POST /api/outcomes": "outcome.write",
+    "POST /api/outcomes/review-rounds": "outcome.write"
   }
 }

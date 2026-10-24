@@ -7954,6 +7954,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"light 390: own posts read Sent, Delivered, Read or Not delivered, live","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"AEON-1710: history failure pills stay on one line and expose the full reason","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery is absent without delivery.read, and its address leads to the tickets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -7999,6 +8001,30 @@
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"ticket rework fits 390 and 1600 in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"usage shows the rework rate by harness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review panel focuses its container for pointer opening and Close for keyboard opening","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review round states preserve controls and never replace missing or open outcomes with one","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds German catalog at 1440 keeps the long labels readable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds German catalog at 390 keeps the long labels readable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds at 1024: tile, weekly trend and neutral panel at rest in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds at 1440: tile, weekly trend and neutral panel at rest in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds at 320: tile, weekly trend and neutral panel at rest in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds at 390: tile, weekly trend and neutral panel at rest in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds discard a late answer after the window changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rule counts align across single and double digit rule ids","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rule trends require a previous window and show count direction in both languages","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review sheet scrolling retains its footer and never dismisses a scrolled list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 1440 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11205,6 +11231,8 @@
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1326: nr3b-learn-slot stays put when the phone summary title wraps","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1326: nr3b-scroll-returns keeps the Actions explainer open so Escape focuses its trigger","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1710: repository retry text follows the schedule after checking again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -18927,6 +18955,14 @@
     {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1226: saved repository failures take precedence over history and stale events","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1639: repository status icons render only their selected artwork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: a settings revision race is reread once without losing sparse overrides","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: continued edits stay bounded and a missing revision is not called a concurrent edit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: history copy names each known reason and its rate reset in English and German","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: history retry copy follows only the current scheduled deadline","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
     ,

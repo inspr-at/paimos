@@ -37,15 +37,20 @@ Repository & delivery links one GitHub repository and its workflow files, with
 one start/resume request and polls the source, never loops the backfill cursor.
 Saved Actions permission failures name the GitHub owner and the configuration
 path; Check again immediately retries the current history step, bypassing its
-retry time while keeping progress. The repository menu can restart history.
+ordinary retry time while keeping progress. A GitHub rate-limit reset remains
+binding. The repository menu can restart history.
 Missing events, stale events, GitHub failures and partial history stay explicit.
 Phase and count details appear only when a backfill response supplies them; the
 source read has no history-progress fields. Every ordinary state reserves the
 approved repository slot; only the link form may grow.
 
 Checks and deadlines read effective values and sparse project values separately
-from `/delivery-settings` and `?view=overrides`. Reset removes just that saved
-value, preserving inheritance and unrelated overrides. An ETag with If-Match
+from `/delivery-settings` and `?view=overrides`. If their revisions differ during
+loading, both reads repeat once transparently. A second mismatch reports the
+concurrent edit; a missing revision reports missing metadata. Background history
+progress lives in `delivery_metric_sources`, independently of the settings ETag.
+Every settings section uses the shared `--section-gap` below the project tabs.
+Reset removes just that saved value, preserving inheritance and unrelated overrides. An ETag with If-Match
 rejects edits based on an older revision; the existing response schema and
 unconditional API callers remain compatible. Failed writes preserve drafts.
 Background revalidation preserves a dirty draft’s original revision; accepting

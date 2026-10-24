@@ -56,3 +56,11 @@ queued-head history exists. It covers recovery during the request, a persistent
 miss, background replay and duplicate delivery. The remote-only
 `scripts/test-webhook-start-race-negative.py` overlay disables the immediate
 retry and verifies that the same ordering reproduces HTTP 502.
+
+Merge completion reads canonical pull-request proof with only the existing
+pull_requests and metadata read grants (AEON-1710). Closed pulls, destroyed
+queue groups and main pushes no longer request unrelated checks, statuses or
+contents grants when minting that token. This prevents a token-mint refusal
+when the installation grants the PR access that those endpoints need. The
+canonical merge proof, repository binding, pending-proof handling and receipt
+checkpoints remain required.

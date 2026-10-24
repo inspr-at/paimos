@@ -72,6 +72,7 @@ const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as c
       </div>
       <div class="s-grid" role="list">
         <SimpleTile v-for="tile in section.tiles" :key="tile.key" :tile="tile" :state="state" :text="text" />
+        <slot v-if="index === page.sections.length - 1" name="review-rounds" />
       </div>
     </section>
 

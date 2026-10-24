@@ -13,6 +13,7 @@ import AppIcon from '../AppIcon.vue'
 import ViewSwitch from '../ViewSwitch.vue'
 import BuildingSection from './BuildingSection.vue'
 import ExpertTile from './ExpertTile.vue'
+import ReviewRoundsTile from './ReviewRoundsTile.vue'
 import FlowView from './FlowView.vue'
 import LevelSwitch from './LevelSwitch.vue'
 import SimpleNumbers from './SimpleNumbers.vue'
@@ -20,7 +21,7 @@ import TicketsSection from './TicketsSection.vue'
 import TrendChart from './TrendChart.vue'
 import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
-import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, numbersOf, openingPrefs, readDefaults, readDeliveryMetrics, shortDate, type DeliveryDefaults, type DeliveryMetrics, type DeliveryPrefs, type Level, type StoredDeliveryPrefs, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
+import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, historyReadReason, numbersOf, openingPrefs, readDefaults, readDeliveryMetrics, shortDate, type DeliveryDefaults, type DeliveryMetrics, type DeliveryPrefs, type Level, type StoredDeliveryPrefs, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
 import { deliveryText, fill } from '../../lib/deliveryNumbersText'
 import { FLOW_MODES, type FlowMode } from '../../lib/deliveryFlowModes'
 import { timeLabel } from '../../lib/deliveryFlow'
@@ -40,6 +41,8 @@ import { useTicketTiming } from '../../lib/useTicketTiming'
 import { buildingView } from '../../lib/deliveryBuilding'
 import { useDeliveryBuilding } from '../../lib/useDeliveryBuilding'
 import { shortDay } from '../../lib/workFigures'
+import { useDeliveryReviewRounds } from '../../lib/useDeliveryReviewRounds'
+import { reviewRoundView } from '../../lib/deliveryReviewRounds'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
 // The project page hands over a new object on every render. Everything here follows the id and
@@ -171,6 +174,9 @@ function setTicketFilters(next: TimingFilters) { closeTip(); ticketFilters.value
 const building = useDeliveryBuilding({ projectId: () => projectId.value, window: () => prefs.value.window, filters: () => ticketFilters.value, active: () => view.value === 'numbers' && prefsReady.value })
 const buildingState = computed<'loading' | 'error' | 'ready'>(() => !prefsReady.value ? 'loading' : building.status.value)
 const buildingModel = computed(() => buildingView(buildingState.value === 'ready' ? building.data.value : null, prefs.value.window, buildingState.value, lang.value))
+const reviewRounds = useDeliveryReviewRounds({ projectId: () => projectId.value, window: () => prefs.value.window, active: () => view.value === 'numbers' && prefsReady.value })
+const reviewState = computed(() => !prefsReady.value ? 'loading' as const : reviewRounds.state.value)
+const reviewModel = computed(() => reviewRoundView(reviewRounds.data.value, prefs.value.window, lang.value, reviewState.value))
 const numbers = computed(() => data.value ? numbersOf(data.value, prefs.value.window, lang.value) : null)
 // Placeholders keep every tile and chart in its slot while loading or after a failed read.
 const empty = computed(() => numbersOf({ project_id: projectId.value, generated_at: '', source: null, metrics: [] }, prefs.value.window, lang.value))
@@ -197,8 +203,8 @@ const chips = computed(() => {
   const day = (iso: string | null) => iso ? shortDate(iso.slice(0, 10), lang.value) : ''
   const stale = repositoryState(s, Date.parse(data.value?.generated_at ?? '')) === 'stale'
   const readError = s.last_read_error?.reason
-  const historyProblem = lang.value === 'de' ? { actions_read_missing: 'Actions-Lesezugriff fehlt', not_installed: 'App nicht installiert', github_unavailable: 'GitHub nicht erreichbar' } : { actions_read_missing: 'Actions read access missing', not_installed: 'App not installed', github_unavailable: 'GitHub unavailable' }
-  const back = readError ? { icon: 'history' as const, b: lang.value === 'de' ? 'Historie' : 'History', rest: ` · ${historyProblem[readError]}` }
+
+  const back = readError ? { icon: 'history' as const, b: lang.value === 'de' ? 'Historie' : 'History', rest: ` · ${historyReadReason(s, lang.value)}` }
     : s.backfill === 'done' ? { icon: 'history' as const, b: t.srcBack[0], rest: fill(t.srcBack[1], { d: day(s.backfill_since) }) }
     : s.backfill === 'running' ? { icon: 'history' as const, b: t.srcRun[0], rest: s.covered_since ? fill(t.srcRun[1], { d: day(s.covered_since) }) : t.srcRunNone[1] }
       : { icon: 'history' as const, b: t.srcNone[0], rest: t.srcNone[1] }
@@ -226,10 +232,13 @@ const trendCaption = computed(() => {
 const tip = ref<{ tile: TileModel | TicketTileModel; x: number; y: number; pinned: boolean; placed: boolean } | null>(null)
 const tipEl = ref<HTMLElement>()
 let tipAnchor: HTMLElement | null = null
+let tipLeave: ReturnType<typeof setTimeout> | undefined
+function keepTip() { clearTimeout(tipLeave); tipLeave = undefined }
 // Where the anchor sat when the tip was placed: a scroll only matters once it has moved it (as Learn does), so focusing
 // a tile that the browser first brings into view keeps its definition open.
 let anchoredAt: { x: number; y: number } | null = null
 function openTip(tile: TileModel | TicketTileModel, anchor: HTMLElement, pin: boolean) {
+  keepTip()
   if (!pin && tip.value?.pinned) return
   if (pin && tip.value?.pinned && tipAnchor === anchor) { closeTip(); return }
   tipAnchor = anchor
@@ -252,8 +261,8 @@ function onScroll() {
   const rect = tipAnchor.getBoundingClientRect()
   if (Math.abs(rect.left - anchoredAt.x) >= 1 || Math.abs(rect.top - anchoredAt.y) >= 1) closeTip()
 }
-function leaveTip() { if (!tip.value?.pinned) closeTip() }
-function closeTip() { tip.value = null; tipAnchor = null; anchoredAt = null }
+function leaveTip() { keepTip(); if (!tip.value?.pinned) tipLeave = setTimeout(closeTip, 150) }
+function closeTip() { keepTip(); tip.value = null; tipAnchor = null; anchoredAt = null }
 function onKey(event: KeyboardEvent) { if (event.key === 'Escape' && tip.value) { const anchor = tipAnchor; closeTip(); anchor?.focus({ preventScroll: true }) } }
 function onPointer(event: PointerEvent) { if (tip.value?.pinned && !tipEl.value?.contains(event.target as Node) && !tipAnchor?.contains(event.target as Node)) closeTip() }
 onMounted(() => {
@@ -262,6 +271,7 @@ onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true, capture: true })
 })
 onBeforeUnmount(() => {
+  keepTip()
   document.removeEventListener('keydown', onKey)
   document.removeEventListener('pointerdown', onPointer, true)
   window.removeEventListener('scroll', onScroll, { capture: true })
@@ -333,11 +343,14 @@ watch(state, (next, prev) => {
           <RouterLink class="btn sm" :to="repositoryLink">{{ settingsLabel }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
         </div>
         <div v-else class="sources">
-          <template v-for="chip in chips" :key="chip.b"><RouterLink v-if="chip.problem" class="src go-src" :to="repositoryLink"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span><AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span></template>
+          <template v-for="chip in chips" :key="chip.b"><RouterLink v-if="chip.problem" class="src go-src" :to="repositoryLink" :title="`${chip.b}${chip.rest}`"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span><AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="src" :title="`${chip.b}${chip.rest}`"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span></template>
         </div>
       </div>
 
       <SimpleNumbers v-if="prefs.level === 'simple'" :data="data" :window="prefs.window" :state="state" :no-data="noData || (state === 'ready' && !source)" :lang="lang" :extra="buildingModel.summary">
+        <template #review-rounds>
+          <ReviewRoundsTile :data="reviewRounds.data.value" :state="reviewState" level="simple" :window="prefs.window" :lang="lang" :route-key="routeKey" @retry="reviewRounds.retry" />
+        </template>
         <template #tickets>
           <TicketsSection :model="ticketView" :state="ticketState" :busy="tickets.busy.value" :filters="ticketFilters" level="simple" :window="prefs.window" :lang="lang"
             @filters="setTicketFilters" @retry="tickets.retry" />
@@ -355,6 +368,7 @@ watch(state, (next, prev) => {
         <div class="tiles" role="list" data-testid="delivery-tiles">
           <ExpertTile v-for="tile in tiles" :key="tile.def.key" :tile="tile" :state="state" :text="text" :info-open="tip?.tile.def.key === tile.def.key"
             @info="(anchor, pin) => openTip(tile, anchor, pin)" @info-leave="leaveTip" />
+          <ReviewRoundsTile :data="reviewRounds.data.value" :state="reviewState" level="expert" :window="prefs.window" :lang="lang" :route-key="routeKey" :info-open="tip?.tile.def.key === 'review-rounds'" :definition-id="`dl-definition-${project.id}`" @retry="reviewRounds.retry" @info="openTip" @info-leave="leaveTip" />
         </div>
         <div class="trends-head">
           <h3>{{ text.trends }}</h3>
@@ -370,6 +384,7 @@ watch(state, (next, prev) => {
         <div class="charts" data-testid="delivery-charts">
           <TrendChart :model="ticketView.chart" :state="ticketState" :text="text" />
           <TrendChart v-for="chart in charts" :key="chart.key" :model="chart" :state="state" :text="text" />
+          <TrendChart :model="reviewModel.chart" :state="reviewState" :text="text" data-testid="review-rounds-trend" />
         </div>
         <div class="defs">
           <h3>{{ text.defsTitle }}</h3>
@@ -393,11 +408,11 @@ watch(state, (next, prev) => {
     </template>
 
     <Teleport to="body">
-      <div v-if="tip" ref="tipEl" class="dl-tip" role="tooltip" :style="{ left: `${tip.x}px`, top: `${tip.y}px`, visibility: tip.placed ? undefined : 'hidden' }" @mouseleave="leaveTip">
+      <div v-if="tip" :id="`dl-definition-${project.id}`" ref="tipEl" class="dl-tip" role="tooltip" :style="{ left: `${tip.x}px`, top: `${tip.y}px`, visibility: tip.placed ? undefined : 'hidden' }" @mouseenter="keepTip" @mouseleave="leaveTip">
         <b>{{ tip.tile.label }}</b>
         <p>{{ tip.tile.definition }}</p>
         <p v-if="tip.tile.reason"><span class="meta">{{ tip.tile.status === 'no_data' ? text.whyNone : text.why }}</span><br>{{ tip.tile.reason }}</p>
-        <p class="meta">{{ text.source }}: {{ tip.tile.source }}<br>{{ text.window }}: {{ fill(text.windowT, { w: prefs.window }) }}<br>{{ tip.tile.target }}<template v-if="!tip.tile.def.key.startsWith('building-')"> · {{ text.arion }}</template></p>
+        <p class="meta">{{ text.source }}: {{ tip.tile.source }}<br>{{ text.window }}: {{ fill(text.windowT, { w: prefs.window }) }}<br>{{ tip.tile.target }}<template v-if="!tip.tile.def.key.startsWith('building-') && tip.tile.def.key !== 'review-rounds'"> · {{ text.arion }}</template></p>
       </div>
     </Teleport>
   </section>
@@ -427,7 +442,8 @@ watch(state, (next, prev) => {
 /* The read alert owns the right half, the save alert the left half: always, so a retry never moves or resizes (AEON-541). */
 .dl-status .banner.half { margin-left: calc(50% + 6px); }
 .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; margin-top: 12px; }
-.src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
+.src { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.src > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .src svg { flex: none; color: var(--teal-ink); }
 .src b { font-weight: 600; color: var(--ink); }
 .chip-sk { height: 26px; border-radius: 999px; }

@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/outcomes
+paths:
+  /outcomes/review-rounds:
+    post:
+      operationId: recordReviewRoundOutcome
+      summary: 'Record a review round outcome'
+      description: 'Requires outcome.write on the ticket, rechecked under the tenant and tree fences. Agents must identify their own submitted review_run_id with the same ticket, kind, artifact head SHA and verdict. Every supplied run must match the ticket, kind, artifact and verdict. A submitted run can back only one observation. This observation grants no review, merge or delivery authority. Person writers may import historical design observations with source imported. One immutable outcome per tenant, ticket, kind and round; an identical retry returns 200, a different observation for that identity returns 409. The tenant event log records type outcome.review_round atomically with the outcome extension; the released AEON-286 outcome kinds stay unchanged.'
+      security: *auth
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewRoundRecord'}
+      responses:
+        '201': {description: 'Recorded outcome', content: {application/json: {schema: {$ref: '#/components/schemas/ReviewRoundOutcome'}}}}
+        '200': {description: 'Identical immutable outcome already exists', content: {application/json: {schema: {$ref: '#/components/schemas/ReviewRoundOutcome'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/review-rounds:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectReviewRoundNumbers
+      summary: 'Read rounds until the first ok'
+      description: 'Requires outcome.read in the current project. Uses only recorded review_round outcomes. For each ticket and kind, the lowest round with verdict ok is the first ok, selected in the window of that outcome timestamp. A kind without an ok as of the reading remains open and is selected by its latest observation in the window. Open kinds never enter means. Tickets counts distinct tickets with either selected kind; still_open counts those with a selected open kind. UTC calendar windows end at the reading time today and compare with the preceding window. Weekly points use the same first-ok cohorts. Coverage starts at the earliest observation, never at ticket creation. Most rounds contains up to ten tickets needing a second round or still open, sorted by design then gate round descending and ticket key. Rule counts count each rule once per observation in the window. No reviewer, builder or model identity is returned. A five-second deadline and 50000-event budget fail with 503 rather than returning partial figures.'
+      security: *auth
+      parameters:
+        - {name: window, in: query, schema: {type: integer, enum: [7, 30, 90, 180, 365], default: 7}}
+      responses:
+        '200': {description: 'Review outcome numbers', content: {application/json: {schema: {$ref: '#/components/schemas/ReviewRoundNumbers'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    ReviewRoundRecord:
+      type: object
+      additionalProperties: false
+      required: [ticket, kind, round, verdict, cited_rules, at, reviewer_role, artifact]
+      properties:
+        ticket: {type: string, minLength: 1, maxLength: 128}
+        kind: {type: string, enum: [gate, design]}
+        round: {type: integer, minimum: 1, maximum: 999}
+        verdict: {type: string, enum: [ok, changes]}
+        cited_rules: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: '^[UA][1-9][0-9]{0,2}$'}}
+        at: {type: string, format: date-time, description: 'Source observation time, from 1970 through the current time; imported TSV rows retain their first-look timestamp.'}
+        reviewer_role: {type: string, enum: [reviewer, design_reviewer, gate_reviewer]}
+        artifact: {type: string, minLength: 1, maxLength: 200, description: 'PR head SHA or design artifact reference; agents must match the registered run head SHA.'}
+        review_run_id: {type: string, format: uuid, description: 'Required for agents; a submitted authenticated review run owned by the caller.'}
+        source: {type: string, enum: [recorded, imported], default: recorded, description: 'Historical imports require a person and kind design.'}
+    ReviewRoundOutcome:
+      type: object
+      required: [id, event_kind, ticket_node_id, project_id, recorded_at, review]
+      properties:
+        id: {type: string, format: uuid}
+        event_kind: {type: string, const: review_round}
+        ticket_node_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        review: {$ref: '#/components/schemas/ReviewRoundRecord'}
+    ReviewRoundMeasure:
+      type: object
+      required: [design_mean, gate_mean, design_tickets, gate_tickets, tickets, still_open, weeks_total, weeks_covered]
+      properties:
+        design_mean: {type: [number, 'null'], minimum: 1}
+        gate_mean: {type: [number, 'null'], minimum: 1}
+        design_tickets: {type: integer, minimum: 0}
+        gate_tickets: {type: integer, minimum: 0}
+        tickets: {type: integer, minimum: 0}
+        still_open: {type: integer, minimum: 0}
+        weeks_total: {type: integer, minimum: 1}
+        weeks_covered: {type: integer, minimum: 0}
+    ReviewRoundRuleCount:
+      type: object
+      required: [rule, count, previous_count]
+      properties:
+        rule: {type: string}
+        count: {type: integer, minimum: 1}
+        previous_count: {type: integer, minimum: 0}
+    ReviewRoundTicket:
+      type: object
+      required: [ticket_node_id, key, title, design_rounds, gate_rounds, open, latest_round, rules]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        design_rounds: {type: [integer, 'null']}
+        gate_rounds: {type: [integer, 'null']}
+        open: {type: boolean}
+        latest_round: {type: integer, minimum: 1}
+        rules: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/ReviewRoundRuleCount'}}
+    ReviewRoundNumbers:
+      type: object
+      required: [project_id, window_days, generated_at, since, status, current, previous, weekly, most_rounds, rules_cited_most]
+      properties:
+        project_id: {type: string, format: uuid}
+        window_days: {type: integer}
+        generated_at: {type: string, format: date-time}
+        since: {type: [string, 'null'], format: date-time}
+        status: {type: string, enum: [ok, partial, no_data]}
+        current: {$ref: '#/components/schemas/ReviewRoundMeasure'}
+        previous: {$ref: '#/components/schemas/ReviewRoundMeasure'}
+        weekly:
+          type: array
+          maxItems: 54
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/ReviewRoundMeasure'}
+              - type: object
+                required: [from, to, week]
+                properties:
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+                  week: {type: integer, minimum: 1, maximum: 53}
+        most_rounds: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/ReviewRoundTicket'}}
+        rules_cited_most: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/ReviewRoundRuleCount'}}

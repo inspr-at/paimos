@@ -31,6 +31,62 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
 const head = (page: Page) => page.locator('.dl-head')
 const tile = (page: Page, label: string) => page.getByRole('listitem').filter({ has: page.locator('.t-label', { hasText: label }) })
 
+test('AEON-1710: history failure pills stay on one line and expose the full reason', async ({ browser }, testInfo) => {
+  // Risk: a full diagnosis wraps inside a pill on phones, or clipping hides
+  // the reason. English copy and German length stress keep controls in place.
+  test.setTimeout(180_000)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme, reducedMotion: 'reduce' })
+    const page = await context.newPage()
+    try {
+      const world = await setup(page, { theme })
+      const body = deliveryMetrics()
+      const setReason = (reason: 'rate_limited' | 'timed_out' | 'github_error' | 'unreachable') => world.answer(200, { ...body, source: { ...body.source,
+        last_read_error: { reason, at: body.generated_at, permission: null, reset_at: '2026-10-24T20:14:00Z', status_code: 502 }, retry_at: '2026-10-24T21:14:00Z' } })
+      setReason('timed_out')
+      await page.goto('/p/AEON/delivery')
+      const chip = page.locator('.sources .go-src').filter({ hasText: 'History' })
+      await expect(chip).toBeVisible()
+      const guard = await controlStability(page, {
+        windows: head(page).getByRole('radiogroup').first(), levels: head(page).getByRole('radiogroup').last(), views: head(page).getByRole('tablist'),
+      })
+      for (const [reason, words] of [['timed_out', 'in time'], ['github_error', 'HTTP 502'], ['unreachable', 'network connection'], ['rate_limited', 'rate limit']] as const) {
+        await guard.check(async () => {
+          setReason(reason)
+          await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+          await expect(chip).toContainText(words)
+          await chip.hover()
+        })
+        const fullReason = await chip.innerText()
+        const sizes = await chip.evaluate(element => {
+          const text = element.querySelector('span')!
+          return { nowrap: getComputedStyle(element).whiteSpace, textHeight: text.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(text).lineHeight),
+            width: element.getBoundingClientRect().width, available: element.parentElement!.getBoundingClientRect().width }
+        })
+        expect(sizes.nowrap).toBe('nowrap')
+        expect(sizes.textHeight).toBeGreaterThan(0)
+        expect(sizes.textHeight).toBeLessThanOrEqual(sizes.lineHeight + 0.5)
+        expect(sizes.width).toBeLessThanOrEqual(sizes.available + 0.5)
+        await expect(chip).toHaveAttribute('title', fullReason)
+      }
+      await page.screenshot({ path: testInfo.outputPath(`history-pill-${width}-${theme}-en.png`), fullPage: true })
+      // The app intentionally stays English (AEON-1609). As in the settings
+      // evidence, German is fixture-only length stress; catalogue copy is
+      // independently asserted in project-delivery-settings.unit.test.ts.
+      await guard.check(async () => {
+        await chip.locator('span').evaluate(element => {
+          element.lastChild!.textContent = ' · Wegen des GitHub-Anfragelimits dieser App pausiert das Lesen der Lieferhistorie bis 20:14. Die zuletzt gespeicherte Historie bleibt erhalten.'
+        })
+        const text = await chip.locator('span').evaluate(element => ({ height: element.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(element).lineHeight) }))
+        expect(text.height).toBeGreaterThan(0)
+        expect(text.height).toBeLessThanOrEqual(text.lineHeight + 0.5)
+      })
+      await page.screenshot({ path: testInfo.outputPath(`history-pill-${width}-${theme}-long-de.png`), fullPage: true })
+      guard.done()
+    } finally { await context.close() }
+  }
+})
+
 test('Delivery is absent without delivery.read, and its address leads to the tickets', async ({ page }) => {
   await setup(page, { grant: false })
   await page.goto('/p/AEON/delivery')
@@ -104,7 +160,7 @@ test('tiles and charts tell partial, missing and clipped data apart and never sh
   const release = world.holdNext()
   await page.goto('/p/AEON/delivery')
   const tiles = page.getByTestId('delivery-tiles')
-  await expect(tiles.locator('[aria-busy="true"]')).toHaveCount(18)
+  await expect(tiles.locator('.tile:not(.rr-tile)[aria-busy="true"]')).toHaveCount(18)
   release()
   await expect(tiles.locator('[aria-busy="true"]')).toHaveCount(0)
   // 30 days reach back before the backfill (11 Sept): partial, with the coverage named.
@@ -128,7 +184,7 @@ test('tiles and charts tell partial, missing and clipped data apart and never sh
   world.answer(500, { error: 'boom' })
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
   await expect(page.getByRole('alert')).toContainText('Delivery numbers could not be loaded.')
-  await expect(tiles.locator('.t-value.empty')).toHaveCount(18)
+  await expect(tiles.locator('.t-value.empty').filter({ hasText: 'Not loaded' })).toHaveCount(18)
   await expect(tiles.locator('.t-value.empty').first()).toHaveText('Not loaded')
   world.metrics({})
   await page.getByRole('button', { name: 'Retry', exact: true }).click()

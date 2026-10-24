@@ -566,6 +566,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "delivery":
+			if len(parts) == 4 && parts[3] == "review-rounds" && validRouteUUID(parts[1]) && read {
+				return "outcome.read", true
+			}
 		case "status-autopilot":
 			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
 				return "nodes.read", true
@@ -888,6 +892,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "goals.write", true
 		}
 	case "outcomes":
+		if len(parts) == 2 && parts[1] == "review-rounds" && r.Method == http.MethodPost {
+			return "outcome.write", true
+		}
 		if len(parts) == 2 && parts[1] == "measurement" && read {
 			return "outcome.read", true
 		}

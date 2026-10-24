@@ -255,6 +255,7 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
   type Mapping = { source: string; disposition: string; destinations: string[]; approval?: string }
   type Execution = {
     baselineSha256: string; actualAfter: number; unchangedSpecs: string[]; upstreamAdditionalCases: string[]
+    postPruneAdditionalCases: string[]
     specs: { file: string; before: number; actualAfter: number; replacement: string; mappings: Mapping[] }[]
     cutA: { beforeBrowserCases: number; afterBrowserCases: number; removedBrowserCases: number; mappings: (Mapping & { file: string })[]; groups: { file: string; before: number; after: number; removed: number }[] }
   }
@@ -290,6 +291,17 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
     // from those inputs as well, so a missing new-main mapping cannot hide
     // behind the frozen catalogue's original-only coverage.
     const knownSources = [...originals.map(key), ...proof.upstreamAdditionalCases]
+    // Later regressions are live inventory, not part of cutA's historical
+    // before/after measurement. Retain exact identities so an addition cannot
+    // conceal a removed original or inflate the recorded pruning saving.
+    const additions = new Set(proof.postPruneAdditionalCases)
+    assert.equal(additions.size, proof.postPruneAdditionalCases.length, 'Duplicate post-prune case')
+    for (const id of additions) {
+      const row = current.get(id)
+      assert.ok(row?.kind === 'browser' && row.file !== undefined && owners.has(row.file), 'Missing post-prune current destination')
+      assert.ok(!knownSources.includes(id), 'A post-prune case must not replace a known source')
+    }
+    const historicalCurrent = [...current.values()].filter(row => !additions.has(key(row)))
     const removed = knownSources.filter(id => !current.has(id) && proof.cutA.groups.some(group => id.startsWith(`browser:${group.file}:`)))
     assert.deepEqual(proof.cutA.mappings.map(row => row.source).sort(), removed.sort(), 'Missing cutA original mapping')
     assert.equal(new Set(proof.cutA.groups.map(row => row.file)).size, proof.cutA.groups.length, 'Duplicate cutA owner')
@@ -300,12 +312,13 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
     }
     for (const group of proof.cutA.groups) {
       assert.equal(group.before, knownSources.filter(id => id.startsWith(`browser:${group.file}:`)).length)
-      assert.equal(group.after, [...current.values()].filter(row => row.kind === 'browser' && row.file === group.file).length)
+      assert.equal(group.after, historicalCurrent.filter(row => row.kind === 'browser' && row.file === group.file).length,
+        `Unrecorded post-prune cases: ${group.file}`)
       assert.equal(group.removed, group.before - group.after)
     }
     assert.equal(proof.cutA.removedBrowserCases, removed.length)
     assert.equal(proof.cutA.beforeBrowserCases - proof.cutA.afterBrowserCases, removed.length)
-    assert.equal(proof.cutA.afterBrowserCases, proof.actualAfter)
+    assert.equal(proof.cutA.afterBrowserCases + additions.size, proof.actualAfter)
   }
   validate(execution)
   const missing = structuredClone(execution)
@@ -319,4 +332,18 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
   assert.notEqual(extra, -1, 'The negative control must retain a new-main cut')
   missingNewMain.cutA.mappings.splice(extra, 1)
   assert.throws(() => validate(missingNewMain), /Missing cutA original mapping/)
+  const additionKey = 'browser:tests/delivery-numbers.spec.ts:AEON-1710: history failure pills stay on one line and expose the full reason'
+  const missingAddition = structuredClone(execution)
+  assert.ok(missingAddition.postPruneAdditionalCases.includes(additionKey), 'Retain the AEON-1710 post-prune regression fixture')
+  missingAddition.postPruneAdditionalCases = missingAddition.postPruneAdditionalCases.filter((id: string) => id !== additionKey)
+  assert.throws(() => validate(missingAddition), /Unrecorded post-prune cases: tests\/delivery-numbers.spec.ts/)
+  const danglingAddition = structuredClone(execution)
+  danglingAddition.postPruneAdditionalCases[0] = 'browser:tests/delivery-numbers.spec.ts:missing AEON-1710 regression'
+  assert.throws(() => validate(danglingAddition), /Missing post-prune current destination/)
+  const duplicateAddition = structuredClone(execution)
+  duplicateAddition.postPruneAdditionalCases.push(additionKey)
+  assert.throws(() => validate(duplicateAddition), /Duplicate post-prune case/)
+  const disguisedOriginal = structuredClone(execution)
+  disguisedOriginal.postPruneAdditionalCases = [originals.find((row: Parameters<typeof key>[0]) => current.has(key(row))).key]
+  assert.throws(() => validate(disguisedOriginal), /A post-prune case must not replace a known source/)
 })
