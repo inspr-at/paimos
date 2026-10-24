@@ -372,11 +372,11 @@ func checkFullUIQA(workflow map[string]any) error {
 		return fmt.Errorf("full UI QA must bind source, shards and aggregate failure gate")
 	}
 	strategy := mapping(shard["strategy"])
-	// AEON-1527 keeps every UI partition and adds the production performance
-	// config. Cold loads must not fall back to the throttled UI server, and
+	// AEON-1726 expands to eight UI partitions with the production performance
+	// config retained. Cold loads must not fall back to the throttled UI server, and
 	// neither inventory may be dropped, widened, or stopped early.
 	if strategy["fail-fast"] != false || !reflect.DeepEqual(mapping(strategy["matrix"]), fullUIQAShardMatrix()) {
-		return fmt.Errorf("full UI QA must run all five shards and the production performance suite without fail-fast")
+		return fmt.Errorf("full UI QA must run all eight shards and the production performance suite without fail-fast")
 	}
 	for _, value := range jobs {
 		job := mapping(value)
@@ -388,10 +388,10 @@ func checkFullUIQA(workflow map[string]any) error {
 }
 
 func fullUIQAShardMatrix() map[string]any {
-	include := make([]any, 0, 6)
-	for shard := 1; shard <= 5; shard++ {
+	include := make([]any, 0, 9)
+	for shard := 1; shard <= 8; shard++ {
 		include = append(include, map[string]any{
-			"shard": shard, "config": "playwright.ui.config.ts", "partition": fmt.Sprintf("%d/5", shard),
+			"shard": shard, "config": "playwright.ui.config.ts", "partition": fmt.Sprintf("%d/8", shard),
 		})
 	}
 	include = append(include, map[string]any{
