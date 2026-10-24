@@ -112,6 +112,29 @@ for (const width of [1440, 1024, 390, 320]) {
       }
       await panel(page).getByRole('button', { name: 'Close Esc' }).focus()
       await shot(page, info, `expert-${width}-${theme}-panel`, panel(page))
+      if (width <= 520) {
+        await page.setViewportSize({ width, height: 500 })
+        await rest(page)
+        const body = panel(page).locator('.rr-lists')
+        expect(await body.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0)
+        const scrolling = await controlStability(page, { close: panel(page).getByRole('button', { name: 'Close Esc' }), frame: panel(page), row: panel(page).locator('.rr-ticket-link').first() })
+        await scrolling.check(async () => {
+          await body.evaluate(el => el.scrollTo(0, el.scrollHeight))
+          await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+          await body.evaluate(el => {
+            const touch = (y: number) => new Touch({ identifier: 1, target: el, clientX: 80, clientY: y })
+            el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [touch(180)] }))
+            el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, changedTouches: [touch(270)] }))
+          })
+          await expect(panel(page)).toBeVisible()
+        })
+        scrolling.done()
+        const shortFrame = (await panel(page).boundingBox())!, shortFooter = (await panel(page).locator('.rr-actions').boundingBox())!
+        expect(Math.abs(shortFooter.y + shortFooter.height - shortFrame.y - shortFrame.height)).toBeLessThanOrEqual(.5)
+        await shot(page, info, `expert-${width}-${theme}-short-sheet`, panel(page))
+        await page.setViewportSize({ width, height: 844 })
+        await rest(page)
+      }
       await guard.check(async () => { await page.keyboard.press('Escape'); await expect(panel(page)).toHaveCount(0) })
       await expect(trigger(page)).toBeFocused()
       guard.done()

@@ -21,7 +21,8 @@ const t = computed(() => reviewText(props.lang))
 <template>
   <FloatingPanel :anchor="anchor" :width="640" :tallest="600" :label="t.label" cycle phone-sheet fill-phone :sheet-below="520" below-header class="review-rounds-panel" data-testid="review-rounds-panel" @close="restore => emit('close', restore)">
     <header class="rr-head"><h3>{{ t.label }}</h3><p>{{ reviewCounts(data.current, lang) }}</p></header>
-    <div class="rr-lists">
+    <!-- The scrolling body owns its touch gestures; header swipes still use the shared sheet dismissal. -->
+    <div class="rr-lists" @touchstart.stop @touchend.stop @touchcancel.stop>
       <section :aria-label="t.most">
         <h4>{{ t.most }}</h4>
         <ul class="rr-tickets">
