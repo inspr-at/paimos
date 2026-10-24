@@ -153,6 +153,25 @@ for (const width of [1440, 1024, 390] as const) {
     }
     await shot(page, info, `goals-${width}-light`)
     await page.emulateMedia({ colorScheme: 'dark' }); await shot(page, info, `goals-${width}-dark`)
+    if (width === 390) {
+      // A remembered-open list reserves 44 px per row before its first read.
+      // The two-line phone rows must fill those same slots after reload.
+      let release!: () => void
+      const pending = new Promise<void>(resolve => { release = resolve })
+      await page.route(SUMMARY + '*', async route => {
+        if (route.request().method() === 'OPTIONS') return route.fallback()
+        await pending; return route.fallback()
+      })
+      await page.reload()
+      await expect(row).toHaveAttribute('data-state', 'reading')
+      const reserved = await row.locator('.instance-items').boundingBox()
+      expect(reserved!.height, 'two remembered row slots').toBe(88)
+      release()
+      await expect(row).toHaveAttribute('data-state', 'ok')
+      await expect(row.locator('.instance-item')).toHaveCount(2)
+      const filled = await row.locator('.instance-items').boundingBox()
+      expect(Math.abs(filled!.height - reserved!.height), 'phone read fills the reserved height without a jump').toBeLessThanOrEqual(0.5)
+    }
     await expect.poll(() => page.title()).toMatch(/^\(5\)/)
     const header = page.locator('header .needs-badge').first()
     await expect(header).toHaveText('5')

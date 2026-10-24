@@ -129,10 +129,10 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
 @media (max-width: 520px) {
   .instance-copy { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .instance-project { max-width: 7ch; }
-  .goals .instance-item { display: grid; grid-template-columns: 14px minmax(0, 1fr) 13px; column-gap: 10px; row-gap: 2px; height: auto; min-height: 44px; padding: 6px 0; }
+  .goals .instance-item { display: grid; grid-template-columns: 14px minmax(0, 1fr) 13px; column-gap: 10px; row-gap: 2px; height: auto; min-height: 44px; padding: 4px 0; }
   .goals .instance-item > svg { grid-column: 1; grid-row: 1 / 3; align-self: center; }
-  .goals .instance-title { grid-column: 2; grid-row: 1; }
-  .goals .instance-meta { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .goals .instance-title { grid-column: 2; grid-row: 1; line-height: 18px; }
+  .goals .instance-meta { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 5px; min-width: 0; line-height: 14px; }
   .goals .instance-project { max-width: none; }
   .goals .instance-meta time, .goals .instance-separator { flex: none; }
   .goals .instance-separator { display: inline; color: var(--ink-3); }
