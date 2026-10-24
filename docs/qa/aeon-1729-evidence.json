@@ -1,0 +1,245 @@
+{
+  "license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "ticket": "AEON-1729",
+  "testedHead": "9ea04ddbcdffba021a1a92941d783d4e5cfd4705",
+  "recordedAt": "2026-10-24T11:27:33.068482+00:00",
+  "exclusionMechanism": "Full UI QA exact-file invocation omits the 19 explicit tests/visual/** exclusions; shared Playwright configs and visual owner workflows stay unchanged.",
+  "visualCheckpointOwner": "ci.yml:visual-comparison",
+  "visualReferenceOwner": "visual-capture.yml:visual-reference-capture",
+  "checks": {
+    "workflowAndGuard": {
+      "command": "node --test scripts/full-ui-qa.test.mjs",
+      "exit": 0,
+      "passed": 8,
+      "skipped": 0
+    },
+    "negativeControls": [
+      {
+        "control": "unassigned",
+        "exit": 1,
+        "error": "Unassigned Full QA spec: tests/workspace-activity.spec.ts"
+      },
+      {
+        "control": "duplicated",
+        "exit": 1,
+        "error": "Duplicate Full QA spec: tests/a11y.spec.ts"
+      },
+      {
+        "control": "non-visual wrongly excluded",
+        "exit": 1,
+        "error": "Only visual Full QA specs may be excluded: tests/a11y.spec.ts"
+      }
+    ],
+    "preFixRegression": {
+      "command": "node --test --test-name-pattern=Full QA assignment covers scripts/full-ui-qa.test.mjs",
+      "runnerFrom": "38c1509a1",
+      "exit": 1,
+      "error": "Unassigned Full QA spec: tests/visual/access.spec.ts",
+      "fixedRunnerRestored": true
+    },
+    "timingPreservation": {
+      "baseline": "38c1509a1",
+      "sameRetainedTimingRowsAndSourceEvidence": true,
+      "excludedSeconds": 830,
+      "retainedSeconds": 23730.406
+    },
+    "remoteStatic": {
+      "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
+      "exit": 1,
+      "passed": 45,
+      "skipped": 0,
+      "summary": "Static pre-filter: 194.55s; 45 passed, 0 optional skipped. Hosted CI remains the proof.",
+      "affectedChecks": {
+        "full-ui-qa-tests": "PASSED (0.38s)",
+        "runner-guard-tests": "PASSED (9.05s)",
+        "runner-guard": "PASSED (0.32s)",
+        "audit-tests": "PASSED (5.54s)",
+        "test-tiers": "PASSED (169.06s)",
+        "web-shard-spec-tests": "PASSED (7.09s)"
+      },
+      "unrelatedTimeout": {
+        "check": "apt-step-bounds",
+        "error": "ci-static: apt-step-bounds exceeded timeout_seconds=60 after 60.02s (process group termination requested)",
+        "passedBeforeCancellation": 15,
+        "failedAssertions": 0,
+        "unsettledPromiseAfterTermination": "Promise resolution is still pending but the event loop has already resolved"
+      },
+      "retries": [
+        {
+          "exit": 3,
+          "error": "remote paused: remote test host not GREEN (night protocol, OPS host watch); not falling back to a heavy local run; retry later or rely on PR CI"
+        },
+        {
+          "exit": 3,
+          "error": "remote paused: remote test host not GREEN (night protocol, OPS host watch); not falling back to a heavy local run; retry later or rely on PR CI"
+        }
+      ]
+    }
+  },
+  "inventory": {
+    "specs": 378,
+    "excluded": [
+      {
+        "file": "tests/visual/access.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/account-use-matrix.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/agent-rules.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/agents.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/capacity.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/decision-desk.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/delivery-numbers.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/goals.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/hours.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/knowledge.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/models.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/projects.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/public-quote.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/quote-editor.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/reference-guard.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/session-chat.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/start-agent.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/ticket-workspace.spec.ts",
+        "status": "EXCLUDED"
+      },
+      {
+        "file": "tests/visual/tickets.spec.ts",
+        "status": "EXCLUDED"
+      }
+    ],
+    "projected": [
+      {
+        "shard": 1,
+        "files": 45,
+        "minutes": 51.446,
+        "withinTarget": true,
+        "audits": [
+          "tests/ui-audit.spec.ts"
+        ]
+      },
+      {
+        "shard": 2,
+        "files": 47,
+        "minutes": 51.439,
+        "withinTarget": true,
+        "audits": [
+          "tests/ui-audit-dark-1440.spec.ts"
+        ]
+      },
+      {
+        "shard": 3,
+        "files": 47,
+        "minutes": 51.441,
+        "withinTarget": true,
+        "audits": [
+          "tests/ui-audit-dark-1920.spec.ts"
+        ]
+      },
+      {
+        "shard": 4,
+        "files": 47,
+        "minutes": 51.436,
+        "withinTarget": true,
+        "audits": [
+          "tests/ui-audit-dark-1280.spec.ts"
+        ]
+      },
+      {
+        "shard": 5,
+        "files": 47,
+        "minutes": 51.424,
+        "withinTarget": true,
+        "audits": [
+          "tests/ui-audit-dark-1024.spec.ts"
+        ]
+      },
+      {
+        "shard": 6,
+        "files": 47,
+        "minutes": 51.444,
+        "withinTarget": true,
+        "audits": [
+          "tests/ui-audit-dark-390.spec.ts",
+          "tests/ui-audit-light-1024.spec.ts",
+          "tests/ui-audit-light-1920.spec.ts"
+        ]
+      },
+      {
+        "shard": 7,
+        "files": 48,
+        "minutes": 51.453,
+        "withinTarget": true,
+        "audits": [
+          "tests/ui-audit-light-1440.spec.ts"
+        ]
+      },
+      {
+        "shard": 8,
+        "files": 50,
+        "minutes": 51.423,
+        "withinTarget": true,
+        "audits": [
+          "tests/ui-audit-light-1280.spec.ts"
+        ]
+      }
+    ]
+  },
+  "hostedAcceptance": {
+    "owner": "OPS",
+    "status": "pending workflow-dispatch on this branch",
+    "requires": "GREEN Full UI QA with no cancelled shard; not run by this worker"
+  },
+  "workerStatus": {
+    "pct": 95,
+    "reason": "BLOCKED-REMOTE-CAPACITY: remote static timed out only in unrelated apt-step-bounds; both retries refused because remote test host is not GREEN. Full UI QA guard and affected checks passed. No heavy local fallback."
+  }
+}
