@@ -15,15 +15,16 @@ import (
 // by the same parser, so a tenant lock before LockMutation cannot hide there.
 func TestOwnerWorkstationAuthLockInventory(t *testing.T) {
 	want := map[string]string{
-		"key_scopes.go:agentKeyScopes":                "tenant:NO KEY UPDATE",
-		"key_trim.go:trimFence":                       "tenant:NO KEY UPDATE",
-		"messaging_assistant.go:messagingAssistant":   "tenant.NO_KEY_UPDATE",
-		"owner_workstation.go:workstationGuard":       "pairing.Mutation",
-		"run_capability.go:runContentBoundary":        "pairing.Lock pairing.Lock", // issuance lookup and per-transaction revalidation; each enters tenant -> tree -> pairing
-		"run_capability.go:attachedHookAuthorityTx":   "pairing.Lock",              // exact attached lease/ownership and RequireTx checks enter tenant -> tree -> pairing before resource work
-		"owner_workstation.go:auditWorkstation":       "tenant:NO KEY UPDATE",
-		"owner_workstation.go:handleOwnerWorkstation": "pairing.Mutation",
-		"store.go:resolveOIDCPerson":                  "tenant:NO KEY UPDATE",
+		"assistant_policy.go:recordAssistantPolicyDenial": "tenant.NO_KEY_UPDATE",
+		"key_scopes.go:agentKeyScopes":                    "tenant:NO KEY UPDATE",
+		"key_trim.go:trimFence":                           "tenant:NO KEY UPDATE",
+		"messaging_assistant.go:messagingAssistant":       "tenant.NO_KEY_UPDATE",
+		"owner_workstation.go:workstationGuard":           "pairing.Mutation",
+		"run_capability.go:runContentBoundary":            "pairing.Lock pairing.Lock", // issuance lookup and per-transaction revalidation; each enters tenant -> tree -> pairing
+		"run_capability.go:attachedHookAuthorityTx":       "pairing.Lock",              // exact attached lease/ownership and RequireTx checks enter tenant -> tree -> pairing before resource work
+		"owner_workstation.go:auditWorkstation":           "tenant:NO KEY UPDATE",
+		"owner_workstation.go:handleOwnerWorkstation":     "pairing.Mutation",
+		"store.go:resolveOIDCPerson":                      "tenant:NO KEY UPDATE",
 		// AEON-724: the tenant fence precedes the operator actor (tenant -> tree);
 		// key adoption fences the tenant, then authorizes and updates the key row.
 		"store.go:issueAgentKeyTx":          "tenant:NO KEY UPDATE operator.Ensure",
