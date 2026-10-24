@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/net/dns/dnsmessage"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -668,6 +669,19 @@ func testAssistantPullRoundTrip(t *testing.T) {
 	}
 }
 
+// Budget consent is explicit; fixture setup leaves legacy identities and keys intact.
+func grantImplicitPullBudget(t *testing.T, w *world, principalID string) {
+	t.Helper()
+	policy := assistants.DefaultPolicy()
+	policy.WeeklyBudget.Amount = "1"
+	raw, _ := json.Marshal(policy)
+	if _, err := w.db.Admin.Exec(t.Context(), `INSERT INTO assistant_profiles(tenant_id,principal_id,owner_person_id,vendor,policy)
+ SELECT tenant_id,id,messaging_owner_id,'unknown',$2 FROM principals WHERE id=$1
+ ON CONFLICT(tenant_id,principal_id) DO UPDATE SET policy=excluded.policy,revision=assistant_profiles.revision+1`, principalID, raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Risk: installing pull support silently requires Amy's owner to re-register
 // the assistant or replace its principal/key. Provision with the old lifecycle
 // before the expansion, then authenticate with that exact key afterwards.
@@ -736,6 +750,9 @@ func testAssistantPullMigration(t *testing.T) {
 	if countSQL(t, d.App, w.admin.TenantID, `SELECT count(*) FROM agent_keys WHERE id=$1 AND principal_id=$2 AND revoked_at IS NULL AND scopes=ARRAY['inbox.read','inbox.send','inbox.receipt']::text[]`, amy.ID, amy.PrincipalID) != 1 {
 		t.Fatal("upgrade changed existing Amy key metadata")
 	}
+	// AEON-1722: identity compatibility is independent of execution consent.
+	// The owner now grants message allowance; the zero-budget default is closed.
+	grantImplicitPullBudget(t, w, amy.PrincipalID)
 	status, data = receiptRequest(t, srv, owner, "POST", path+"/"+amy.PrincipalID+"/test-send", `{"dry_run":false,"body":"Amy pulls during a run","idempotency_key":"amy-existing-pull"}`)
 	queued := mustJSON[assistantAdapterTestResult](t, data)
 	if status != 202 {
@@ -821,6 +838,7 @@ func TestPullAssistantPickupRetention(t *testing.T) {
 					t.Fatal(err)
 				}
 				recipient, credential = assistant.PrincipalID, assistant.Token
+				grantImplicitPullBudget(t, w, recipient)
 			} else {
 				credential = receiptAgentKey(t, w, w.agent, "inbox.read", "inbox.send", "inbox.receipt")
 				body := fmt.Sprintf(`{"vendor":"grok","principal_id":%q,"address":"grok_bot:retention","delivery_mode":"pull"}`, recipient)

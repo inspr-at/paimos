@@ -382,6 +382,62 @@ func TestAssistantMessageBudgetFailureSettlement(t *testing.T) {
 	}
 }
 
+// B2: an item that becomes ineligible between hold and handoff must not leave
+// a charge for an unexposed page. The trigger deterministically expires it at
+// the reservation write; no timing threshold or sleep establishes this case.
+func TestAssistantPullBudgetRollsBackWhenHandoffChanges(t *testing.T) {
+	for _, route := range []string{"inbox", "project"} {
+		t.Run(route, func(t *testing.T) {
+			w, m, project, _ := messagingWorld(t)
+			policy := assistants.DefaultPolicy()
+			policy.AllowedProjects, policy.WeeklyBudget.Amount = []string{project}, "1"
+			putMessageAssistantPolicy(t, w, policy)
+			msg := mustCompatSend(t, m, w.sender, project, compatInput(w.agent.ID, "expiry-during-pickup"))
+			if _, err := w.db.Admin.Exec(t.Context(), `CREATE FUNCTION expire_pickup_fixture() RETURNS trigger LANGUAGE plpgsql AS $$
+ BEGIN UPDATE inbox_messages SET expires_at=clock_timestamp()-interval '1 microsecond'
+ WHERE id::text=split_part(NEW.operation_key,'/',2); RETURN NEW; END $$;
+ CREATE TRIGGER expire_pickup_fixture AFTER INSERT ON assistant_budget_reservations
+ FOR EACH ROW EXECUTE FUNCTION expire_pickup_fixture()`); err != nil {
+				t.Fatal(err)
+			}
+			if route == "inbox" {
+				items, err := m.base.pending(t.Context(), w.agent, 0, 100)
+				if err == nil || !strings.Contains(err.Error(), "retry pickup") || len(items) != 0 {
+					t.Fatalf("changed pickup: items=%+v err=%v", items, err)
+				}
+			} else {
+				mux := http.NewServeMux()
+				m.Mount(mux)
+				r := httptest.NewRequest("GET", "/api/projects/"+project+"/messages/listen", nil)
+				r = r.WithContext(tenant.WithPrincipal(t.Context(), w.agent))
+				out := httptest.NewRecorder()
+				mux.ServeHTTP(out, r)
+				if out.Code != 409 || !strings.Contains(out.Body.String(), "pickup_changed") {
+					t.Fatalf("changed project pickup: %d %s", out.Code, out.Body.String())
+				}
+			}
+			for _, query := range []string{
+				`SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`,
+				`SELECT count(*) FROM assistant_policy_receipts WHERE principal_id=$1 AND operation='adapter.pull'`,
+				`SELECT count(*) FROM inbox_messages WHERE recipient_principal_id=$1 AND fetched_at IS NOT NULL`,
+			} {
+				if got := countSQL(t, w.db.App, w.agent.TenantID, query, w.agent.ID); got != 0 {
+					t.Fatalf("aborted pull left state: %s = %d", query, got)
+				}
+			}
+			if state, reason := receiptState(t, w, msg.ID); state != "queued" || reason != "" {
+				t.Fatalf("aborted pull receipt=%s %s", state, reason)
+			}
+			if _, err := w.db.Admin.Exec(t.Context(), `DROP TRIGGER expire_pickup_fixture ON assistant_budget_reservations`); err != nil {
+				t.Fatal(err)
+			}
+			if items, err := m.base.pending(t.Context(), w.agent, 0, 100); err != nil || len(items) != 1 || items[0].ID != msg.ID {
+				t.Fatalf("rollback lost original message: %+v err=%v", items, err)
+			}
+		})
+	}
+}
+
 func putMessageAssistantPolicy(t *testing.T, w *world, policy assistants.Policy) {
 	t.Helper()
 	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {

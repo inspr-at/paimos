@@ -127,7 +127,7 @@ func (s *Store) Request(ctx context.Context, daemon nativecontract.DaemonActor, 
 		return s.event(ctx, tx, p, l, in.RequestID, "native_session.approval_changed", "pending")
 	})
 	if err == nil && refusal != nil {
-		err = refusal
+		err = fault(409, nativecontract.ReasonPermissionRevoked)
 	}
 	if err != nil {
 		return nativecontract.Approval{}, err

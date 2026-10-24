@@ -7996,6 +7996,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantProjectListenRejectsInactiveOwner","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantPullBudgetRollsBackWhenHandoffChanges","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantPullRefusalDoesNotStarveAllowedMessages","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAttemptCapAndSettings","tier":"GATED-FULL"}

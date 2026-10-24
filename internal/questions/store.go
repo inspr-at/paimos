@@ -159,6 +159,9 @@ func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 			return err
 		}
 		text := []string{in.Question, in.Context, in.Findings, in.Why, in.MeanwhileText, in.AnywayReason}
+		if in.Doctrine != nil {
+			text = append(text, in.Doctrine.Path, in.Doctrine.RuleKey, in.Doctrine.TLDREN, in.Doctrine.TLDRDE)
+		}
 		for _, option := range in.Options {
 			text = append(text, option.Title, option.Description, option.Answer)
 		}
