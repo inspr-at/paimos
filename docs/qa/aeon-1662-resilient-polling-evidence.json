@@ -1,0 +1,180 @@
+{
+  "ticket": "AEON-1662",
+  "risk": "Unrelated session readers can satisfy a transport-attempt counter before the table refresh records a failed outcome; the next online event invalidates that outcome and the third-failure banner never appears.",
+  "disposition": "The root-cause fix was already on main via AEON-1420. Strengthen its existing scenario with two competing project-tree reads so the known failing interleaving is exercised on every round.",
+  "baseline_commit": "5a4390185f89ec360233979d5dd3b3ad98eff3be",
+  "spec_sha256": "dd171cb920df244bf91d3870c3fb1f2ee30cbbc50e9fdf74b62df6ed04e3dd5b",
+  "historical_failure": {
+    "pr": 851,
+    "commit": "6b8c7e1af1a5af4084885600bfb4760f77941ece",
+    "job": "https://github.com/inspr-at/paimos/actions/runs/39719621462/job/119630581086",
+    "locator": "getByText('Sessions could not be refreshed:')",
+    "error": "expect(locator).toBeVisible() failed; element(s) not found; timeout 5000ms",
+    "original_test_start_line": 41,
+    "failing_assertion_line": 65,
+    "interpretation": "The missing element is the third-failure banner. This log does not establish that the loaded table vanished."
+  },
+  "timing": {
+    "agents_poll_period_ms": 20000,
+    "get_retries": 2,
+    "retry_delay_ms": "250 * 2 ** attempt * (0.75 + Math.random() * 0.5)",
+    "old_barrier": "All /api/harness-sessions query reads were counted, including project-tree reads. Waiting for already observed transports to settle does not wait for a retry scheduled in the future or for the refresh status update.",
+    "lost_outcome": "After one failure the delayed-update indicator stays visible. A later loop can satisfy its transport counter using another reader and pass the already-visible indicator assertion while the table read is still in backoff. The next online event restarts the poller and invalidates that unfinished read, so it cannot increment the failure count.",
+    "clock_ownership": "The Agents case uses its own real browser clock; the Live Agents case has a separate Playwright page/context. No fake-clock state is shared between cases. The competing-reader reproduction fails within one refresh sequence, without advancing the 20-second periodic timer."
+  },
+  "existing_fix": {
+    "filtered_table_reader_commit": "732d335880598c01e6f6635f0a9350dca6ee9e13",
+    "await_refresh_action_commit": "35a47f469d9c6d997e1a762c74ebb4a542aac478",
+    "merged_by_pr": 857,
+    "merge_commit": "7a3ef4b7f9d11f87974dee9eb2fc9fe6e575201a",
+    "behavior": "Filter the mock to the tenant-wide view=current reader, await the initial complete load, then observe the online-triggered loadAll action through its after callback before asserting status or sending the next event."
+  },
+  "linux_validation": {
+    "runner": "Approved LEAD remote-spec.sh; agm2-ci Linux; managed headless Chromium; serial one-worker chunks.",
+    "requested_flags_refusal": {
+      "flags": "--repeat-each=30",
+      "exit_code": 2,
+      "message": "remote refused: spec paths only, no flags (the runner sets config and workers)"
+    },
+    "equivalent_native_repetition": "Set Playwright repeatEach: 30 in the UI config on scratch/aeon-1662-baseline-repeats only; no spec or product change. Native reports confirm repeatEachIndex 0 through 29, workers 1, retries 0. Final work branch does not include this config change.",
+    "repetition_commit": "39248542e5a8c4f87ebe9dc6f194d6633cd95b50",
+    "command": "remote-spec.sh <worktree> \"tests/resilient-polling.spec.ts\" \"\" <worktree>/web/test-results/aeon-1662-baseline-30",
+    "run": {
+      "run": "spec-39248542e5-50755",
+      "suite_exit_code": 0,
+      "exit_code": 0,
+      "cleanup_complete": true
+    },
+    "native_blob_reports": 30,
+    "cases_per_repetition": 2,
+    "passed": 60,
+    "failed": 0,
+    "skipped": 0,
+    "retries": 0,
+    "summary": "60 passed (4.7m)",
+    "suite_once": {
+      "run": "spec-5a4390185f-24260",
+      "passed": 2,
+      "failed": 0,
+      "exit_code": 0,
+      "summary": "2 passed (8.5s)",
+      "note": "Initial unchanged-main full-spec run; a final-source full-spec run will also be recorded."
+    }
+  },
+  "original_counter_comparison": {
+    "quiet_runner": {
+      "commit": "fde721e08b0b51ad0e6b0822b1531aa67ce780a7",
+      "run": "spec-fde721e08b-14917",
+      "repetitions": 10,
+      "passed": 10,
+      "failed": 0,
+      "exit_code": 0
+    },
+    "competing_project_reads": {
+      "commit": "c4cff0ff1b6a78730dbfe87d35cf4059ad1fba88",
+      "run": {
+        "run": "spec-c4cff0ff1b-54167",
+        "suite_exit_code": 1,
+        "exit_code": 1,
+        "cleanup_complete": true
+      },
+      "repetitions": 10,
+      "passed": 0,
+      "failed": 10,
+      "failure_reason": "Every failure is the same missing third-failure banner as PR851: getByText('Sessions could not be refreshed:'); element(s) not found. No timeout increase or sleeping fixture was used."
+    },
+    "conclusion": "The original quiet-run pass does not establish synchronization. Starting two independent project reads alongside online recovery reproduces the lost failure count 10/10 with the old test. The final test retains that competing-reader schedule while waiting for the actual table action."
+  },
+  "snapshot_negative_control": {
+    "status": "failed as expected",
+    "commit": "3b89983d1eb005e391d7ecfd9836d6b7f182c2f2",
+    "mutation": "Set data.value = initial in usePolledData error handling, which discards the last successful snapshot. The test source is identical to the final work branch.",
+    "run": {
+      "run": "spec-3b89983d1e-46182",
+      "suite_exit_code": 1,
+      "exit_code": 1,
+      "cleanup_complete": true
+    },
+    "passed": 0,
+    "failed": 1,
+    "failure_reason": "The initially visible session row is absent after the failed refresh. The failure is the retained-row toBeVisible assertion at line 67, not startup, a missing handler, or a generic test timeout.",
+    "locator": "locator('.sessions [data-row^=\"s:\"]').first()"
+  },
+  "static_validation": {
+    "status": "passed on one remote rerun",
+    "command": "ci-static-remote.sh (runs node scripts/ci-static.mjs --merge-main on mbp2606)",
+    "source_commit": "65545a990a32eabdb7d09fc501b0383612cceae7",
+    "first_run": {
+      "exit_code": 1,
+      "passed_checks": 45,
+      "optional_skips": 0,
+      "failure": "ci-static: apt-step-bounds exceeded timeout_seconds=60 after 60.03s (process group termination requested)",
+      "unrelated_to_change": "The change touches only the polling browser test. No apt/helper/workflow source was changed."
+    },
+    "exit_code": 0,
+    "passed_checks": 46,
+    "optional_skips": 0,
+    "duration_seconds": 181.37,
+    "apt_step_bounds_seconds": 41.46,
+    "summary": "Static pre-filter: 181.37s; 46 passed, 0 optional skipped. Hosted CI remains the proof.",
+    "rerun_reason": "The first run hit the unrelated apt-step-bounds 60s check timeout. The unchanged check passed on the single follow-up remote run; its limit was not raised."
+  },
+  "preserved": {
+    "product_changes": false,
+    "weakened_assertions": false,
+    "increased_timeouts": false,
+    "new_retries": false,
+    "skips_or_quarantine": false,
+    "test_manifest_changes": false,
+    "origin_push": false,
+    "deployment": false,
+    "review_gate": false,
+    "other_model_calls": false,
+    "existing_assertions": true,
+    "existing_test_names": true,
+    "source_files_changed": [
+      "web/tests/resilient-polling.spec.ts"
+    ],
+    "assertion_and_test_name_comparison": "Compared every expect/expect.poll source line and both registered test titles with starting main: identical. UI config is identical to starting main."
+  },
+  "implementation_commit": "65545a990a32eabdb7d09fc501b0383612cceae7",
+  "changes": [
+    "Keep the online-triggered loadAll completion barrier and all existing assertions.",
+    "Launch two bounded project-scoped session reads alongside each table refresh and join their completion with the table action; preserve the filtered table-reader mock.",
+    "Do not change production code, retry policy, timeouts, test names, tiers or shard manifests."
+  ],
+  "strengthened_spec_linux_30": {
+    "status": "passed",
+    "commit": "dbec728a0aa952b105641b54ef65ad62b23c3299",
+    "run": {
+      "run": "spec-dbec728a0a-84338",
+      "suite_exit_code": 0,
+      "exit_code": 0,
+      "cleanup_complete": true
+    },
+    "native_blob_reports": 30,
+    "passed": 60,
+    "failed": 0,
+    "skipped": 0,
+    "retries": 0,
+    "actual_workers_per_chunk": 1,
+    "repeat_each_indices": "0..29 for each of the two test titles",
+    "summary": "60 passed (4.6m)"
+  },
+  "final_source_suite_once": {
+    "status": "passed",
+    "source_commit": "65545a990a32eabdb7d09fc501b0383612cceae7",
+    "run": {
+      "run": "spec-65545a990a-57162",
+      "suite_exit_code": 0,
+      "exit_code": 0,
+      "cleanup_complete": true
+    },
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "summary": "2 passed (8.4s)",
+    "configuration": "Normal committed UI config, repeatEach default 1."
+  },
+  "completed_at_utc": "2026-10-24T10:23:34Z"
+}
