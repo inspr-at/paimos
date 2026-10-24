@@ -46,6 +46,125 @@ async function holdTimeoutsWhile(page: Page, key: string, field?: string) {
     } : handler, delay, ...args)
   }, { key, field })
 }
+// A viewport override and its native notifications are separate Chromium
+// deliveries. Hold every competing recovery path, then release only the
+// visual-viewport event after the real layout has reached the requested size.
+// Native event delivery under software GL is not the clock for these tests.
+type VisualViewportHold = {
+  holding: boolean; framesHeld: number; rootsDropped: number; visualResizes: number
+  beginHold: () => Promise<void>; dropRoot: () => void
+}
+async function installVisualViewportHold(page: Page) {
+  await holdTimeoutsWhile(page, '__aeonVisualViewportHold', 'holding')
+  await page.addInitScript(() => {
+    let resolveHeldFrame: (() => void) | undefined
+    const rootDeliveries = new Map<ResizeObserver, () => void>()
+    const state = {
+      holding: false, framesHeld: 0, rootsDropped: 0, visualResizes: 0,
+      beginHold() {
+        state.holding = true
+        return new Promise<void>(resolve => {
+          resolveHeldFrame = resolve
+          // This callback crosses the same interception as application frames.
+          window.requestAnimationFrame(() => { throw new Error('A held frame escaped') })
+        })
+      },
+      dropRoot() {
+        if (!rootDeliveries.size) throw new Error('No root viewport observer was installed')
+        for (const deliver of rootDeliveries.values()) deliver()
+      },
+    }
+    ;(window as unknown as { __aeonVisualViewportHold: typeof state }).__aeonVisualViewportHold = state
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => frame(time => {
+      if (state.holding) {
+        state.framesHeld++
+        resolveHeldFrame?.()
+        resolveHeldFrame = undefined
+        return
+      }
+      callback(time)
+    })
+    const interval = window.setInterval.bind(window)
+    window.setInterval = (handler, delay, ...args) => interval(typeof handler === 'function' ? (...values: unknown[]) => {
+      if (!state.holding) handler(...values)
+    } : handler, delay, ...args)
+    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    const media = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = media(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      private readonly deliverRoot: () => void
+      constructor(callback: ResizeObserverCallback) {
+        const deliver: ResizeObserverCallback = (entries, observer) => {
+          const delivered = entries.filter(entry => {
+            if (!state.holding) return true
+            if (entry.target === document.documentElement) state.rootsDropped++
+            return false
+          })
+          if (delivered.length) callback(delivered, observer)
+        }
+        super(deliver)
+        // Inject the intercepted notification, rather than requiring software
+        // GL to produce a native observer delivery while its frames are held.
+        // Only target is read by the dropping seam; no geometry reaches the app.
+        this.deliverRoot = () => deliver([{ target: document.documentElement } as ResizeObserverEntry], this)
+      }
+      observe(target: Element, options?: ResizeObserverOptions) {
+        super.observe(target, options)
+        if (target === document.documentElement) rootDeliveries.set(this, this.deliverRoot)
+      }
+      unobserve(target: Element) {
+        super.unobserve(target)
+        if (target === document.documentElement) rootDeliveries.delete(this)
+      }
+      disconnect() {
+        super.disconnect()
+        rootDeliveries.delete(this)
+      }
+    }
+    window.visualViewport!.addEventListener('resize', event => {
+      if (!state.holding) return
+      // Native deliveries may be delayed or absent while software GL is held.
+      // Release exactly this signal after the real layout reaches phone width.
+      if (event.isTrusted) { event.stopImmediatePropagation(); return }
+      state.visualResizes++
+    }, { capture: true })
+  })
+}
+async function expectVisualViewportClear(page: Page) {
+  await page.evaluate(() => (window as unknown as { __aeonVisualViewportHold: VisualViewportHold }).__aeonVisualViewportHold.beginHold())
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    layout: document.documentElement.getBoundingClientRect().width,
+    visual: window.visualViewport!.width,
+  }))).toEqual({ layout: 390, visual: 390 })
+  // Body/header observers and the interval must not clear the glimpse first.
+  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
+  const result = await page.evaluate(async () => {
+    const state = (window as unknown as { __aeonVisualViewportHold: VisualViewportHold }).__aeonVisualViewportHold
+    state.dropRoot()
+    window.visualViewport!.dispatchEvent(new Event('resize'))
+    // Vue flushes the event's reactive change in a microtask. Do not release
+    // a frame or a timer to make the assertion pass.
+    await Promise.resolve()
+    return {
+      frameHeld: state.framesHeld > 0,
+      rootDropped: state.rootsDropped > 0,
+      visualResizes: state.visualResizes,
+      painted: !!document.querySelector('[data-header-glimpse="on"]'),
+      cleared: !!document.querySelector('[data-header-glimpse="off"]'),
+    }
+  })
+  expect(result).toEqual({ frameHeld: true, rootDropped: true, visualResizes: 1, painted: false, cleared: true })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+}
+
 // Fixed 60fps steps, released after layout, so the contrast shot pauses on one
 // orbit angle. 17ms stays above the renderer's frame gate. Do not relax 0.78.
 const GLIMPSE_PIN_FRAMES = 192
@@ -452,145 +571,25 @@ test('a dropped wide-media change still hides the glimpse below 1280', async ({ 
 // With the other viewport notifications lost, a frame-based fallback cannot
 // clear the decoration. The visual viewport delivery must work independently.
 test('AEON-1337: a visual viewport resize clears the glimpse before the next animation frame', async ({ page }) => {
-  await holdTimeoutsWhile(page, '__aeonViewportFrameHold', 'holding')
-  await page.addInitScript(() => {
-    const rootDeliveries = new Map<ResizeObserver, () => void>()
-    const state = {
-      holding: false, framesHeld: 0, rootsDropped: 0, visualResizes: 0,
-      dropRoot() {
-        if (!rootDeliveries.size) throw new Error('No root viewport observer was installed')
-        for (const deliver of rootDeliveries.values()) deliver()
-      },
-    }
-    ;(window as unknown as { __aeonViewportFrameHold: typeof state }).__aeonViewportFrameHold = state
-    const frame = window.requestAnimationFrame.bind(window)
-    window.requestAnimationFrame = callback => frame(time => {
-      if (state.holding) { state.framesHeld++; return }
-      callback(time)
-    })
-    const interval = window.setInterval.bind(window)
-    window.setInterval = (handler, delay, ...args) => interval(typeof handler === 'function' ? (...values: unknown[]) => {
-      if (!state.holding) handler(...values)
-    } : handler, delay, ...args)
-    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
-    const media = window.matchMedia.bind(window)
-    window.matchMedia = query => {
-      const list = media(query)
-      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
-      return list
-    }
-    const Observer = window.ResizeObserver
-    window.ResizeObserver = class extends Observer {
-      private readonly deliverRoot: () => void
-      constructor(callback: ResizeObserverCallback) {
-        const deliver: ResizeObserverCallback = (entries, observer) => {
-          const delivered = entries.filter(entry => {
-            if (!state.holding) return true
-            if (entry.target === document.documentElement) state.rootsDropped++
-            return false
-          })
-          if (delivered.length) callback(delivered, observer)
-        }
-        super(deliver)
-        // Inject the intercepted notification, rather than requiring software
-        // GL to produce a native observer delivery while its frames are held.
-        // Only target is read by the dropping seam; no geometry reaches the app.
-        this.deliverRoot = () => deliver([{ target: document.documentElement } as ResizeObserverEntry], this)
-      }
-      observe(target: Element, options?: ResizeObserverOptions) {
-        super.observe(target, options)
-        if (target === document.documentElement) rootDeliveries.set(this, this.deliverRoot)
-      }
-      unobserve(target: Element) {
-        super.unobserve(target)
-        if (target === document.documentElement) rootDeliveries.delete(this)
-      }
-      disconnect() {
-        super.disconnect()
-        rootDeliveries.delete(this)
-      }
-    }
-    window.visualViewport!.addEventListener('resize', event => {
-      if (!state.holding) return
-      // Native deliveries may be delayed or absent while software GL is held.
-      // Release exactly this signal after the real layout reaches phone width.
-      if (event.isTrusted) { event.stopImmediatePropagation(); return }
-      state.visualResizes++
-    }, { capture: true })
-  })
+  await installVisualViewportHold(page)
   await page.setViewportSize({ width: 1279, height: 900 })
   await mockHeaderGraph(page, sized(8, true))
   await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
-  await page.setViewportSize({ width: 1280, height: 900 })
+  await resizeSeen(page, { width: 1280, height: 900 })
   await ready(page)
-  await page.evaluate(() => { (window as unknown as { __aeonViewportFrameHold: { holding: boolean } }).__aeonViewportFrameHold.holding = true })
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __aeonViewportFrameHold: { framesHeld: number } }).__aeonViewportFrameHold.framesHeld > 0)).toBe(true)
-  await resizeSeen(page, { width: 390, height: 844 })
-  await expect.poll(() => page.evaluate(() => document.documentElement.getBoundingClientRect().width)).toBe(390)
-  // Every fallback is held, including body observer deliveries and the narrow
-  // interval. The glimpse must still be on before the visual event is released.
-  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
-  await page.evaluate(() => {
-    const state = (window as unknown as { __aeonViewportFrameHold: { dropRoot: () => void } }).__aeonViewportFrameHold
-    state.dropRoot()
-    window.visualViewport!.dispatchEvent(new Event('resize'))
-  })
-  await expect.poll(() => page.evaluate(() => {
-    const state = (window as unknown as { __aeonViewportFrameHold: { framesHeld: number; rootsDropped: number; visualResizes: number } }).__aeonViewportFrameHold
-    return {
-      width: document.documentElement.getBoundingClientRect().width,
-      frameHeld: state.framesHeld > 0,
-      rootDropped: state.rootsDropped > 0,
-      visualDelivered: state.visualResizes > 0,
-    }
-  })).toEqual({ width: 390, frameHeld: true, rootDropped: true, visualDelivered: true })
-  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
-  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+  await expectVisualViewportClear(page)
 })
 
 // Risk: software-rendered frames stop during a shrink, so the paint sampler
-// cannot recover missed window/media/root notifications. The independent
+// cannot recover missed window/media/observer notifications. The independent
 // visual-viewport event must clear an already painted glimpse without a frame.
 test('AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held', async ({ page }) => {
-  await holdTimeoutsWhile(page, '__aeonHeldViewport', 'holding')
-  await page.addInitScript(() => {
-    const state = { holding: false, visualWidths: [] as number[] }
-    ;(window as unknown as { __aeonHeldViewport: typeof state }).__aeonHeldViewport = state
-    const frame = window.requestAnimationFrame.bind(window)
-    window.requestAnimationFrame = callback => frame(time => { if (!state.holding) callback(time) })
-    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
-    const media = window.matchMedia.bind(window)
-    window.matchMedia = query => {
-      const list = media(query)
-      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
-      return list
-    }
-    const Observer = window.ResizeObserver
-    window.ResizeObserver = class extends Observer {
-      constructor(callback: ResizeObserverCallback) {
-        super((entries, observer) => {
-          const delivered = entries.filter(entry => !state.holding || entry.target !== document.documentElement)
-          if (delivered.length) callback(delivered, observer)
-        })
-      }
-    }
-    window.visualViewport?.addEventListener('resize', () => {
-      if (state.holding) state.visualWidths.push(window.visualViewport!.width)
-    })
-  })
+  await installVisualViewportHold(page)
   await mockHeaderGraph(page, sized(8, true))
   await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
   await ready(page)
-  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
-  await page.evaluate(() => { (window as unknown as { __aeonHeldViewport: { holding: boolean } }).__aeonHeldViewport.holding = true })
-  await resizeSeen(page, { width: 390, height: 844 })
-  await expect.poll(() => page.evaluate(() => ({
-    layout: document.documentElement.getBoundingClientRect().width,
-    visual: (window as unknown as { __aeonHeldViewport: { visualWidths: number[] } }).__aeonHeldViewport.visualWidths.at(-1),
-  }))).toEqual({ layout: 390, visual: 390 })
-  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
-  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+  await expectVisualViewportClear(page)
 })
 
 // Risk: software GL stalls animation frames at the same time as the viewport
