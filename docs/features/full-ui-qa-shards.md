@@ -110,3 +110,6 @@ the target; `--check` reports `withinTarget: true` for all eight. One worker,
 zero retries, forbid-only and the 90-minute timeout remain unchanged. These are
 projections with uncertainty from the older timings. OPS owns workflow-dispatch
 acceptance: a green Full UI QA run with no cancelled shard on this branch.
+
+[AEON-1729 validation evidence](../qa/aeon-1729-evidence.json) records the guard
+results, negative controls, retained timing comparison and remote static outcome.
