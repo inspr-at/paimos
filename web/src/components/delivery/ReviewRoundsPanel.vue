@@ -56,7 +56,7 @@ const t = computed(() => reviewText(props.lang))
 .rr-head { flex: none; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .rr-head h3 { margin: 0; font: 650 16px/1.4 var(--font); color: var(--ink); }
 .rr-head p { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.rr-lists { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px; padding: 14px 16px; overflow-y: auto; min-height: 0; }
+.rr-lists { flex: 1; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-content: start; gap: 18px; padding: 14px 16px; overflow-y: auto; min-height: 0; }
 .rr-lists section { min-width: 0; }
 h4 { margin: 0 0 8px; font: 650 13px/1.5 var(--font); color: var(--ink); }
 ul { list-style: none; margin: 0; padding: 0; }

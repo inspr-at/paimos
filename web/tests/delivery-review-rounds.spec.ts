@@ -105,7 +105,9 @@ for (const width of [1440, 1024, 390, 320]) {
         await expect(chart(page)).not.toContainText(sentinel)
       }
       if (width <= 520) {
-        expect((await panel(page).boundingBox())!.height).toBeCloseTo(844, 0)
+        const frame = (await panel(page).boundingBox())!, footer = (await panel(page).locator('.rr-actions').boundingBox())!
+        expect(frame.height).toBeCloseTo(844, 0)
+        expect(Math.abs(footer.y + footer.height - frame.y - frame.height)).toBeLessThanOrEqual(.5)
         for (const row of await panel(page).locator('.rr-ticket-link, .rr-rule-row').all()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44)
       }
       await panel(page).getByRole('button', { name: 'Close Esc' }).focus()
@@ -199,10 +201,16 @@ for (const width of [1440, 390]) {
     await page.keyboard.press('Tab')
     await panel(page).locator('.rr-rules .rr-chip').first().focus()
     await expect(page.locator('.tooltip')).toHaveText(reviewRuleText('U2', 'de'))
-    await shot(page, info, `german-${width}-panel`, panel(page))
+    await shot(page, info, `german-${width}-rule-tooltip`, panel(page))
     const germanControls = await controlStability(page, { close: panel(page).getByRole('button', { name: 'Schließen Esc' }), row: panel(page).locator('.rr-ticket-link').first() })
     await germanControls.check(async () => { await panel(page).getByRole('button', { name: 'Schließen Esc' }).focus() })
     germanControls.done()
+    await expect(page.locator('.tooltip')).toHaveCount(0)
+    if (width <= 520) {
+      const frame = (await panel(page).boundingBox())!, footer = (await panel(page).locator('.rr-actions').boundingBox())!
+      expect(Math.abs(footer.y + footer.height - frame.y - frame.height)).toBeLessThanOrEqual(.5)
+    }
+    await shot(page, info, `german-${width}-panel`, panel(page))
     const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
     expect(horizontalOverflow).toBeLessThanOrEqual(1)
     evidence.push({ width, theme: 'light', language: 'de', controlsStable: true, horizontalOverflow })
