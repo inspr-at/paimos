@@ -354,62 +354,99 @@ test('AEON-1362 bar form: diagonal stripes slide only live or under the pointer;
   expect((await state('past')).name).toBe('none')
 })
 
+// Risk: continuous status motion consumes the main thread and makes the app unresponsive.
 test('AEON-1666: 24 sliding icons cost at most 1 ms of main-thread CPU time per animation frame', async ({ page }, testInfo) => {
-  await page.goto('/tests/status-icons-budget-harness.html')
-  const icons = page.locator('.st-ip')
+  await page.setViewportSize({ width: 1440, height: 1600 })
+  await mockWork(page, workData('light', 23))
+  await page.goto('/p/PHAROS')
+  await showProjectHead(page)
+  const icons = grid(page).locator('tr.ticket-row .st-ip')
   await expect(icons).toHaveCount(24)
   await expect.poll(async () => (await slides(page)).filter(slide => slide.state === 'running' && !slide.offscreen).length).toBeGreaterThanOrEqual(24)
   await page.mouse.move(0, 0)
 
+  type FrameEvent = { name: string; pid: number; ts: number; args?: { data?: { message?: string }; layerTreeId?: number; frameSeqId?: number } }
   const cdp = await page.context().newCDPSession(page)
-  const samples = new Map<string, Record<string, number>>()
+  const trace: FrameEvent[] = [], samples = new Map<string, Record<string, number>>()
+  cdp.on('Tracing.dataCollected', ({ value }) => {
+    // Retain only the evidence needed for frame attribution, not unrelated
+    // page contents or the complete timeline. The test timeout bounds capture.
+    for (const event of value) if (event.name === 'DrawFrame' || event.name === 'TimeStamp') trace.push(event)
+  })
+  const traced = new Promise<boolean>(resolve => cdp.once('Tracing.tracingComplete', event => resolve(event.dataLossOccurred)))
   const measured = new Promise<void>(resolve => {
     cdp.on('Performance.metrics', ({ title, metrics }) => {
       if (title.startsWith('status-budget-')) samples.set(title, Object.fromEntries(metrics.map(metric => [metric.name, metric.value])))
       if (title === 'status-budget-end') resolve()
     })
   })
+  let tracing = false
   try {
-    // AEON-1666: the retired check used elapsed TaskDuration / (3 * 60), so
-    // scheduler preemption inside a task counted as icon work, startup/timers
-    // entered the window, and slow runners still pretended to render 180 frames.
-    // Chromium's threadTicks domain charges only CPU consumed by this thread:
+    // The retired check used elapsed TaskDuration / (3 * 60): scheduler waits
+    // inside tasks counted as icon work, and every runner pretended to draw
+    // 180 frames. threadTicks charges CPU only (including GC and page work):
     // https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/inspector/inspector_performance_agent.cc
-    // console.timeStamp emits Performance.metrics synchronously at the two
-    // frame boundaries; no CDP round trip or assumed refresh rate defines them.
     await cdp.send('Performance.enable', { timeDomain: 'threadTicks' })
-    const frames = 120
-    const motion = await icons.evaluateAll(async (elements, frameCount) => {
+    await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline.frame', transferMode: 'ReportEvents' })
+    tracing = true
+    const motion = await icons.evaluateAll(async elements => {
       const animations = elements.flatMap(icon => icon.getAnimations({ subtree: true }))
         .filter(animation => animation instanceof CSSAnimation && animation.animationName === 'ip-slide')
       await Promise.all(animations.map(animation => animation.ready))
-      const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
-      // Exclude only initial layer promotion: twelve actual animation frames,
-      // not a sleep. Every measured task, including GC, remains in the budget.
-      for (let index = 0; index < 12; index++) await nextFrame()
-      const before = animations.map(animation => ({ time: Number(animation.currentTime), state: animation.playState }))
-      console.timeStamp('status-budget-start')
-      for (let index = 0; index < frameCount; index++) await nextFrame()
-      console.timeStamp('status-budget-end')
-      return animations.map((animation, index) => ({
-        before: before[index].state, after: animation.playState, advanced: Number(animation.currentTime) > before[index].time,
-      }))
-    }, frames)
-    // Runtime evaluation and metrics use separate protocol sessions. Wait for
-    // the end notification itself, which can arrive after evaluateAll returns.
+      // A per-frame rAF sampler itself wakes the main thread and forces style
+      // work. Observe two CSS iteration events instead: first warms the layers,
+      // second ends one complete measured cycle. No sleeps or refresh-rate guess.
+      const layer = elements[0].querySelector('i')!
+      return new Promise<{ before: string; after: string; advanced: boolean }[]>(resolve => {
+        let before: { time: number; state: string }[] | undefined
+        const iteration = (event: Event) => {
+          if ((event as AnimationEvent).animationName !== 'ip-slide') return
+          if (!before) {
+            before = animations.map(animation => ({ time: Number(animation.currentTime), state: animation.playState }))
+            console.timeStamp('status-budget-start')
+          } else {
+            console.timeStamp('status-budget-end')
+            layer.removeEventListener('animationiteration', iteration)
+            resolve(animations.map((animation, index) => ({
+              before: before![index].state, after: animation.playState, advanced: Number(animation.currentTime) > before![index].time,
+            })))
+          }
+        }
+        layer.addEventListener('animationiteration', iteration)
+      })
+    })
+    // Runtime evaluation and metrics use separate protocol sessions; await the
+    // end notification itself, which can arrive after evaluateAll returns.
     await measured
+    await cdp.send('Tracing.end')
+    tracing = false
+    expect(await traced, 'trace must not lose frame events').toBe(false)
     expect(motion).toHaveLength(24)
     for (const animation of motion) expect(animation).toEqual({ before: 'running', after: 'running', advanced: true })
     expect([...samples.keys()]).toEqual(['status-budget-start', 'status-budget-end'])
+    const marks = (title: string) => trace.filter(event => event.name === 'TimeStamp' && event.args?.data?.message === title)
+    const starts = marks('status-budget-start'), ends = marks('status-budget-end')
+    expect(starts).toHaveLength(1); expect(ends).toHaveLength(1)
+    const [from] = starts, [to] = ends
+    expect(to.pid).toBe(from.pid)
+    expect(to.ts).toBeGreaterThan(from.ts)
+    // The timestamp's renderer owns the icons. Exclude browser/other-renderer
+    // frames; require a single layer tree and unique drawn frame identities.
+    const drawn = trace.filter(event => event.name === 'DrawFrame' && event.pid === from.pid && event.ts >= from.ts && event.ts < to.ts)
+    const frames = drawn.length
+    expect(frames, 'the measured renderer must actually draw animation frames').toBeGreaterThan(0)
+    expect(new Set(drawn.map(event => event.args?.layerTreeId)).size).toBe(1)
+    expect(drawn.every(event => Number.isInteger(event.args?.frameSeqId))).toBe(true)
+    expect(new Set(drawn.map(event => event.args?.frameSeqId)).size).toBe(frames)
     const start = samples.get('status-budget-start')!, end = samples.get('status-budget-end')!
-    const cpuMs = (end.TaskDuration - start.TaskDuration) * 1000
-    const perFrame = cpuMs / frames
+    const cpuMs = (end.TaskDuration - start.TaskDuration) * 1000, perFrame = cpuMs / frames
     expect(Number.isFinite(perFrame) && perFrame > 0, 'thread CPU metrics must be present and advance').toBe(true)
     const evidence = { icons: motion.length, frames, cpuMs, cpuMsPerFrame: perFrame, wallMs: (end.Timestamp - start.Timestamp) * 1000, timeDomain: 'threadTicks' }
     console.log(`AEON-1666 sliding budget: ${JSON.stringify(evidence)}`)
-    await testInfo.attach('status-icon-cpu-budget', { body: JSON.stringify(evidence), contentType: 'application/json' })
+    await testInfo.attach('status-icon-cpu-budget', { body: JSON.stringify({ ...evidence, traceEvents: [from, ...drawn, to] }), contentType: 'application/json' })
     expect(perFrame, '24 sliding icons: main-thread CPU ms per measured animation frame (budget 1 ms)').toBeLessThanOrEqual(1)
   } finally {
+    if (tracing) await cdp.send('Tracing.end')
     await cdp.detach()
   }
 })
