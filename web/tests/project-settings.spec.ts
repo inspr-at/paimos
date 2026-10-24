@@ -57,7 +57,8 @@ async function setup(page: Page, readOnly = false) {
   await page.route('**/api/me/permissions**', route => {
     const project = new URL(route.request().url()).searchParams.get('project_id') ?? undefined
     const answer = mockEffectivePermissions(readOnly ? 'viewer' : 'admin', project)
-    if (!readOnly) answer.workspace.permissions.push('account.use.manage')
+    answer.workspace.permissions.push('delivery.read')
+    if (!readOnly) answer.workspace.permissions.push('account.use.manage', 'delivery.manage')
     return route.fulfill({ json: answer })
   })
   // The existing Work context card remains the owner of this API.
