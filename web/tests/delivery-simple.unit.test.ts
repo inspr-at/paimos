@@ -20,6 +20,7 @@ import { TILES } from '../src/lib/deliveryNumbers'
 import * as numbersText from '../src/lib/deliveryNumbersText'
 import * as ticketsLib from '../src/lib/deliveryTickets'
 import * as building from '../src/lib/deliveryBuilding'
+import * as reviewRounds from '../src/lib/deliveryReviewRounds'
 import * as statusTiming from '../src/lib/statusTiming'
 import * as workFigures from '../src/lib/workFigures'
 import * as flowLib from '../src/lib/deliveryFlow'
@@ -231,12 +232,15 @@ for (const lang of ['en', 'de'] as const) {
       'vue-router': { useRoute: () => Vue.reactive({ query: {}, path: '/p/AEON/delivery', hash: '' }), useRouter: () => ({ replace: () => {} }) },
       '../AppIcon.vue': sfc({ props: ['name', 'size'], render: () => Vue.h('svg') }),
       '../ViewSwitch.vue': stub, './ExpertTile.vue': stub, './LevelSwitch.vue': stub,
+      './ReviewRoundsTile.vue': stub,
       './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub, './FlowView.vue': stub, './TicketsSection.vue': stub, './BuildingSection.vue': stub,
       // AEON-1359: Delivery › Tickets reads on its own; answered (with no figures), so the source chips stand.
       '../../lib/deliveryTickets': ticketsLib, '../../lib/statusTiming': statusTiming, '../../lib/workFigures': workFigures,
       '../../lib/useTicketTiming': { useTicketTiming: () => ({ data: Vue.shallowRef(null), status: Vue.ref('ready'), busy: Vue.ref(false), final: Vue.ref('delivered'), retry() {} }) },
       // AEON-1493: Building it reads on its own; answered, so it stays out of the status row.
       '../../lib/deliveryBuilding': building, '../../lib/useDeliveryBuilding': { useDeliveryBuilding: () => ({ data: Vue.shallowRef(null), status: Vue.ref('ready'), busy: Vue.ref(false), retry() {} }) },
+      // AEON-1718: the independent review read succeeds while these cases vary the Numbers read and preference save.
+      '../../lib/deliveryReviewRounds': reviewRounds, '../../lib/useDeliveryReviewRounds': { useDeliveryReviewRounds: () => ({ data: Vue.shallowRef(null), state: Vue.ref('ready'), retry() {} }) },
       '../../lib/delivery': delivery, '../../lib/deliveryNumbersText': numbersText,
       '../../lib/authz': { can: () => true }, '../../lib/projectSettings': projectSettings, '../../lib/projectDeliverySettings': projectDeliverySettings,
       '../../lib/deliveryFlow': flowLib, '../../lib/deliveryFlowModes': flowModes, '../../lib/deliveryFlowText': flowTextLib, '../../lib/useDeliveryFlow': useFlow,

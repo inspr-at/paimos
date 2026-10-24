@@ -15,7 +15,7 @@ func (rt *runtime) cmdOutcome() *Command {
 		Name:  "outcome",
 		Short: "Record an objective outcome of agent work",
 		Use:   "outcome <command>",
-		subs:  []*Command{rt.cmdOutcomeRecord()},
+		subs:  []*Command{rt.cmdOutcomeRecord(), rt.cmdOutcomeReviewRound(), rt.cmdOutcomeImportDesignRounds()},
 	}
 }
 

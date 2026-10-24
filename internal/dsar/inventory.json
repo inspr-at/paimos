@@ -1892,6 +1892,33 @@
     {
       "classification": "personal",
       "columns": {
+        "actor_principal_id": "personal",
+        "artifact": "review",
+        "at": "personal",
+        "cited_rules": "metadata",
+        "id": "metadata",
+        "idempotency_key": "metadata",
+        "kind": "metadata",
+        "project_id": "metadata",
+        "recorded_at": "personal",
+        "request_digest": "metadata",
+        "review_run_id": "metadata",
+        "reviewer_role": "metadata",
+        "round": "metadata",
+        "source": "metadata",
+        "tenant_id": "metadata",
+        "ticket_node_id": "metadata",
+        "verdict": "metadata"
+      },
+      "locator": {
+        "person_column": "actor_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "outcome_review_rounds"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "daily_points_per_day": "personal"
       },
       "locator": {

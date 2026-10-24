@@ -409,15 +409,16 @@ export function durationTop(p50: number[], p90: number[], target: number | null)
 }
 /** `bridge` joins points across observed buckets without a sample (tickets go live with releases, so a day without
  * one is observed, not missing); gaps stay for partial and no-data buckets. */
-export interface ChartLine { values: (number | null)[]; tone: 'teal' | 'gold'; connect: boolean; bridge?: boolean }
+export interface ChartLine { values: (number | null)[]; tone: 'teal' | 'gold'; connect: boolean; bridge?: boolean; dashed?: boolean }
 export interface ChartPanel {
   top: number; share: number; caption: string; lines: ChartLine[]; band: ([number, number] | null)[] | null; fade: boolean
   targets: { value: number; label: string }[]
+  references?: { value: number; label: string }[]
 }
 export interface ChartModel {
   // 'tickets': Delivery › Tickets' Created → live (AEON-1359); `sparse` dots every point.
-  key: MetricTextKey | 'tickets' | `building-${string}`; kind: TileKind; sparse?: boolean; label: string; unit: string; buckets: ChartBucket[]; panels: ChartPanel[]
-  readouts: string[]; foot: string; legend: 'two' | 'nightly' | null; nights: ('ok' | 'bad' | 'none' | 'nodata')[]
+  key: MetricTextKey | 'tickets' | 'review-rounds' | `building-${string}`; kind: TileKind; sparse?: boolean; label: string; unit: string; buckets: ChartBucket[]; panels: ChartPanel[]
+  readouts: string[]; foot: string; legend: 'two' | 'nightly' | 'review' | null; seriesLabels?: [string, string]; nights: ('ok' | 'bad' | 'none' | 'nodata')[]
 }
 const values = (samples: Measured[], pick: (sample: Measured) => number | null) => samples.map(sample => sample.n > 0 ? pick(sample) : null)
 const present = (list: (number | null)[]) => list.filter((value): value is number => value != null)

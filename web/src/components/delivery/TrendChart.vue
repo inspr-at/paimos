@@ -61,7 +61,7 @@ function drawPanel(panel: ChartPanel, box: Box, main: boolean) {
     const label = zone.status === 'partial' ? props.text.partial : props.text.noData
     return { x, w, status: zone.status, label: main && w > label.length * 5.8 + 12 ? label : '' }
   })
-  const targets = panel.targets.map(target => ({ ...target, y: Y(target.value) }))
+  const targets = [...panel.targets.map(target => ({ ...target, reference: false })), ...(panel.references ?? []).map(target => ({ ...target, reference: true }))].map(target => ({ ...target, y: Y(target.value) }))
   const bands: string[] = []
   if (panel.band && ready.value) {
     let run: [number, number, number][] = []
@@ -91,16 +91,16 @@ function drawPanel(panel: ChartPanel, box: Box, main: boolean) {
     }
     const dots: Dot[] = points.flatMap((point, k) => point ? [{ ...point, tone: line.tone, last: k === points.length - 1,
       shown: point.partial || sparse || !line.connect || (!joined[k] && !points[k + 1]) || k === points.length - 1 }] : [])
-    return { tone: line.tone, segments, dots, points }
+    return { tone: line.tone, dashed: line.dashed, segments, dots, points }
   }) : []
   // The main target label sits above its line unless data is there; then below.
   const labels = targets.map(target => {
-    if (!main) return { label: target.label, x: Lm.value + pw.value - 2, y: box.y - 7 }
+    if (!main) return { label: target.label, reference: target.reference, x: Lm.value + pw.value - 2, y: box.y - 7 }
     const wide = target.label.length * 5.9 + 6, x0 = Lm.value + pw.value - wide
     const near = lines.flatMap(line => line.dots).filter(dot => dot.x >= x0 - 6)
     const hit = (y: number) => near.some(dot => dot.y > y - 13 && dot.y < y + 5)
     const above = target.y - 5, below = target.y + 13
-    return { label: target.label, x: Lm.value + pw.value - 2, y: (above < box.y + 10 || hit(above)) && !hit(below) && below < box.y + box.h + 4 ? below : above }
+    return { label: target.label, reference: target.reference, x: Lm.value + pw.value - 2, y: (above < box.y + 10 || hit(above)) && !hit(below) && below < box.y + box.h + 4 ? below : above }
   })
   return { box, ticks, zones, targets, labels, bands, lines, caption: panel.caption }
 }
@@ -149,6 +149,9 @@ const id = computed(() => `dl-chart-${props.model.key}`)
         <span><svg class="lg-sw" width="14" height="8" aria-hidden="true"><line x1="0" y1="4" x2="14" y2="4" class="g-line" /></svg>{{ text.firstTry }}</span>
         <span><svg class="lg-sw" width="14" height="8" aria-hidden="true"><line x1="0" y1="4" x2="14" y2="4" class="g-line gold" /></svg>{{ text.required }}</span>
       </span>
+      <span v-if="model.legend === 'review'" class="c-key review-key">
+        <span v-for="(label, index) in model.seriesLabels" :key="index"><svg class="lg-sw" width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" class="g-line" :class="{ dashed: index === 1 }" /></svg>{{ label }}</span>
+      </span>
       <span v-if="model.legend === 'nightly'" class="n-legend" aria-hidden="true">
         <span><svg width="12" height="12"><rect width="12" height="12" rx="3" class="n-key ok" /></svg>{{ text.green }}</span>
         <span><svg width="12" height="12"><rect width="12" height="12" rx="3" class="n-key bad" /></svg>{{ text.red }}</span>
@@ -177,16 +180,16 @@ const id = computed(() => `dl-chart-${props.model.key}`)
               <text :x="Lm - 6" :y="tick.y + 3.5" class="ax" text-anchor="end">{{ tick.label }}</text>
             </g>
             <path v-for="(band, b) in panel.bands" :key="`b${b}`" :d="band" class="g-band" :class="{ fade: model.panels[index].fade }" />
-            <line v-for="(target, t) in panel.targets" :key="`t${t}`" :x1="Lm" :x2="Lm + pw" :y1="target.y" :y2="target.y" class="g-target" />
+            <line v-for="(target, t) in panel.targets" :key="`t${t}`" :x1="Lm" :x2="Lm + pw" :y1="target.y" :y2="target.y" :class="target.reference ? 'g-reference' : 'g-target'" />
             <template v-for="(line, l) in panel.lines" :key="`l${l}`">
-              <path v-for="(segment, s) in line.segments" :key="s" :d="segment.d" class="g-line" :class="[line.tone, { part: segment.partial }]" />
+              <path v-for="(segment, s) in line.segments" :key="s" :d="segment.d" class="g-line" :class="[line.tone, { part: segment.partial && model.legend !== 'review', dashed: line.dashed }]" />
               <template v-for="(dot, d) in line.dots" :key="`d${d}`">
                 <circle v-if="dot.partial" :cx="dot.x" :cy="dot.y" r="3" class="g-dot hollow" :class="line.tone" />
                 <circle v-else-if="dot.shown" :cx="dot.x" :cy="dot.y" :r="dot.last ? 4 : 3" class="g-dot" :class="line.tone" />
               </template>
             </template>
             <text v-if="panel.caption" :x="Lm + 2" :y="panel.box.y - 7" class="g-rlabel">{{ panel.caption }}</text>
-            <text v-for="(label, t) in panel.labels" :key="`tl${t}`" :x="label.x" :y="label.y" class="g-tlabel" text-anchor="end">{{ label.label }}</text>
+            <text v-for="(label, t) in panel.labels" :key="`tl${t}`" :x="label.x" :y="label.y" class="g-tlabel" :class="{ reference: label.reference }" text-anchor="end">{{ label.label }}</text>
           </g>
           <text v-for="tick in axis" :key="tick.x" :x="tick.x" :y="H - 4" class="ax" :class="{ on: tick.last }" :text-anchor="tick.last ? 'end' : 'middle'">{{ tick.label }}</text>
           <g v-if="selected !== null">
@@ -230,6 +233,8 @@ const id = computed(() => `dl-chart-${props.model.key}`)
 .g-line { fill: none; stroke: var(--teal); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .g-line.gold { stroke: var(--gold); }
 .g-line.part { stroke-dasharray: 2 3.5; }
+.g-line.dashed { stroke-dasharray: 5 4; }
+.g-reference { stroke: var(--ink-3); stroke-width: 1; opacity: .4; }
 .g-dot { fill: var(--teal); stroke: var(--surface-raised); stroke-width: 2; }
 .g-dot.gold { fill: var(--gold); }
 .g-dot.hollow { fill: var(--surface-raised); stroke: var(--teal); stroke-width: 1.6; }

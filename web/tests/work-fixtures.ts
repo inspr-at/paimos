@@ -9,6 +9,8 @@ import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.t
 import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { buildingAnswer } from './delivery-building-fixtures'
+import { reviewAnswer } from './delivery-review-rounds-fixtures'
+import type { WindowDays } from '../src/lib/deliveryNumbers'
 import { compareModelSort, planningSortValue, type PlanningColumn } from '../src/lib/planning.ts'
 import { defaultStatusHelp } from '../src/lib/statusDefinitions.ts'
 import { PORCELAIN } from '../src/lib/themeEngine.ts'
@@ -435,6 +437,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         coverage: { tickets: 0, complete: 0, inferred: 0, gaps: 0, since: null, partial: true }, buckets: [] } })
     }
     // AEON-1493: Delivery › Building it. No round recorded yet: the section shows its no-data line.
+    const reviewProject = /^\/api\/projects\/([^/]+)\/delivery\/review-rounds$/.exec(path)
+    if (reviewProject && method === 'GET') return route.fulfill({ json: reviewAnswer(decodeURIComponent(reviewProject[1]), Number(query.get('window') ?? 7) as WindowDays, 'no_data') })
     const buildingProject = /^\/api\/projects\/([^/]+)\/delivery\/building$/.exec(path)
     if (buildingProject && method === 'GET') return route.fulfill({ json: buildingAnswer(decodeURIComponent(buildingProject[1]), Number(query.get('window') ?? 7), { empty: true }) })
     const entryNode = /^\/api\/nodes\/([^/]+)\/entry-checks$/.exec(path)
