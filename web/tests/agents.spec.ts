@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
+import { agentData, assistantEvidence, mockAgents, mockAssistants, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { controlStability } from './control-stability'
+import AxeBuilder from '@axe-core/playwright'
 
 const world: AgentWorld = {
   me: me.id,
@@ -26,7 +28,7 @@ async function setup(page: Page, options: AgentMockOptions & { empty?: boolean; 
   await mockWork(page, work, { readOnly: options.readOnly, admin: !options.member })
   const data = agentData({ ...world, empty: options.empty })
   const calls = await mockAgents(page, data, options)
-  return { data, calls }
+  return { data, calls, work }
 }
 async function openAgents(page: Page, path = '/agents') {
   await page.goto(path)
@@ -180,6 +182,16 @@ test('an approval from an agent with no session and no address shows its name', 
   await expect(page.getByTestId('desk-line')).toContainText(/Harbor Clerk waits for this\. Expires in \d+ min/)
   await expect(page.getByRole('dialog')).not.toContainText(`Agent ${principal.slice(0, 8)}`)
   await expect(facts.getByText('Across the whole workspace', { exact: true })).toHaveCount(1)
+  await page.goto(`/decision-desk?assistant=${principal}`)
+  await expect(page.getByTestId('desk-scope')).toContainText('Showing items from this assistant.')
+  await expect(page.locator('.desk-row')).toHaveCount(1)
+  await expect(page.getByTestId(`desk-row-a:${data.approvals[0].id}`)).toBeVisible()
+  await page.getByTestId('desk-scope').getByRole('link', { name: 'Show all', exact: true }).click()
+  await expect(page).toHaveURL('/decision-desk')
+  await expect.poll(() => page.locator('.desk-row').count()).toBeGreaterThan(1)
+  await page.goto('/decision-desk?assistant=invalid')
+  await expect(page.locator('.desk-row')).toHaveCount(0)
+  await expect(page.getByTestId('desk-scope')).toContainText('Invalid assistant filter.')
 })
 
 test('an approval without agent_name falls back to the short agent id', async ({ page }) => {
@@ -732,3 +744,634 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
     await page.screenshot({ path: testInfo.outputPath(`sc2-${colorScheme}-${width}-ticket.png`), fullPage: true })
   })
 }
+
+// AEON-1705 §9: the risk is false live facts, duplicate session identities, or
+// policy actions drifting to another record/person while the right panel updates.
+test('assistants use the existing Agents dock with stable tabs, locked policy and audited revision saves', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
+  // The approved remote entry point exposes Playwright. Run the affected unit
+  // and glyph guard in that same remote checkout before the interactions.
+  const units = execFileSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', 'tests/assistants.unit.test.ts', '--maxWorkers=1'], { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 })
+  const glyphs = execFileSync(process.execPath, ['--test', 'tests/text-glyphs.test.ts'], { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 })
+  await testInfo.attach('assistant-units-and-glyphs', { body: units + glyphs, contentType: 'text/plain' })
+  const errors = watchErrors(page)
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
+  // Capture fixture: an empty queue is a successful read, rather than an
+  // unmocked failure in the adjacent Sessions list (including PRJ-26).
+  await page.route(url => url.pathname === '/api/queue', route => route.fulfill({ json: {
+    items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 4, work_hours: null, warning: false },
+  } }))
+  const { items } = assistantEvidence(Date.now(), me.id)
+  const { writes, events, routineWrites, routines, runOwners, routineReads } = await mockAssistants(page, items, me.id)
+  let policyAccess = true
+  await page.route('**/api/me/permissions*', route => {
+    const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    permissions.workspace.permissions.push('events.read')
+    if (policyAccess) permissions.workspace.permissions.push('agents.create', 'recurrences.manage')
+    return route.fulfill({ json: permissions })
+  })
+  const checks: unknown[] = []
+  const shot = async (name: string) => {
+    const measurements = await page.evaluate(() => {
+      const box = (element: Element | null) => element ? (() => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height } })() : null
+      const title = document.querySelector('.assistant-panel-title')
+      return {
+        viewport: { width: innerWidth, height: innerHeight }, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+        horizontalOverflow: document.documentElement.scrollWidth - innerWidth,
+        policyLines: [...document.querySelectorAll<HTMLElement>('.assistant-glance')].map(element => ({ text: element.textContent, box: box(element), textOverflow: getComputedStyle(element).textOverflow, whiteSpace: getComputedStyle(element).whiteSpace, clipped: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight })),
+        cardLines: [...document.querySelectorAll<HTMLElement>('.phone-facts')].map(element => ({ text: element.textContent, box: box(element) })),
+        header: title ? { title: box(title), more: box(title.querySelector('.assistant-more')), close: box(title.querySelector('.assistant-close')), status: box(document.querySelector('.panel-status')), statusLine: box(document.querySelector('.panel-status-line')), tabs: box(document.querySelector('.assistant-tabs')) } : null,
+        scopeHeading: box(document.querySelector('#assistant-policy-scopes')),
+        queueWarning: document.body.textContent?.includes('Queued work can’t be read right now') ?? false,
+      }
+    })
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-${name}-fix7.png`), fullPage: true })
+    checks.push({ name, ...measurements })
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  await openAgents(page)
+  const section = page.locator('.assistants')
+  const dialFold = page.getByRole('button', { name: 'Fold the dial', exact: true })
+  if (await dialFold.isVisible()) await dialFold.click()
+  await expect(section.getByRole('heading')).toHaveText('Assistants · 2')
+  await expect(section).toHaveClass(/\bglass-card\b/)
+  const layout = page.locator('[data-layout-cycle]')
+  await expect(section.locator('.assistants-head')).toHaveAttribute('aria-owns', 'agents-layout-cycle')
+  await expect(layout).toHaveAttribute('id', 'agents-layout-cycle')
+  await expect(layout).toBeVisible()
+  await expect(layout).toHaveAccessibleName(/^Layout: .+ Next: /)
+  await expect(layout).toHaveAttribute('data-tip', /Next:/)
+  const layoutFrame = await layout.boundingBox(), sectionHead = await section.locator('.assistants-head').boundingBox()
+  expect(layoutFrame!.x).toBeGreaterThanOrEqual(sectionHead!.x)
+  expect(layoutFrame!.x + layoutFrame!.width).toBeLessThanOrEqual(sectionHead!.x + sectionHead!.width)
+  expect(layoutFrame!.y).toBeGreaterThanOrEqual(sectionHead!.y)
+  expect(layoutFrame!.y + layoutFrame!.height).toBeLessThanOrEqual(sectionHead!.y + sectionHead!.height)
+  const cardStyles = await page.locator('.assistants, .sessions').evaluateAll(cards => cards.map(card => {
+    const style = getComputedStyle(card)
+    return [style.backgroundImage, style.borderTopColor, style.borderTopWidth, style.borderRadius, style.boxShadow]
+  }))
+  expect(cardStyles[0]).toEqual(cardStyles[1])
+  await expect(section.locator('.assistant-row')).toHaveCount(2)
+  for (const height of await section.locator('.assistant-row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height))) expect(height).toBeGreaterThanOrEqual(56)
+  // U11: the complete policy must fit in up to two lines at 1440, including
+  // while Status has free room. Removing the wrapping fix fails these checks.
+  for (const line of await section.locator('.assistant-glance').all()) {
+    await expect(line).toBeVisible()
+    await expect(line).toHaveCSS('white-space', 'normal')
+    await expect(line).not.toHaveCSS('text-overflow', 'ellipsis')
+    expect(await line.evaluate(element => {
+      const rect = element.getBoundingClientRect(), row = element.closest('.assistant-row')!.getBoundingClientRect()
+      return element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight && rect.height <= 2 * parseFloat(getComputedStyle(element).lineHeight) + .5 && rect.top >= row.top && rect.bottom <= row.bottom
+    })).toBe(true)
+  }
+  await expect(page.locator('.sessions')).not.toContainText('Queued work can’t be read right now')
+  const positions = await page.evaluate(() => ({ capacity: document.querySelector('.cap-row')!.getBoundingClientRect().bottom, assistants: document.querySelector('.assistants')!.getBoundingClientRect(), sessions: document.querySelector('.sessions')!.getBoundingClientRect().top }))
+  expect(positions.capacity).toBeLessThanOrEqual(positions.assistants.top)
+  expect(positions.assistants.bottom).toBeLessThanOrEqual(positions.sessions)
+  await expect(page.locator(`[data-row="s:${session(5)}"]`)).toHaveCount(0)
+  // Health/spend stay unknown. The Desk confirms there are no open asks for
+  // these assistants; owned routines use D's revisioned API.
+  await expect(section.locator('.assistant-state').first()).toHaveText('Status unavailable')
+  await expect(section.locator('.budget-unknown')).toHaveCount(2)
+  for (const selector of ['.budget-unknown', '.adapter-column']) {
+    for (const cell of await section.locator(selector).all()) {
+      await expect(cell).toHaveText('—')
+      await expect(cell).toHaveAttribute('title', 'Not available yet')
+      await expect(cell).toHaveAttribute('data-tip', 'Not available yet')
+    }
+  }
+  await expect(section.locator('.assistant-approvals > span')).toHaveCount(2)
+  for (const cell of await section.locator('.assistant-approvals > span').all()) {
+    await expect(cell).toHaveText('—')
+    await expect(cell).not.toHaveAttribute('data-tip', 'Not available yet')
+  }
+  const lastActivity = section.locator('.assistant-row').first().locator('.last-column')
+  await expect(lastActivity).toHaveText('Ran Inbox triage 1 · 30 min ago')
+  await expect(lastActivity).not.toHaveAttribute('data-tip', 'Not available yet')
+  await expect(section.locator('.assistant-row').first().locator('.routines-column')).not.toHaveAttribute('data-tip', 'Not available yet')
+  await expect(section.locator('.assistant-open').first()).toHaveAccessibleDescription(/Ran Inbox triage 1 · 30 min ago/)
+  expect(await lastActivity.evaluate(cell => cell.scrollWidth <= cell.clientWidth)).toBe(true)
+  await section.locator('.budget-unknown').first().hover()
+  await expect(page.locator('.tooltip:popover-open')).toHaveText('Not available yet')
+  const amy = items.find(item => item.display_name === 'Amy')!
+  await section.hover()
+  const stableRows = await controlStability(page, { layout, amy: section.locator(`[data-assistant="${amy.principal_id}"] .assistant-open`), scout: section.locator('.assistant-row').nth(1).locator('.assistant-open') }, { tolerance: 0 })
+  await stableRows.check(async () => {
+    amy.display_name = 'Zamy'; amy.revision++
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(section.locator('.assistant-name strong').first()).toHaveText('Zamy')
+  })
+  stableRows.done()
+  await page.mouse.move(1, 1)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+  amy.display_name = 'Amy'; amy.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(section.locator(`[data-assistant="${amy.principal_id}"] strong`)).toHaveText('Amy')
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(section.locator('.assistant-name strong').first()).toHaveText('Amy')
+  expect((await new AxeBuilder({ page }).include('.assistants').withRules(['color-contrast']).analyze()).violations).toEqual([])
+  // A16/U10: a real long policy must be clipped only after two lines, and
+  // its row must size from the text even with WCAG 1.4.12 spacing overrides.
+  amy.policy.allowed_projects = ['p-aeon', 'p-pharos', 'KNOWLEDGE', 'RESEARCH', 'OPERATIONS', 'AUTOMATION', 'INSPR', 'SUPPORT']
+  amy.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  const longRow = section.locator(`[data-assistant="${amy.principal_id}"]`), longPolicy = longRow.locator('.assistant-glance')
+  const fullPolicy = 'AEON, PHAROS, KNOWLEDGE, RESEARCH, OPERATIONS, AUTOMATION, INSPR, SUPPORT · asks before acting · $10 a week'
+  await expect(longPolicy).toHaveText(fullPolicy)
+  const checkLongPolicy = async () => {
+    const measurements = await longPolicy.evaluate(element => {
+      const box = element.getBoundingClientRect(), row = element.closest('.assistant-row')!, rowBox = row.getBoundingClientRect()
+      const nameBox = row.querySelector('.assistant-name')!.getBoundingClientRect(), nextBox = row.nextElementSibling!.getBoundingClientRect()
+      return { lineHeight: parseFloat(getComputedStyle(element).lineHeight), height: box.height, hiddenHeight: element.scrollHeight - element.clientHeight, horizontalOverflow: element.scrollWidth - element.clientWidth, rowHeight: rowBox.height, inside: nameBox.top >= rowBox.top && box.bottom <= rowBox.bottom, noOverlap: rowBox.bottom <= nextBox.top && box.bottom <= nextBox.top }
+    })
+    expect(measurements.height).toBeGreaterThan(measurements.lineHeight)
+    expect(measurements.height).toBeLessThanOrEqual(2 * measurements.lineHeight + .5)
+    expect(measurements.hiddenHeight).toBeGreaterThan(1)
+    expect(measurements.horizontalOverflow).toBeLessThanOrEqual(0)
+    expect(measurements.rowHeight).toBeGreaterThan(56)
+    expect(measurements.inside).toBe(true)
+    expect(measurements.noOverlap).toBe(true)
+    await expect(longPolicy).toHaveAttribute('data-tip', fullPolicy)
+    return measurements
+  }
+  const regularPolicy = await checkLongPolicy()
+  const spacing = await page.addStyleTag({ content: '.assistants, .assistants * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }' })
+  const spacedPolicy = await checkLongPolicy()
+  expect(spacedPolicy.rowHeight).toBeGreaterThan(regularPolicy.rowHeight)
+  await longPolicy.hover()
+  await expect(page.locator('.tooltip:popover-open')).toHaveText(fullPolicy)
+  await page.keyboard.press('Escape')
+  await spacing.evaluate(element => element.remove())
+  await checkLongPolicy()
+  checks.push({ name: '1440-long-policy-text-spacing', regularPolicy, spacedPolicy, fullPolicy })
+  await page.mouse.move(1, 1)
+  await shot('1440-light-typical')
+  await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-typical')
+  expect((await new AxeBuilder({ page }).include('.assistants').withRules(['color-contrast']).analyze()).violations).toEqual([])
+  await page.emulateMedia({ colorScheme: 'light' })
+  // Keep the existing compact/phone and policy-edit fixtures short; the long
+  // policy above exercises desktop clamping and its matching captures only.
+  amy.policy.allowed_projects = ['p-aeon', 'p-pharos']; amy.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(longPolicy).toHaveText('AEON, PHAROS · asks before acting · $10 a week')
+  await expect(longPolicy).not.toHaveAttribute('data-clip-tip')
+  await page.setViewportSize({ width: 1024, height: 1000 })
+  await expect(section.locator('.last-column').first()).toBeHidden()
+  await expect(section.locator('.folded-facts').first()).toBeVisible()
+  await shot('1024-light-folded')
+  await page.emulateMedia({ colorScheme: 'dark' }); await shot('1024-dark-folded')
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const policyRevision = amy.revision
+  await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
+  const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
+  await expect(details).toBeVisible()
+  // U3/U2: unavailable status has no placeholder line or empty action band.
+  // All icon actions share the title row; tabs follow the actual status.
+  await expect(details.locator('.panel-status-line')).toHaveCount(0)
+  await expect(details.locator('.assistant-actions')).toHaveCount(0)
+  const more = details.getByRole('button', { name: 'More assistant actions' })
+  await expect(details.locator('.assistant-panel-title').getByRole('button', { name: 'More assistant actions' })).toBeVisible()
+  const titleBox = (await details.locator('.assistant-panel-title').boundingBox())!, moreBox = (await more.boundingBox())!
+  expect(moreBox.y).toBeGreaterThanOrEqual(titleBox.y)
+  expect(moreBox.y + moreBox.height).toBeLessThanOrEqual(titleBox.y + titleBox.height)
+  const statusBox = (await details.locator('.panel-status').boundingBox())!, tabsBox = (await details.getByRole('tablist').boundingBox())!
+  expect(tabsBox.y - statusBox.y - statusBox.height).toBeLessThanOrEqual(10)
+  // The narrow list beside the dock uses policy, never a dash-only line.
+  for (const card of await section.locator('.assistant-row').all()) {
+    await expect(card.locator('.phone-facts')).toBeVisible()
+    await expect(card.locator('.phone-facts')).toContainText('AEON')
+    await expect(card.locator('.phone-facts')).not.toHaveText('—')
+  }
+  const overview = details.getByRole('tabpanel', { name: 'Overview', exact: true })
+  await expect(overview.locator('.overview-pending')).toHaveText("Spend and adapter health appear once they're connected.")
+  await expect(overview).not.toContainText('Spend and daily totals are not available yet.')
+  await expect(overview).not.toContainText('Adapter health is not available yet.')
+  await expect(overview).not.toContainText('Assistant approvals are not available yet.')
+  await expect(overview.locator('[data-tip="Not available yet"]')).toHaveCount(3)
+  await expect(overview).toContainText('No open approvals')
+  await expect(details.locator('.assistant-panel-head')).not.toContainText('Pause and resume for this assistant are not available yet.')
+  await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
+  const tabs = details.getByRole('tablist')
+  const controls = { tabs, more, close: details.getByRole('button', { name: 'Close assistant details' }), frame: details, ...Object.fromEntries(['Overview', 'Approvals', 'Routines', 'Policy', 'Activity'].map(name => [name, tabs.getByRole('tab', { name, exact: true })])) }
+  await expectStableControls({ controls, scrollAreas: { content: details.locator('.assistant-panel-scroll') }, interactions: ['Approvals', 'Routines', 'Policy', 'Activity', 'Overview'].map(name => ({ name, run: async () => {
+    await tabs.getByRole('tab', { name, exact: true }).click()
+    if (name === 'Approvals') {
+      const pane = details.getByRole('tabpanel', { name: 'Approvals', exact: true })
+      await expect(pane).toContainText('No open approvals')
+      await expect(pane).toContainText('Recent decisions are unavailable.')
+      await expect(pane.getByRole('button')).toHaveCount(0)
+    }
+    if (name === 'Routines') {
+      const pane = details.getByRole('tabpanel', { name: 'Routines', exact: true })
+      await expect(pane.locator('[data-routine]')).toHaveCount(3)
+      await expect(pane).toContainText('Every Monday, Tuesday, Wednesday, Thursday, Friday at 08:00')
+      await expect(pane.getByRole('link', { name: 'AEON-1 · Aeon foundation' }).first()).toHaveAttribute('href', '/p/AEON/AEON-1')
+      const row = pane.locator('[data-routine]').first(), action = row.getByRole('button')
+      const routineGuard = await controlStability(page, { row, action, tabs, close: controls.close })
+      await routineGuard.check(async () => { await action.click(); await expect(action).toHaveAccessibleName('Resume Inbox triage 1') })
+      await routineGuard.check(async () => { await action.click(); await expect(action).toHaveAccessibleName('Pause Inbox triage 1') })
+      routineGuard.done()
+      expect(routineWrites).toEqual([{ id: routines[0]!.id, action: 'pause', expected_revision: 1 }, { id: routines[0]!.id, action: 'resume', expected_revision: 2 }])
+      const readsBefore = routineReads.length
+      runOwners[routines[1]!.id] = 'af000000-0000-4000-8000-000000000099'
+      const ownerGuard = await controlStability(page, Object.fromEntries([0, 1, 2].map(index => [`routine ${index + 1}`, pane.locator('[data-routine]').nth(index).getByRole('button')])))
+      await ownerGuard.check(async () => {
+        await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit: (name: string, data: string, id: number) => void } }).fixtureQuietStreams.emit('recurrence.updated', '{}', 1705))
+        await expect(pane.locator('[data-routine]').nth(1)).toContainText('The latest run belongs to another owner.')
+        await expect(pane.locator('[data-routine]').nth(1).getByRole('link', { name: 'AEON-1 · Aeon foundation' })).toHaveCount(0)
+      })
+      ownerGuard.done()
+      expect(routineReads.slice(readsBefore)).not.toContain(`/api/recurrences/${routines[1]!.id}/runs/${routines[1]!.last_run.id}/agent-result`)
+    }
+    if (name === 'Policy') {
+      const policy = details.getByRole('tabpanel', { name: 'Policy', exact: true })
+      await expect(policy.getByRole('heading', { name: 'What it may do', exact: true })).toBeVisible()
+      await expect(policy).toContainText('Read and write tickets')
+      await expect(policy.getByText('nodes.read', { exact: true })).toHaveCount(0)
+      for (const locked of ['outward', 'secrets']) await expect(details.locator(`[data-locked-rule="${locked}"] input, [data-locked-rule="${locked}"] select`)).toHaveCount(0)
+    }
+    await shot(`1440-light-panel-${name.toLowerCase()}`)
+    await page.emulateMedia({ colorScheme: 'dark' }); await shot(`1440-dark-panel-${name.toLowerCase()}`)
+    await page.emulateMedia({ colorScheme: 'light' })
+  } })) })
+  await details.getByRole('button', { name: 'More assistant actions' }).click()
+  const pause = page.getByRole('menuitem', { name: 'Pause', exact: true })
+  await expect(pause).toBeDisabled()
+  await expect(pause).toHaveAttribute('data-tip', 'Pause and resume for this assistant are not available yet.')
+  await expect(pause).toHaveAccessibleDescription('Pause and resume for this assistant are not available yet.')
+  await pause.hover()
+  await expect(page.locator('.tooltip:popover-open')).toHaveText('Pause and resume for this assistant are not available yet.')
+  await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
+  const scopeGroup = details.getByRole('region', { name: 'What it may do', exact: true })
+  await expect(scopeGroup.getByRole('heading', { name: 'What it may do', exact: true })).toBeVisible()
+  await expect(scopeGroup.getByRole('checkbox')).toHaveCount(6)
+  await expect(details.getByRole('heading', { name: 'Budget', exact: true })).toBeVisible()
+  const budget = details.getByRole('textbox', { name: 'Per week', exact: true })
+  await expect(budget).toHaveValue('10')
+  await budget.scrollIntoViewIfNeeded()
+  const save = details.getByRole('button', { name: /^Save/ })
+  const saveGuard = await controlStability(page, { budget, save, cancel: details.getByRole('button', { name: /^Cancel/ }), tabs })
+  await saveGuard.check(() => budget.fill('15'))
+  saveGuard.done()
+  await details.locator('.assistant-panel-scroll').evaluate(element => { element.scrollTop = 0 })
+  await details.locator('.assistant-panel-scroll').evaluate(element => {
+    const input = element.querySelector('.policy-budget-fields input')!
+    // Keep the scope heading and the entire edited field in the same capture;
+    // centring the budget would scroll the heading past the pinned tabs.
+    element.scrollTop = Math.max(0, input.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom + 16)
+  })
+  await expect(scopeGroup.getByRole('heading', { name: 'What it may do', exact: true })).toBeVisible()
+  expect(await budget.evaluate(input => {
+    const field = input.getBoundingClientRect(), body = input.closest('.assistant-panel-scroll')!.getBoundingClientRect()
+    return field.top >= body.top && field.bottom <= body.bottom
+  })).toBe(true)
+  await shot('1440-light-panel-policy-edit')
+  await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-panel-policy-edit')
+  await page.emulateMedia({ colorScheme: 'light' })
+  await save.click()
+  await expect(details.getByRole('status')).toHaveText('Policy saved')
+  expect(writes).toHaveLength(1)
+  expect(writes[0]).toMatchObject({ id: amy.principal_id, body: { expected_revision: policyRevision, policy: { weekly_budget: { amount: '15', unit: 'USD' }, outward_action_rule: 'approval_required', never_ask_person_for_secrets_or_manual_steps: true } } })
+  expect(events).toHaveLength(1)
+  await expect(details.locator('.policy-audit')).toContainText(/Changed by .*: Budget: \$10 to \$15/)
+  // A conflicting write must retain the draft and never report a successful save.
+  await details.getByRole('button', { name: 'More assistant actions' }).click()
+  await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
+  await budget.fill('20'); amy.revision++
+  await save.click()
+  await expect(details.getByRole('status')).toContainText('The policy changed while this draft was open')
+  await expect(budget).toHaveValue('20')
+  expect(writes.at(-1)?.body.expected_revision).toBe(policyRevision + 1)
+  await details.getByRole('button', { name: /^Cancel/ }).click()
+  await details.getByRole('button', { name: 'Close assistant details' }).click()
+  await expect(details).toHaveCount(0)
+  policyAccess = false
+  await page.reload()
+  await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
+  await details.getByRole('tab', { name: 'Policy', exact: true }).click()
+  await expect(details).toContainText('Only people with Policy access can change this.')
+  await expect(details.getByRole('textbox')).toHaveCount(0)
+  await expect(details.getByRole('button', { name: 'More assistant actions' })).toHaveCount(0)
+  expect((await new AxeBuilder({ page }).include('.assistant-panel').withRules(['color-contrast']).analyze()).violations).toEqual([])
+  await shot('1440-light-panel-policy-readonly')
+  await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-panel-policy-readonly')
+  await page.emulateMedia({ colorScheme: 'light' })
+  for (const width of [390, 320]) {
+    await details.getByRole('button', { name: 'Close assistant details' }).click()
+    await page.setViewportSize({ width, height: 844 })
+    await section.scrollIntoViewIfNeeded()
+    expect(await section.locator('.assistant-row').first().evaluate(el => el.getBoundingClientRect().height)).toBe(64)
+    for (const card of await section.locator('.assistant-row').all()) {
+      await expect(card.locator('.phone-facts')).toBeVisible()
+      await expect(card.locator('.phone-facts')).toContainText('AEON')
+      await expect(card.locator('.phone-facts')).not.toHaveText('—')
+      expect(await card.locator('.phone-facts').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    }
+    if (width === 390) {
+      await shot('390-light-cards')
+      await page.emulateMedia({ colorScheme: 'dark' }); await shot('390-dark-cards')
+      await page.emulateMedia({ colorScheme: 'light' })
+    }
+    await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
+    const sheet = await details.boundingBox()
+    expect(sheet?.height).toBe(844)
+    expect(await details.getByRole('tab', { name: 'Overview', exact: true }).evaluate(el => el.getBoundingClientRect().height)).toBe(44)
+    await expectStableControls({ controls: { tabs: details.getByRole('tablist'), close: details.getByRole('button', { name: 'Close assistant details' }), sheet: details }, scrollAreas: { body: details.locator('.assistant-panel-scroll') }, interactions: ['Overview', 'Policy'].map(name => ({ name, run: async () => {
+      await details.getByRole('tab', { name, exact: true }).click()
+      if (width === 390) {
+        await shot(`390-light-sheet-${name.toLowerCase()}`)
+        await page.emulateMedia({ colorScheme: 'dark' }); await shot(`390-dark-sheet-${name.toLowerCase()}`)
+        await page.emulateMedia({ colorScheme: 'light' })
+      }
+    } })) })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  }
+  await details.getByRole('button', { name: 'Close assistant details' }).click()
+  await expect(details).toHaveCount(0)
+  items.push(...Array.from({ length: 5 }, (_, n) => ({ ...amy, principal_id: `af000000-0000-4000-8000-00000000000${n}`, display_name: `Research ${n}` })))
+  await page.reload()
+  await expect(section.locator('.assistant-row')).toHaveCount(5)
+  await section.getByRole('button', { name: 'Show all (7)', exact: true }).click()
+  await expect(section.locator('.assistant-row')).toHaveCount(7)
+  await page.reload()
+  await expect(section.locator('.assistant-row')).toHaveCount(7)
+  const longName = 'Rechercheassistentin für bereichsübergreifende Wissenspflege und Posteingang'
+  amy.display_name = longName; amy.revision++
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.reload()
+  await expect(section.locator(`[data-assistant="${amy.principal_id}"] strong`)).toHaveAttribute('data-tip', longName)
+  await section.scrollIntoViewIfNeeded(); await shot('390-dark-long-german-name')
+  await section.locator(`[data-assistant="${amy.principal_id}"] .assistant-open`).click()
+  await expect(details.locator('.assistant-title-name')).toHaveAttribute('data-tip', longName)
+  await shot('390-dark-sheet-long-german-name')
+  const identityGuard = await controlStability(page, { sheet: details, tabs: details.getByRole('tablist'), close: details.getByRole('button', { name: 'Close assistant details' }) })
+  await identityGuard.check(async () => { amy.display_name = 'Amy'; amy.revision++; await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await expect(details.locator('.assistant-title-name')).toHaveText('Amy') })
+  identityGuard.done()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  expect(errors).toEqual([])
+  await testInfo.attach('aeon-1705-fix7-checks.json', { body: JSON.stringify(checks, null, 2), contentType: 'application/json' })
+})
+
+test('assistant Desk approvals keep independent links, waiting order and partial coverage', async ({ page }, testInfo) => {
+  // Risk: merged outward approvals never reach Agents, or a partial/failed read
+  // claims a complete count. Deciding must remain exclusively on the Desk.
+  test.setTimeout(120_000)
+  const errors = watchErrors(page), now = Date.now()
+  const { data, work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
+  const { items } = assistantEvidence(now, me.id)
+  const amy = items.find(item => item.display_name === 'Amy')!
+  amy.display_name = 'Zamy' // Waiting must outrank Scout's alphabetical position.
+  await mockAssistants(page, items, me.id)
+  const asks = [1, 2].map(n => ({ ...data.approvals[0]!, id: `da000000-0000-4000-8000-00000000000${n}`, agent_principal_id: amy.principal_id, agent_name: 'Same display name', scope: 'approvals.request.outward_message', resource_kind: 'node', resource_id: 'n-a1', run_id: null, rationale: `Send the approved summary ${n}`, decision: null, proposed_at: new Date(now - n * 60_000).toISOString(), expires_at: new Date(now + 3600_000).toISOString() }))
+  data.approvals.push(...asks)
+  let partial = false, readable = true, mayApprove = true
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/me/permissions*', route => {
+    const effective = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    if (!mayApprove) effective.workspace.permissions = effective.workspace.permissions.filter(permission => permission !== 'approvals.decide')
+    return route.fulfill({ json: effective })
+  })
+  await page.route('**/api/decision-desk/projection?**', async route => {
+    await held
+    if (!readable) return route.fulfill({ status: 503, json: { error: 'Desk temporarily unavailable' } })
+    const cursor = Number(new URL(route.request().url()).searchParams.get('cursor') ?? 0)
+    const rows = asks.map(ask => ({ id: ask.id, kind: 'approval', revision: 1, title: ask.rationale, created_at: ask.proposed_at, expires_at: ask.expires_at, held: true, can_decide: mayApprove, asked_by: { id: ask.agent_principal_id, name: ask.agent_name }, ticket_key: 'AEON-1', href: `/decision-desk?item=a:${ask.id}`, source: `/api/approvals/${ask.id}` }))
+    const other = data.approvals[0]!
+    rows.push({ ...rows[0]!, id: other.id, asked_by: { id: other.agent_principal_id, name: asks[0]!.agent_name }, href: `/decision-desk?item=a:${other.id}`, source: `/api/approvals/${other.id}` })
+    return route.fulfill({ json: { items: rows, counts: { open: partial ? 1003 : 3, held: partial ? 1003 : 3, chores: 0 }, has_more: partial, ...(partial ? { next_cursor: String(cursor + 1) } : {}), as_of: new Date(now).toISOString() } })
+  })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await openAgents(page)
+  const section = page.locator('.assistants'), amyRow = section.locator(`[data-assistant="${amy.principal_id}"]`)
+  await expect(section.locator('.assistant-row')).toHaveCount(2)
+  await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+  release()
+  const link = amyRow.getByRole('link', { name: '2 to approve', exact: true })
+  await expect(link).toHaveAttribute('href', `/decision-desk?assistant=${amy.principal_id}`)
+  await expect(section.locator('.assistant-name strong').first()).toHaveText('Zamy')
+  await expect(amyRow.locator('.assistant-state')).toHaveText('Waiting for you')
+  await amyRow.locator('.assistant-open').focus()
+  await page.keyboard.press('Tab')
+  await expect(link).toBeFocused()
+  await expect(page.getByRole('complementary', { name: 'Assistant details', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(`/decision-desk?assistant=${amy.principal_id}`)
+  await expect(page.getByTestId('desk-scope')).toContainText('Showing items from this assistant.')
+  for (const ask of asks) await expect(page.getByTestId(`desk-row-a:${ask.id}`)).toBeVisible()
+  await expect(page.getByTestId(`desk-row-a:${data.approvals[0]!.id}`)).toHaveCount(0)
+  await openAgents(page)
+  await expect(link).toBeVisible()
+  amy.display_name = 'Rechercheassistentin für bereichsübergreifende Wissenspflege und Posteingang'; amy.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(amyRow.locator('strong')).toHaveAttribute('data-tip', amy.display_name)
+  const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
+  const expectClearApprovalBands = async () => {
+    const bands = await amyRow.evaluate(row => {
+      const box = (selector: string) => { const r = row.querySelector(selector)!.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, height: r.height } }
+      return { row: row.getBoundingClientRect().height, status: box('.assistant-state'), spend: box('.phone-facts'), link: box('.assistant-approvals a') }
+    })
+    expect(bands.row).toBe(64)
+    expect(bands.link.height).toBeGreaterThanOrEqual(44)
+    expect(bands.link.y, 'approval hit area starts below the status band').toBeGreaterThanOrEqual(bands.status.bottom)
+    expect(bands.link.x, 'approval hit area stays beside the spend facts').toBeGreaterThanOrEqual(bands.spend.right)
+  }
+  // A narrow card on a wide viewport must use the same non-overlapping bands.
+  await section.evaluate(element => { element.style.maxWidth = '500px' })
+  await expectClearApprovalBands()
+  await section.evaluate(element => { element.style.removeProperty('max-width') })
+  const checks: { width: number; theme: string; approvals: number; overflow: number }[] = []
+  for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await section.scrollIntoViewIfNeeded()
+    if (width === 390) {
+      await expectClearApprovalBands()
+      await amyRow.locator('.assistant-state').click()
+      await expect(details).toBeVisible()
+      await details.getByRole('button', { name: 'Close assistant details' }).click()
+      await expect(page).toHaveURL('/agents')
+    }
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-fix5-${width}-${theme}-waiting.png`), fullPage: true })
+    await amyRow.locator('.assistant-open').click()
+    const tabs = details.getByRole('tablist'), close = details.getByRole('button', { name: 'Close assistant details' })
+    await expectStableControls({ controls: { tabs, close, overview: tabs.getByRole('tab', { name: 'Overview', exact: true }), approvals: tabs.getByRole('tab', { name: 'Approvals', exact: true }), ...(width === 390 ? { sheet: details } : {}) }, scrollAreas: { body: details.locator('.assistant-panel-scroll') }, interactions: [{ name: 'open approvals without moving controls', run: async () => {
+      await tabs.getByRole('tab', { name: 'Approvals', exact: true }).click()
+      const pane = details.getByRole('tabpanel', { name: 'Approvals', exact: true })
+      await expect(pane.locator('.assistant-log-entry')).toHaveCount(2)
+      await expect(pane).toContainText('Send the approved summary 1')
+      await expect(pane).toContainText('AEON-1')
+      await expect(pane).toContainText('Recent decisions are unavailable.')
+      await expect(pane.getByRole('button')).toHaveCount(0)
+      await expect(pane.getByRole('link', { name: 'Open on the Desk', exact: true }).first()).toHaveAttribute('href', `/decision-desk?assistant=${amy.principal_id}&item=a%3A${asks[0]!.id}`)
+    } }] })
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+    checks.push({ width, theme, approvals: 2, overflow })
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-fix5-${width}-${theme}-approvals.png`), fullPage: true })
+    await close.click()
+  }
+  await amyRow.locator('.assistant-open').click()
+  await details.getByRole('tab', { name: 'Approvals', exact: true }).click()
+  await page.clock.install()
+  const wake = async () => {
+    await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit: (name: string, data: string, id: number) => void } }).fixtureQuietStreams.emit('approval.proposed', '{}', 1705))
+    await page.clock.fastForward(3001)
+  }
+  const countGuard = await controlStability(page, { assistant: amyRow.locator('.assistant-open'), approvalLink: amyRow.locator('.assistant-approvals a') })
+  const digitLeft = () => amyRow.locator('.assistant-approvals a').evaluate(link => {
+    const range = document.createRange()
+    range.setStart(link.firstChild!, 0); range.setEnd(link.firstChild!, 1)
+    return range.getBoundingClientRect().x
+  })
+  const beforeDigit = await digitLeft()
+  await countGuard.check(async () => {
+    partial = true
+    await wake()
+    await expect(amyRow.getByRole('link', { name: '2+ to approve', exact: true })).toHaveAttribute('title', 'This list is partial; more entries are available.')
+  })
+  countGuard.done()
+  expect(Math.abs(await digitLeft() - beforeDigit), 'the first digit stays still when the count becomes partial').toBeLessThanOrEqual(.5)
+  await expect(details.locator('.panel-status-line')).toContainText('At least 2 actions need an approval')
+  await expect(details.getByRole('tabpanel', { name: 'Approvals', exact: true })).toContainText('This list is partial; more entries are available.')
+  readable = false
+  await wake()
+  await expect(details.getByRole('alert')).toHaveText('Open approvals could not be refreshed. Check again on the Desk.')
+  readable = true; partial = false; mayApprove = false
+  await page.reload()
+  await expect(amyRow.locator('.assistant-state')).toHaveText('Waiting for an approval')
+  await expect(amyRow.getByRole('link', { name: '2 to approve', exact: true })).toBeVisible()
+  await testInfo.attach('aeon-1705-fix5-checks.json', { body: JSON.stringify(checks), contentType: 'application/json' })
+  expect(errors).toEqual([])
+})
+
+test('assistant admission waiting sort retries after hover and focus leave the section', async ({ page }) => {
+  // Risk: the first Desk read arrives during interaction, permanently losing
+  // waiting-first admission order or moving a row under the pointer/focus.
+  const errors = watchErrors(page), now = Date.now()
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
+  const { items } = assistantEvidence(now, me.id)
+  const amy = items.find(item => item.display_name === 'Amy')!
+  amy.display_name = 'Zamy'
+  await mockAssistants(page, items, me.id)
+  let held: Promise<void>
+  await page.route('**/api/decision-desk/projection?**', async route => {
+    await held
+    return route.fulfill({ json: { items: [{ id: 'da000000-0000-4000-8000-000000000001', kind: 'approval', revision: 1, title: 'Send the summary', created_at: new Date(now).toISOString(), held: true, asked_by: { id: amy.principal_id, name: amy.display_name }, href: '/decision-desk?item=a:da000000-0000-4000-8000-000000000001' }], counts: { open: 1, held: 1, chores: 0 }, has_more: false, as_of: new Date(now).toISOString() } })
+  })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  for (const interaction of ['pointer', 'focus']) await test.step(interaction, async () => {
+    let release!: () => void
+    held = new Promise<void>(resolve => { release = resolve })
+    await page.mouse.move(0, 0)
+    await openAgents(page)
+    const section = page.locator('.assistants'), amyRow = section.locator(`[data-assistant="${amy.principal_id}"]`)
+    await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+    const open = amyRow.locator('.assistant-open')
+    if (interaction === 'pointer') await section.hover()
+    else await open.focus()
+    const guard = await controlStability(page, { amy: open, scout: section.locator('.assistant-row').first().locator('.assistant-open') }, { tolerance: 0 })
+    await guard.check(async () => {
+      release()
+      await expect(amyRow.getByRole('link', { name: '1 to approve', exact: true })).toBeVisible()
+      await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+    })
+    if (interaction === 'focus') await guard.check(async () => {
+      await amyRow.getByRole('link').focus()
+      await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+    })
+    guard.done()
+    if (interaction === 'pointer') await page.mouse.move(0, 0)
+    else await page.locator('h1').evaluate(element => { element.tabIndex = -1; element.focus() })
+    await expect(section.locator('.assistant-name strong').first()).toHaveText('Zamy')
+  })
+  expect(errors).toEqual([])
+})
+
+test('zero assistants show the permission-gated existing connect flow without sample rows', async ({ page }, testInfo) => {
+  test.setTimeout(90_000)
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
+  const items: ReturnType<typeof assistantEvidence>['items'] = []
+  await mockAssistants(page, items, me.id)
+  let connectAccess = true
+  await page.route('**/api/me/permissions*', route => {
+    const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    if (connectAccess) permissions.workspace.permissions.push('agents.create')
+    return route.fulfill({ json: permissions })
+  })
+  await page.goto('/agents')
+  const section = page.locator('.assistants')
+  for (const permitted of [true, false]) {
+    connectAccess = permitted
+    await page.reload()
+    const fold = page.getByRole('button', { name: 'Fold the dial', exact: true })
+    if (await fold.isVisible()) await fold.click()
+    await expect(section).toContainText('No assistants yet.')
+    await expect(section).toHaveClass(/\bglass-card\b/)
+    await expect(section.locator('.assistants-head')).toContainText('Assistants · 0')
+    await expect(section.locator('.assistant-row')).toHaveCount(0)
+    const connect = section.getByRole('link', { name: 'Connect an assistant', exact: true })
+    await expect(connect).toHaveCount(permitted ? 1 : 0)
+    if (permitted) await expect(connect).toHaveAttribute('href', '/agents/register-agent?kind=assistant')
+    for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+      if (width === 1440) {
+        await expect(section.locator('.assistants-head')).toHaveAttribute('aria-owns', 'agents-layout-cycle')
+        await expect(page.locator('#agents-layout-cycle')).toHaveAccessibleName(/^Layout: .+ Next: /)
+        await expect(page.locator('#agents-layout-cycle')).toHaveAttribute('data-tip', /Next:/)
+      }
+      await page.screenshot({ path: testInfo.outputPath(`aeon-1705-${width}-${theme}-empty-${permitted ? 'connect' : 'readonly'}-fix1.png`), fullPage: true })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+    }
+  }
+  connectAccess = true
+  await page.reload()
+  await section.getByRole('link', { name: 'Connect an assistant', exact: true }).click()
+  await expect(page).toHaveURL('/agents/register-agent?kind=assistant')
+  await expect(page.getByRole('heading', { name: 'Connect an assistant', exact: true })).toBeVisible()
+  await expect(page.getByText('Creates an identity without credentials, project access or spend authority.', { exact: false })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Harbor Clerk')
+  await page.getByRole('button', { name: 'Connect an assistant', exact: false }).click()
+  await expect(page).toHaveURL(/\/agents\?assistant=/)
+  await expect(page.getByRole('complementary', { name: 'Assistant details' }).getByRole('heading', { name: /Harbor Clerk/ })).toBeVisible()
+  expect(items).toHaveLength(1)
+  expect(items[0]!.policy.allowed_projects).toEqual([])
+  expect(items[0]!.policy.weekly_budget.amount).toBe('0')
+  const phonePanel = page.getByRole('complementary', { name: 'Assistant details' })
+  await phonePanel.getByRole('button', { name: 'More assistant actions' }).click()
+  const phonePause = page.getByRole('menuitem', { name: 'Pause', exact: true })
+  await expect(phonePause).toBeDisabled()
+  await expect(phonePause.locator('.pause-reason')).toBeVisible()
+  await expect(phonePause.locator('.pause-reason')).toHaveText('Pause and resume for this assistant are not available yet.')
+  await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
+  const phoneBudget = phonePanel.getByRole('textbox', { name: 'Per week', exact: true })
+  await phoneBudget.scrollIntoViewIfNeeded()
+  await expectStableControls({ controls: { sheet: phonePanel, save: phonePanel.getByRole('button', { name: /^Save/ }), cancel: phonePanel.getByRole('button', { name: /^Cancel/ }), budget: phoneBudget, tabs: phonePanel.getByRole('tablist') }, scrollAreas: { body: phonePanel.locator('.assistant-panel-scroll') }, interactions: [{ name: 'edit a policy on the phone', run: () => phoneBudget.fill('2') }] })
+  await page.screenshot({ path: testInfo.outputPath('aeon-1705-390-dark-sheet-policy-edit-fix1.png'), fullPage: true })
+  await phoneBudget.press('ControlOrMeta+Enter')
+  await expect(phonePanel.getByRole('status')).toHaveText('Policy saved')
+  expect(items[0]!.policy.weekly_budget.amount).toBe('2')
+  // Even a principal carrying person-only permission names must use its own
+  // self-policy route and never acquire Policy editing controls as an agent.
+  const self = items[0]!, agentRequests: string[] = []
+  page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/assistants')) agentRequests.push(new URL(request.url()).pathname) })
+  await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: self.principal_id, name: self.display_name, kind: 'agent', roles: ['admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
+  await page.reload()
+  const details = page.getByRole('complementary', { name: 'Assistant details' })
+  await expect(details).toBeVisible()
+  await details.getByRole('tab', { name: 'Policy', exact: true }).click()
+  await expect(details).toContainText('Only people with Policy access can change this.')
+  await expect(details.getByRole('textbox')).toHaveCount(0)
+  await expect(details.getByRole('button', { name: 'More assistant actions' })).toHaveCount(0)
+  expect(agentRequests).toContain(`/api/assistants/${self.principal_id}/policy`)
+  expect(agentRequests).not.toContain('/api/assistants')
+})
