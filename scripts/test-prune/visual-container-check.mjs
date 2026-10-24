@@ -19,7 +19,7 @@ export function checkContainerPin(workflow, visual, previous, nightly, fixedCapt
     need(job?.includes(`image: ${container.image}@${container.digest}`) &&
       job.includes(`AEON_VISUAL_CONTAINER_DIGEST: ${container.digest}`), 'Nightly visual container pin differs from manifest')
   }
-  if (fixedCapture) {
+  if (fixedCapture !== undefined) {
     const job = fixedCapture.split('\n  visual-reference-capture:')[1]?.split(/\n  [a-z][a-z0-9-]*:/)[0]
     need(job?.includes(`image: ${container.image}@${container.digest}`) &&
       job.includes(`AEON_VISUAL_CONTAINER_DIGEST: ${container.digest}`), 'Fixed capture container pin differs from manifest')

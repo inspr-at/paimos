@@ -129,6 +129,30 @@ func TestVisualCaptureRunnerBoundary(t *testing.T) {
 			}
 		})
 	}
+	for _, mutation := range []struct {
+		name, want string
+		edit       func(map[string]any)
+	}{
+		{"root write token", "read-only token permissions", func(w map[string]any) { w["permissions"] = map[string]any{"contents": "write"} }},
+		{"Go write token", "read-only token permissions", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["go-test"])["permissions"] = map[string]any{"contents": "write"}
+		}},
+		{"Go environment", "must not receive environments or secrets", func(w map[string]any) { mapping(mapping(w["jobs"])["go-test"])["environment"] = "production" }},
+		{"Go secret", "must not receive environments or secrets", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["go-test"])["env"] = map[string]any{"KEY": "${{ secrets.APP_KEY }}"}
+		}},
+	} {
+		t.Run("hosted Go preserves authority/"+mutation.name, func(t *testing.T) {
+			var changed map[string]any
+			if err := yaml.Unmarshal(ci, &changed); err != nil {
+				t.Fatal(err)
+			}
+			mutation.edit(changed)
+			if got := strings.Join(checkWorkflowPolicy("ci.yml", changed), "\n"); !strings.Contains(got, mutation.want) {
+				t.Fatalf("hosted Go authority weakened: %q, want %q", got, mutation.want)
+			}
+		})
+	}
 	var workflow map[string]any
 	if err := yaml.Unmarshal(body, &workflow); err != nil {
 		t.Fatal(err)

@@ -159,6 +159,9 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 			reject(err.Error())
 		}
 	}
+	if name == "ci.yml" && !readOnlyPermissions(workflow["permissions"]) {
+		reject("CI requires explicit read-only token permissions")
+	}
 	if hasEvent(workflow["on"], "pull_request_target") {
 		reject("pull_request_target is forbidden")
 	}
@@ -185,6 +188,18 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		job := mapping(value)
 		if name == "ci.yml" && job["uses"] == nil && job["runs-on"] != "ubuntu-latest" {
 			reject(fmt.Sprintf("CI job %q must use literal runs-on: ubuntu-latest", id))
+		}
+		if name == "ci.yml" && id == "go-test" {
+			permissions := job["permissions"]
+			if permissions == nil {
+				permissions = workflow["permissions"]
+			}
+			if !readOnlyPermissions(permissions) {
+				reject("CI Go tests require explicit read-only token permissions")
+			}
+			if job["environment"] != nil || containsSecret(job) || containsSecret(workflow["env"]) {
+				reject("CI Go tests must not receive environments or secrets")
+			}
 		}
 		jobName, _ := job["name"].(string)
 		if strings.EqualFold(strings.TrimSpace(id), "gate/cross-family") ||
@@ -569,9 +584,6 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
-	if mapping(mapping(mapping(jobs["go-test"])["strategy"])["matrix"])["shard"] != hostedGoShards {
-		return fmt.Errorf("hosted shard count must retain two essential PR shards and seven full shards")
-	}
 	// Proof lookup failures must retain full validation, with read-only authority.
 	proof := mapping(jobs["tree-reuse"])
 	if proof == nil || proof["continue-on-error"] != true {
@@ -684,6 +696,9 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		if job["if"] != condition || !hasNeed(job["needs"], "ci-plan") || !hasNeed(job["needs"], "tree-reuse") {
 			return fmt.Errorf("required CI job %q must use the reviewed PR classification gate", id)
 		}
+	}
+	if mapping(mapping(mapping(jobs["go-test"])["strategy"])["matrix"])["shard"] != hostedGoShards {
+		return fmt.Errorf("hosted shard count must retain two essential PR shards and seven full shards")
 	}
 	if mapping(tiers["outputs"])["web_shards"] != "${{ steps.tiers.outputs.web_shards }}" {
 		return fmt.Errorf("ci-plan must publish the planned web shard list")

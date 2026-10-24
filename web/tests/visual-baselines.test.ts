@@ -413,6 +413,7 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.equal(checkContainerPin(workflow, manifest, manifest), true)
   const fixedWorkflow = readFileSync(new URL('../../.github/workflows/visual-capture.yml', import.meta.url), 'utf8')
   assert.equal(checkContainerPin(workflow, manifest, manifest, undefined, fixedWorkflow), true)
+  assert.throws(() => checkContainerPin(workflow, manifest, manifest, undefined, ''), /Fixed capture container pin differs/)
   assert.throws(() => checkContainerPin(workflow, manifest, manifest, undefined, fixedWorkflow.replaceAll(renderer.container.digest, 'sha256:' + '0'.repeat(64))), /Fixed capture container pin differs/)
   assert.throws(() => checkContainerPin(workflow, candidateVisual, manifest), /Raster setting or fixed machine changed without regenerated, approved baselines/)
   const bumped = structuredClone(manifest); bumped.renderer.container.digest = 'sha256:' + '1'.repeat(64)
