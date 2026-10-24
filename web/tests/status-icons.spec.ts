@@ -366,8 +366,11 @@ test('AEON-1666: 24 sliding icons cost at most 1 ms of main-thread CPU time per 
 
   const cdp = await page.context().newCDPSession(page)
   const samples = new Map<string, Record<string, number>>()
-  cdp.on('Performance.metrics', ({ title, metrics }) => {
-    if (title.startsWith('status-budget-')) samples.set(title, Object.fromEntries(metrics.map(metric => [metric.name, metric.value])))
+  const measured = new Promise<void>(resolve => {
+    cdp.on('Performance.metrics', ({ title, metrics }) => {
+      if (title.startsWith('status-budget-')) samples.set(title, Object.fromEntries(metrics.map(metric => [metric.name, metric.value])))
+      if (title === 'status-budget-end') resolve()
+    })
   })
   try {
     // AEON-1666: the retired check used elapsed TaskDuration / (3 * 60), so
@@ -395,6 +398,9 @@ test('AEON-1666: 24 sliding icons cost at most 1 ms of main-thread CPU time per 
         before: before[index].state, after: animation.playState, advanced: Number(animation.currentTime) > before[index].time,
       }))
     }, frames)
+    // Runtime evaluation and metrics use separate protocol sessions. Wait for
+    // the end notification itself, which can arrive after evaluateAll returns.
+    await measured
     expect(motion).toHaveLength(24)
     for (const animation of motion) expect(animation).toEqual({ before: 'running', after: 'running', advanced: true })
     expect([...samples.keys()]).toEqual(['status-budget-start', 'status-budget-end'])
