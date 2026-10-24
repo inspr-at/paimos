@@ -96,6 +96,16 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 		}
 		scopes := []string{"inbox.read"}
 		grantRefusal := ""
+		if err := authz.RequireTx(ctx, tx, p, "inbox.read", authz.Scope{ProjectID: project}); err != nil {
+			if !errors.Is(err, authz.ErrForbidden) {
+				return nil, nil, err
+			}
+			// Policy ceilings get their precise reason from EvaluateTx below;
+			// ordinary role revocation must also refuse before charging/pickup.
+			if reason, _ := authz.AssistantPolicyDenial(err); reason == "" {
+				grantRefusal = "assistant_inbox_authority_revoked"
+			}
+		}
 		if run != "" {
 			var owner struct {
 				GrantedBy   string `json:"granted_by_principal_id"`
@@ -110,7 +120,9 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 				if err != nil {
 					return nil, nil, err
 				}
-				grantRefusal = consent
+				if consent != "" {
+					grantRefusal = consent
+				}
 				permission := "nodes.write"
 				if owner.Destination.Kind == "knowledge" {
 					permission = "knowledge.write"
