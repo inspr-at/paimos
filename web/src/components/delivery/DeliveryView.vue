@@ -13,6 +13,7 @@ import AppIcon from '../AppIcon.vue'
 import ViewSwitch from '../ViewSwitch.vue'
 import BuildingSection from './BuildingSection.vue'
 import ExpertTile from './ExpertTile.vue'
+import ReviewRoundsTile from './ReviewRoundsTile.vue'
 import FlowView from './FlowView.vue'
 import LevelSwitch from './LevelSwitch.vue'
 import SimpleNumbers from './SimpleNumbers.vue'
@@ -40,6 +41,8 @@ import { useTicketTiming } from '../../lib/useTicketTiming'
 import { buildingView } from '../../lib/deliveryBuilding'
 import { useDeliveryBuilding } from '../../lib/useDeliveryBuilding'
 import { shortDay } from '../../lib/workFigures'
+import { useDeliveryReviewRounds } from '../../lib/useDeliveryReviewRounds'
+import { reviewRoundView } from '../../lib/deliveryReviewRounds'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
 // The project page hands over a new object on every render. Everything here follows the id and
@@ -171,6 +174,9 @@ function setTicketFilters(next: TimingFilters) { closeTip(); ticketFilters.value
 const building = useDeliveryBuilding({ projectId: () => projectId.value, window: () => prefs.value.window, filters: () => ticketFilters.value, active: () => view.value === 'numbers' && prefsReady.value })
 const buildingState = computed<'loading' | 'error' | 'ready'>(() => !prefsReady.value ? 'loading' : building.status.value)
 const buildingModel = computed(() => buildingView(buildingState.value === 'ready' ? building.data.value : null, prefs.value.window, buildingState.value, lang.value))
+const reviewRounds = useDeliveryReviewRounds({ projectId: () => projectId.value, window: () => prefs.value.window, active: () => view.value === 'numbers' && prefsReady.value })
+const reviewState = computed(() => !prefsReady.value ? 'loading' as const : reviewRounds.state.value)
+const reviewModel = computed(() => reviewRoundView(reviewRounds.data.value, prefs.value.window, lang.value, reviewState.value))
 const numbers = computed(() => data.value ? numbersOf(data.value, prefs.value.window, lang.value) : null)
 // Placeholders keep every tile and chart in its slot while loading or after a failed read.
 const empty = computed(() => numbersOf({ project_id: projectId.value, generated_at: '', source: null, metrics: [] }, prefs.value.window, lang.value))
@@ -338,6 +344,9 @@ watch(state, (next, prev) => {
       </div>
 
       <SimpleNumbers v-if="prefs.level === 'simple'" :data="data" :window="prefs.window" :state="state" :no-data="noData || (state === 'ready' && !source)" :lang="lang" :extra="buildingModel.summary">
+        <template #review-rounds>
+          <ReviewRoundsTile :data="reviewRounds.data.value" :state="reviewState" level="simple" :window="prefs.window" :lang="lang" :route-key="routeKey" @retry="reviewRounds.retry" />
+        </template>
         <template #tickets>
           <TicketsSection :model="ticketView" :state="ticketState" :busy="tickets.busy.value" :filters="ticketFilters" level="simple" :window="prefs.window" :lang="lang"
             @filters="setTicketFilters" @retry="tickets.retry" />
@@ -355,6 +364,7 @@ watch(state, (next, prev) => {
         <div class="tiles" role="list" data-testid="delivery-tiles">
           <ExpertTile v-for="tile in tiles" :key="tile.def.key" :tile="tile" :state="state" :text="text" :info-open="tip?.tile.def.key === tile.def.key"
             @info="(anchor, pin) => openTip(tile, anchor, pin)" @info-leave="leaveTip" />
+          <ReviewRoundsTile :data="reviewRounds.data.value" :state="reviewState" level="expert" :window="prefs.window" :lang="lang" :route-key="routeKey" :info-open="tip?.tile.def.key === 'review-rounds'" @retry="reviewRounds.retry" @info="openTip" @info-leave="leaveTip" />
         </div>
         <div class="trends-head">
           <h3>{{ text.trends }}</h3>
@@ -370,6 +380,7 @@ watch(state, (next, prev) => {
         <div class="charts" data-testid="delivery-charts">
           <TrendChart :model="ticketView.chart" :state="ticketState" :text="text" />
           <TrendChart v-for="chart in charts" :key="chart.key" :model="chart" :state="state" :text="text" />
+          <TrendChart :model="reviewModel.chart" :state="reviewState" :text="text" data-testid="review-rounds-trend" />
         </div>
         <div class="defs">
           <h3>{{ text.defsTitle }}</h3>
@@ -397,7 +408,7 @@ watch(state, (next, prev) => {
         <b>{{ tip.tile.label }}</b>
         <p>{{ tip.tile.definition }}</p>
         <p v-if="tip.tile.reason"><span class="meta">{{ tip.tile.status === 'no_data' ? text.whyNone : text.why }}</span><br>{{ tip.tile.reason }}</p>
-        <p class="meta">{{ text.source }}: {{ tip.tile.source }}<br>{{ text.window }}: {{ fill(text.windowT, { w: prefs.window }) }}<br>{{ tip.tile.target }}<template v-if="!tip.tile.def.key.startsWith('building-')"> · {{ text.arion }}</template></p>
+        <p class="meta">{{ text.source }}: {{ tip.tile.source }}<br>{{ text.window }}: {{ fill(text.windowT, { w: prefs.window }) }}<br>{{ tip.tile.target }}<template v-if="!tip.tile.def.key.startsWith('building-') && tip.tile.def.key !== 'review-rounds'"> · {{ text.arion }}</template></p>
       </div>
     </Teleport>
   </section>

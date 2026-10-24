@@ -1,0 +1,9 @@
+{
+  "group": "remaining-ui",
+  "spec": {
+    "file": "tests/delivery-review-rounds.spec.ts",
+    "listedTests": 8,
+    "weightSeconds": 60,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

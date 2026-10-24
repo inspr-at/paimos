@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Lens rule text snapshot (AEON-1714, 2026-10-23). Keep the IDs and one-line
+// English texts aligned with the shared UI/accessibility lenses; German copy
+// conveys the same rule without introducing names or links.
+import type { DeliveryLanguage } from './delivery'
+
+const EN: Record<string, string> = {
+  "U1": "No coloured edge accent: no border, inset box-shadow or pseudo-element bar on the left or top edge of a row, card, callout, toast, panel or table header that uses a non-neutral token or is wider than 1 px. A 1 px neutral hairline (line token) is allowed.",
+  "U2": "No reserved empty space: a conditional block (v-if, empty list, absent notice) has no height, min-height, padding or margin when its content is absent at render. Reserve space only for content that arrives after first paint, and then exactly its rendered height.",
+  "U3": "No empty headings or dividers: a heading, section label or divider renders only when the content it introduces or separates renders (same condition).",
+  "U4": "No developer strings in visible text: no raw version numbers, build ids or timestamps, internal state names (reserved, pending, stable, #id), enum keys, capability names or file paths. These may appear only in a tooltip or a details panel.",
+  "U5": "Plurals: every \"count + noun\" string goes through a plural-aware formatter (i18n plural key or Intl.PluralRules); no literal \"{n} items\" with a bare count.",
+  "U6": "Number and unit are joined by a no-break space (U+00A0 or U+202F): \"24 h\", \"3 ms\", \"85 %\".",
+  "U7": "Changing numbers never shift layout: counters, countdowns, timers and live values use tabular-nums inside a box that reserves the widest expected value (min-width in ch), with the spare width after the value (start-aligned), never as padding before the digits.",
+  "U8": "One source per number: a value shown more than once in a view (badge, header, count line, filter chip, tab title) is read from one computed value, never computed twice.",
+  "U9": "One source per state word: a status shown in more than one place in a view maps from the same state key through one label function; no hard-coded duplicate status strings.",
+  "U10": "No mid-word breaks: names and labels never use word-break: break-all or overflow-wrap: anywhere. Use hyphens: auto with the right lang, then clamp to N lines with an ellipsis, and expose the full text via the shared clip-tip or a title.",
+  "U11": "Ellipsis only at max width: text is truncated only when its container is already at its max width for that breakpoint; never truncate in a column that has free space in the same row.",
+  "U12": "Sentence case for labels, buttons, headings, menu items and counts (\"39 other changes\"); proper nouns excepted; capitals only through the existing eyebrow or label token class.",
+  "U13": "Action weight: in a dialog, popover or sheet with more than one action, the main action is a primary button, the alternative a secondary button, and a third option a text link; never several equal plain-text actions.",
+  "U14": "One control style per toolbar group: all controls in one toolbar group share one style (e.g. ghost); only the active or pressed state differs.",
+  "U15": "One cue per meaning: a state (selected, new, active) is marked by one cue (ring, check, chip or tint), never two at once for the same meaning.",
+  "U16": "No label repeating its heading: a field label never repeats its section heading verbatim.",
+  "U17": "One clock per view: all times in a view go through the same formatter, in the viewer's time zone and format; no UTC or build times next to local times.",
+  "U18": "Pill shape only on one line: an element with a radius of at least half its height has white-space: nowrap; content that can wrap uses the 12 px radius token.",
+  "U19": "Labels align with their controls: stacked form labels are start-aligned with their control's left edge, never centred; trailing hints and icons in the label row align with the control's right edge.",
+  "U20": "Phones: on ≤ 520 px, a popover that holds actions opens as a bottom sheet; popovers never float over the field or row they describe (see A14).",
+  "U21": "German copy is impersonal: no du, dich, dir, dein (in any form) or Sie-forms in German UI strings; use impersonal or infinitive forms (\"nichts offen\", \"Anderes Konto verwenden\").",
+  "A1": "Contrast: text >= 4.5:1 (>= 3:1 at 24 px, or 19 px bold); icons, control borders and focus rings >= 3:1 against what touches them. Check the light AND dark token values.",
+  "A2": "Keyboard: every interactive element is reachable and operable by keyboard in visual order; no keyboard trap.",
+  "A3": "Dialogs and sheets: focus moves in on open, is trapped while open, Escape closes, focus returns to the opener.",
+  "A4": "Focus visible: every focusable element shows a :focus-visible indicator; outline: none only with a replacement of >= 3:1.",
+  "A5": "Names: icon-only controls have an accessible name (aria-label or visually hidden text); decorative SVGs are aria-hidden=\"true\".",
+  "A6": "Forms: every field has a programmatic label; errors are tied to the field with aria-describedby and announced; \"required\" is not shown by colour or asterisk alone.",
+  "A7": "Live status: changes the person did not trigger (loading, saved, live counts, sync state) use a polite live region, without announcing every tick.",
+  "A8": "Colour is never the only signal: state also shows as text, icon or shape.",
+  "A9": "Target size: >= 24 x 24 CSS px everywhere; primary touch targets on phones >= 44 px.",
+  "A10": "Semantics: native elements (button, a href, ul/ol, table); no click handler on a div/span without a role, tabindex and key handling; headings in order, one h1 per page.",
+  "A11": "Disabled controls say why, in adjacent text or a keyboard-reachable explanation; prefer aria-disabled when the reason must stay focusable.",
+  "A12": "Motion: honour prefers-reduced-motion; nothing animates for more than 5 s without a way to pause it.",
+  "A13": "Reflow: usable at 320 px width and 200 % zoom without horizontal page scroll (data tables excepted).",
+  "A14": "Hover and focus content (tooltips, popovers): reachable by keyboard, dismissible with Escape, stays while hovered, and never covers its trigger or the content it explains.",
+  "A15": "Language: the lang attribute matches the UI language; no text baked into images.",
+  "A16": "Text spacing (WCAG 1.4.12): nothing clips or overlaps when line-height 1.5, letter-spacing 0.12 em and word-spacing 0.16 em are applied, so text boxes have no fixed heights.",
+  "A17": "Consistent naming (WCAG 3.2.4): the same function has the same name and icon across views."
+}
+
+const DE: Record<string, string> = {
+  "U1": "Keine farbigen Randakzente: linke oder obere Kanten verwenden höchstens eine neutrale Haarlinie von einem Pixel.",
+  "U2": "Abwesender Inhalt reserviert keinen Leerraum. Platz wird nur für nach dem ersten Rendern eintreffenden Inhalt in dessen tatsächlicher Höhe gehalten.",
+  "U3": "Überschriften, Abschnittsbezeichnungen und Trennlinien erscheinen nur zusammen mit dem Inhalt, den sie einleiten oder trennen.",
+  "U4": "Interne Zustände, Kennungen, Versionsnummern und Dateipfade gehören nur in Erklärungen oder Details.",
+  "U5": "Anzahl und Hauptwort werden mit einer Pluralregel formatiert, einschließlich der Einzahl.",
+  "U6": "Zwischen Zahl und Einheit steht ein geschütztes Leerzeichen.",
+  "U7": "Veränderliche Zahlen verwenden gleich breite Ziffern und einen ausreichend breiten, linksbündigen Zahlenplatz.",
+  "U8": "Eine Zahl hat genau eine berechnete Quelle für alle ihre Vorkommen in der Ansicht.",
+  "U9": "Ein Zustand wird überall durch dieselbe Funktion aus demselben Zustandsschlüssel benannt.",
+  "U10": "Wörter werden nicht mitten im Wort umgebrochen; gekürzte Namen bleiben vollständig lesbar.",
+  "U11": "Text wird erst an der maximalen verfügbaren Breite gekürzt, niemals neben ungenutztem Platz.",
+  "U12": "Bezeichnungen, Aktionen, Überschriften und Anzahlen verwenden normale Satzschreibung.",
+  "U13": "Die Hauptaktion ist primär, eine Alternative sekundär und eine dritte Möglichkeit ein Textlink.",
+  "U14": "Steuerelemente einer Werkzeuggruppe verwenden denselben Stil; nur der aktive Zustand unterscheidet sich.",
+  "U15": "Eine Bedeutung wird durch ein einziges Merkmal gekennzeichnet, etwa Ring, Häkchen, Kennzeichnung oder Tönung.",
+  "U16": "Eine Feldbezeichnung wiederholt nicht wörtlich ihre Abschnittsüberschrift.",
+  "U17": "Alle Zeiten einer Ansicht verwenden dieselbe Formatierung und die Zeitzone der betrachtenden Person.",
+  "U18": "Eine Pillenform bleibt einzeilig; mehrzeiliger Inhalt verwendet den Radius für Flächen.",
+  "U19": "Feldbezeichnungen sind links am Steuerelement ausgerichtet, Hinweise und Symbole am rechten Rand.",
+  "U20": "Auf schmalen Telefonen werden Popover mit Aktionen als Blatt am unteren Bildschirmrand geöffnet.",
+  "U21": "Deutsche Texte bleiben unpersönlich und verwenden Infinitive oder sachliche Beschreibungen.",
+  "A1": "Text erreicht ausreichenden Kontrast, ebenso Symbole, Umrisse und Fokusringe, im hellen und dunklen Farbschema.",
+  "A2": "Jedes interaktive Element ist in sichtbarer Reihenfolge mit der Tastatur erreichbar und bedienbar.",
+  "A3": "Dialoge erhalten und halten den Fokus, schließen mit Escape und geben den Fokus an den Auslöser zurück.",
+  "A4": "Jedes fokussierbare Element besitzt einen deutlich sichtbaren Fokusindikator mit ausreichendem Kontrast.",
+  "A5": "Reine Symbolaktionen haben einen zugänglichen Namen; dekorative Symbole bleiben für Hilfstechnik verborgen.",
+  "A6": "Felder haben verknüpfte Bezeichnungen; Fehler sind zugeordnet und werden angekündigt.",
+  "A7": "Nicht direkt ausgelöste Statusänderungen werden behutsam angekündigt, ohne jeden Zählschritt vorzulesen.",
+  "A8": "Farbe ist nie das einzige Signal; Zustände sind auch als Text, Symbol oder Form erkennbar.",
+  "A9": "Ziele sind mindestens 24 × 24 CSS-Pixel groß, primäre Berührungsziele auf Telefonen mindestens 44 Pixel.",
+  "A10": "Native Elemente und eine passende Überschriftenfolge bilden die Bedeutung und Bedienung ab.",
+  "A11": "Nicht verfügbare Steuerelemente erklären ihren Grund in erreichbarem Begleittext.",
+  "A12": "Reduzierte Bewegung wird respektiert; längere Animationen lassen sich anhalten.",
+  "A13": "Bei 320 Pixel Breite und doppelter Vergrößerung bleibt die Ansicht ohne horizontalen Seitenlauf bedienbar.",
+  "A14": "Zusatzinhalt ist per Tastatur erreichbar, mit Escape schließbar, beim Überfahren beständig und verdeckt seinen Auslöser nicht.",
+  "A15": "Die Sprachangabe entspricht der sichtbaren Sprache; Text wird nicht in Bilder eingebettet.",
+  "A16": "Vergrößerte Zeilen-, Zeichen- und Wortabstände verursachen weder Abschneiden noch Überlappungen.",
+  "A17": "Dieselbe Funktion trägt in allen Ansichten denselben Namen und dasselbe Symbol."
+}
+
+export function reviewRuleText(rule: string, lang: DeliveryLanguage): string {
+  return (lang === 'de' ? DE : EN)[rule] ?? (lang === 'de' ? 'Regeltext nicht verfügbar.' : 'Rule text is not available.')
+}

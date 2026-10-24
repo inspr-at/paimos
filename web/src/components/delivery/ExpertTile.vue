@@ -9,7 +9,7 @@ import type { TileModel } from '../../lib/deliveryNumbers'
 import type { DeliveryText } from '../../lib/deliveryNumbersText'
 
 // Ticket step tiles (AEON-1359) carry their step as the key instead of an Arion metric.
-const props = defineProps<{ tile: Omit<TileModel, 'def'> & { def: { key: string } }; state: 'loading' | 'error' | 'ready'; text: DeliveryText; infoOpen: boolean }>()
+const props = defineProps<{ tile: Omit<TileModel, 'def'> & { def: { key: string } }; state: 'loading' | 'error' | 'ready'; text: DeliveryText; infoOpen: boolean; hideDetail?: boolean }>()
 const emit = defineEmits<{ info: [anchor: HTMLElement, pin: boolean]; 'info-leave': [] }>()
 const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
 </script>
@@ -26,19 +26,19 @@ const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
     </div>
     <template v-if="state === 'loading'">
       <div class="t-value"><span class="sk" style="width: 62%; height: 26px" /></div>
-      <div class="t-line"><span class="sk" style="width: 80%; height: 10px" /></div>
+      <div v-if="!hideDetail" class="t-line"><span class="sk" style="width: 80%; height: 10px" /></div>
       <div class="t-line"><span class="sk" style="width: 55%; height: 10px" /></div>
       <div class="t-line"><span class="sk" style="width: 70%; height: 10px" /></div>
     </template>
     <template v-else-if="state === 'error' || !tile.value">
-      <div class="t-value empty">{{ state === 'error' ? text.notLoaded : text.noData }}</div>
-      <div class="t-line"><span class="t-pp">p50 · p90 –</span></div>
+      <div class="t-value empty">{{ state === 'error' ? text.notLoaded : text.noData }}<slot name="value-companion" /></div>
+      <div v-if="!hideDetail" class="t-line"><slot name="empty-detail"><span class="t-pp">p50 · p90 –</span></slot></div>
       <div class="t-line"><span v-clip-tip>{{ state === 'error' ? ' ' : tile.lineB || ' ' }}</span></div>
       <div class="t-line t-delta none"><AppIcon name="minus" :size="13" /><span v-clip-tip>{{ state === 'error' ? text.notLoaded : tile.delta.text }}</span></div>
     </template>
     <template v-else>
-      <div class="t-value">{{ tile.value.main }}<small>{{ tile.value.unit }}</small><template v-if="tile.value.more">{{ tile.value.more.main }}<small>{{ tile.value.more.unit }}</small></template></div>
-      <div class="t-line">
+      <div class="t-value"><span class="t-main">{{ tile.value.main }}</span><small>{{ tile.value.unit }}</small><template v-if="tile.value.more">{{ tile.value.more.main }}<small>{{ tile.value.more.unit }}</small></template><slot name="value-companion" /></div>
+      <div v-if="!hideDetail" class="t-line">
         <span v-if="tile.lineA.squares" class="mini-n" aria-hidden="true"><i v-for="(night, index) in tile.lineA.squares" :key="index" :class="night" /></span>
         <span v-clip-tip :class="{ 't-pp': tile.lineA.mono }"><template v-for="(part, index) in tile.lineA.parts" :key="index"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></span>
       </div>
@@ -49,8 +49,10 @@ const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
       </div>
     </template>
     <div class="t-line t-target">
-      <svg class="lg-sw" width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" class="g-target" /></svg>
-      <span v-clip-tip>{{ tile.target }}</span>
+      <slot name="target">
+        <svg class="lg-sw" width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" class="g-target" /></svg>
+        <span v-clip-tip>{{ tile.target }}</span>
+      </slot>
     </div>
     <slot name="extra" />
     <div class="t-foot">

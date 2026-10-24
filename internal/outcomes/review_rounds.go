@@ -169,7 +169,7 @@ func (m *Module) recordReviewRound(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		created = true
-		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &node.id, Type: "review_round", After: out})
+		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &node.id, Type: "outcome.review_round", After: out})
 		return err
 	})
 	if err != nil {

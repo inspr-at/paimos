@@ -12,7 +12,7 @@ import { vClipTip } from '../../directives/clipTip'
 import type { SimpleTileModel } from '../../lib/deliverySimple'
 import type { SimpleText } from '../../lib/deliverySimpleText'
 
-const props = defineProps<{ tile: SimpleTileModel; state: 'loading' | 'error' | 'ready'; text: SimpleText }>()
+const props = defineProps<{ tile: SimpleTileModel; state: 'loading' | 'error' | 'ready'; text: SimpleText; minimal?: boolean }>()
 const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as const
 // A shorter error sentence must not shrink the tile, or the next row's Learn button jumps.
 const root = ref<HTMLElement>()
@@ -24,15 +24,23 @@ watch(() => props.state, (next, prev) => {
 </script>
 
 <template>
-  <article ref="root" class="s-tile" role="listitem" :aria-labelledby="`sn-${tile.key}`" :aria-busy="state === 'loading' || undefined" :data-key="tile.key" :style="hold > 0 ? { minHeight: `${hold}px` } : undefined">
+  <article ref="root" class="s-tile" :class="{ minimal }" role="listitem" :aria-labelledby="`sn-${tile.key}`" :aria-busy="state === 'loading' || undefined" :data-key="tile.key" :style="hold > 0 ? { minHeight: `${hold}px` } : undefined">
     <!-- Building it (AEON-1493): a whole-tile trigger, a detail line under the verdict and an action in the foot. -->
     <slot name="trigger" />
     <div class="s-top">
       <h4 :id="`sn-${tile.key}`" class="s-name">{{ tile.name }}</h4>
-      <LearnPopover :id="tile.key" :name="tile.name" :body="tile.learn.body" :expert="tile.learn.expert" :target="tile.learn.target" :facts="tile.learn.facts"
+      <LearnPopover v-if="!minimal" :id="tile.key" :name="tile.name" :body="tile.learn.body" :expert="tile.learn.expert" :target="tile.learn.target" :facts="tile.learn.facts"
         :labels="{ learn: text.learn, expertName: text.expertName, arion: text.arion }" />
     </div>
-    <template v-if="state === 'loading'">
+    <template v-if="minimal">
+      <div class="s-valrow" aria-live="polite">
+        <span v-if="state === 'loading'" class="sk" style="width: 45%; height: 30px" />
+        <span v-else-if="tile.value" class="s-val">{{ tile.value[0]?.text }}</span>
+        <span v-else class="s-val empty">{{ tile.empty }}</span>
+      </div>
+      <p class="s-trend" :class="tile.trend.cls"><span v-if="state === 'loading'" class="sk" style="width: 70%; height: 12px" /><template v-else><AppIcon :name="tile.trend.icon" :size="13" /><span v-clip-tip>{{ state === 'error' ? tile.empty : tile.trend.text }}</span></template></p>
+    </template>
+    <template v-else-if="state === 'loading'">
       <div class="s-valrow"><span class="sk" style="width: 45%; height: 30px" /></div>
       <div class="s-verdict"><span class="sk" style="width: 65%; height: 14px" /></div>
       <slot name="detail" />
@@ -55,7 +63,7 @@ watch(() => props.state, (next, prev) => {
       <p class="s-trend" :class="tile.trend.cls"><AppIcon :name="tile.trend.icon" :size="13" /><span v-clip-tip>{{ tile.trend.text }}</span></p>
       <p class="s-say">{{ tile.say }}</p>
     </template>
-    <div class="s-foot">
+    <div v-if="!minimal" class="s-foot">
       <span v-if="state === 'loading'" class="sk" style="width: 55%; height: 9px" />
       <template v-else>
         <span v-if="tile.partial && tile.foot" class="partial"><AppIcon name="half" :size="10" />{{ text.partial }}</span>
@@ -70,6 +78,8 @@ watch(() => props.state, (next, prev) => {
 .s-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 16px 11px; border-radius: 16px; background: var(--glass); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -22px color-mix(in srgb, var(--primary-line) 35%, transparent); }
 .s-top { display: flex; align-items: flex-start; gap: 8px; min-height: 26px; }
 .s-name { flex: 1; min-width: 0; margin: 3px 0 0; font: 600 13.5px/1.35 var(--font); color: var(--ink); overflow-wrap: anywhere; }
+.minimal .s-name { overflow-wrap: normal; hyphens: auto; }
+.minimal .s-val { display: inline-block; min-width: 4ch; text-align: start; }
 .s-valrow { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0 8px; min-height: 40px; }
 .s-val { font: 650 32px/40px var(--font); letter-spacing: -.025em; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
 .s-val small { margin-left: 4px; font: 500 14px/1 var(--font); letter-spacing: 0; color: var(--ink-2); }

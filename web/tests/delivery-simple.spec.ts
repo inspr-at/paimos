@@ -249,7 +249,7 @@ test('Simple explains each number in plain words, and its controls stay still th
   await expect(summary).toContainText('1 of 13 numbers are on target.')
   await expect(summary).toContainText('Closest: how long a review takes (1.6× the target). Biggest gap: waiting for a runner (about 6× the target).')
   await expect(page.getByRole('heading', { name: 'Making a change ready', level: 3 })).toBeVisible()
-  await expect(page.getByTestId('delivery-simple').locator('.s-grid').getByRole('listitem').filter({ has: page.locator('.s-name') })).toHaveCount(18)
+  await expect(page.getByTestId('delivery-simple').locator('.s-grid').getByRole('listitem').filter({ has: page.locator('.s-name') })).toHaveCount(19)
   const checks = simpleTile(page, 'How long the PR checks take')
   await expect(checks.locator('.s-val')).toHaveText('16min')
   await expect(checks.getByTestId('verdict')).toHaveText('Far off · about 2× the target')

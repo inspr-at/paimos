@@ -113,7 +113,7 @@ func TestReviewRoundOutcomes(t *testing.T) {
 	}
 	var observations, audit int
 	inTenant(t, d, owner, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM outcome_review_rounds), (SELECT count(*) FROM events WHERE type='review_round')`).Scan(&observations, &audit)
+		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM outcome_review_rounds), (SELECT count(*) FROM events WHERE type='outcome.review_round')`).Scan(&observations, &audit)
 	})
 	if observations != 2 || audit != 2 {
 		t.Fatalf("denials/retries wrote outcomes or audit: %d/%d", observations, audit)
@@ -139,7 +139,7 @@ func TestReviewRoundOutcomes(t *testing.T) {
 		t.Fatalf("foreign report: %d %s", got.Code, got.Body.String())
 	}
 	// Force the final audit append to fail: the outcome must roll back with it.
-	if _, err := d.Admin.Exec(t.Context(), `CREATE FUNCTION reject_round_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='review_round' THEN RAISE EXCEPTION 'fixture audit rejection'; END IF; RETURN NEW; END $$;
+	if _, err := d.Admin.Exec(t.Context(), `CREATE FUNCTION reject_round_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='outcome.review_round' THEN RAISE EXCEPTION 'fixture audit rejection'; END IF; RETURN NEW; END $$;
  CREATE TRIGGER reject_round_audit BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_round_audit()`); err != nil {
 		t.Fatal(err)
 	}
