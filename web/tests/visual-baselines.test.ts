@@ -283,7 +283,10 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.deepEqual(candidateVisual.baselineAuthority, manifest.baselineAuthority)
   const [fixedSetting, fixedPolicy] = Object.entries(manifest.rendererPreparation.settings).find(([, setting]) => setting.machine && setting.browserArgs.length === 1)!
   const fixedLabel = fixedPolicy.machine.runnerLabel
-  assert.throws(() => preparedRenderer(manifest, fixedSetting), /OPS-pinned CPU identity/)
+  const unpinned = structuredClone(manifest)
+  unpinned.rendererPreparation.settings[fixedSetting].machine.cpuModel = null
+  unpinned.rendererPreparation.settings[fixedSetting].machine.cpuFlagsSHA256 = null
+  assert.throws(() => preparedRenderer(unpinned, fixedSetting), /OPS-pinned CPU identity/)
   const machineVisual = structuredClone(manifest)
   machineVisual.renderer.machine = { runnerLabel: fixedLabel, cpuModel: cpu.model, cpuFlagsSHA256: cpu.flagsSHA256 }
   assertMachine(machineVisual, { env: { AEON_VISUAL_RUNNER: fixedLabel }, cpu })
