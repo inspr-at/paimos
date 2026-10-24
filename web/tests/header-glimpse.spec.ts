@@ -6,6 +6,11 @@ import { headerStorageKey } from '../src/lib/projectHeader'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import type { TicketGraphLink } from '../src/lib/ticketGraph'
 
+// These software-GL cases share the runner's raster budget. The global UI
+// configuration enables fullyParallel: two dense pinned graphs then compete
+// during context creation, 192 draws and compositor captures. Keep this file
+// in one worker, with independent failures and every existing assertion.
+test.describe.configure({ mode: 'default' })
 test.use({
   viewport: { width: 1600, height: 1000 },
   reducedMotion: 'no-preference',
