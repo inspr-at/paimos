@@ -161,8 +161,8 @@ func seedOutcomeReviewRun(t *testing.T, d *dbtest.DB, p tenant.Principal, projec
 	inTenant(t, d, p, func(tx pgx.Tx) error {
 		var authorSession, reviewerSession string
 		for i, id := range []*string{&authorSession, &reviewerSession} {
-			if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,ticket_node_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest)
- VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','worker',decode(md5($5),'hex'),decode(md5($5),'hex')) RETURNING id::text`, p.TenantID, project, ticket, reviewer, "review-session-"+itoa(i)).Scan(id); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,ticket_node_id,agent_principal_id,harness,host,management,role,work_shape,ref_digest,lease_digest)
+ VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','worker','ship',decode(md5($5),'hex'),decode(md5($5),'hex')) RETURNING id::text`, p.TenantID, project, ticket, reviewer, "review-session-"+itoa(i)).Scan(id); err != nil {
 				return err
 			}
 		}

@@ -1893,7 +1893,7 @@
       "classification": "personal",
       "columns": {
         "actor_principal_id": "personal",
-        "artifact": "metadata",
+        "artifact": "review",
         "at": "personal",
         "cited_rules": "metadata",
         "id": "metadata",
