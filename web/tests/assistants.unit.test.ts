@@ -72,12 +72,16 @@ it('assistant policy changes retain their own history window during admission bu
   const html = await renderHistoryPanel(store)
   const audit = html.match(/class="assistant-block policy-audit"[^>]*>([\s\S]*?)<\/section>/)?.[1] ?? ''
   expect(audit).toContain('Budget: $10 to $15')
+  const actor = audit.match(/<p\b[^>]*data-tip="owner"[^>]*>/)?.[0] ?? ''
+  expect(actor).toContain('tabindex="0"')
+  expect(actor).not.toContain('title=')
   expect(audit).not.toContain(assistantCopy().policyAllowed)
   expect(html).toContain(assistantCopy().policyAllowed) // Admissions stay in Activity.
 })
 
 it('assistant history resolves loaded actor names and uses neutral text for unknown members', async () => {
-  // Risk: policy decisions display UUID fragments as if they were names.
+  // Risk: policy decisions display UUID fragments as names, or disclose the
+  // full identity only to pointer users through a native title tooltip.
   const store = useAssistants()
   await store.load()
   const amy = store.items.find(item => item.display_name === 'Amy')!
@@ -88,7 +92,9 @@ it('assistant history resolves loaded actor names and uses neutral text for unkn
   for (const name of ['Policy owner', 'Amy', 'Research lead', 'another member']) expect(visible).toContain(`Recorded by ${name}`)
   expect(visible).not.toContain(unknown.slice(0, 8))
   expect(visible).not.toContain(lead.slice(0, 8))
-  expect(html).toContain(`title="${unknown}"`)
+  const actor = html.match(new RegExp(`<p\\b[^>]*data-tip="${unknown}"[^>]*>`))?.[0] ?? ''
+  expect(actor).toContain('tabindex="0"')
+  expect(actor).not.toContain('title=')
   expect(assistantCopy('de').anotherMember).toBe('einem anderen Mitglied')
 })
 

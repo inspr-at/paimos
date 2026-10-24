@@ -939,6 +939,23 @@
       ],
       "timeout_seconds": 90,
       "supplement": "AEON-1709: exercise the ESSENTIAL person-bound instance connection, consolidated Desk, notification and affected router-boundary units directly in the approved remote static lane, without a database or browser."
+    },
+    {
+      "id": "assistant-policy-units",
+      "command": "node node_modules/vitest/vitest.mjs run tests/assistants.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+      "cwd": "web",
+      "ci": {
+        "job": "web-unit",
+        "step": "Run selected web units without retries",
+        "command": "node ../scripts/test-tiers/cli.mjs run web --unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}",
+        "cwd": "web"
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
+      "timeout_seconds": 90,
+      "supplement": "AEON-1706: run the affected assistant policy and accessible history units in the approved remote static lane."
     }
   ]
 }

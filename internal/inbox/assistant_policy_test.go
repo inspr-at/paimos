@@ -203,6 +203,9 @@ func TestAssistantAdapterMessagesPreserveRunBudget(t *testing.T) {
 // while the sender is still told that the rejected message is queued.
 func TestAssistantPullRefusalDoesNotStarveAllowedMessages(t *testing.T) {
 	w, m, revoked, _ := messagingWorld(t)
+	if _, err := w.db.Admin.Exec(t.Context(), `INSERT INTO inbox_delivery_targets(tenant_id,principal_id,kind,webhook_url) VALUES($1,$2,'webhook','https://fixture.invalid/wake')`, w.sender.TenantID, w.sender.ID); err != nil {
+		t.Fatal(err)
+	}
 	allowed := peerTestProject(t, w, w.admin, "ALLOWED")
 	for _, project := range []string{revoked, allowed} {
 		if _, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "grok_bot:worker", Adapter: "grok_bot_routine", Kind: "pull", Role: "primary", MaximumLevel: "simple"}); err != nil {
@@ -226,6 +229,21 @@ func TestAssistantPullRefusalDoesNotStarveAllowedMessages(t *testing.T) {
 	}
 	if state, reason := receiptState(t, w, permitted.ID); state != "queued" || reason != "" {
 		t.Fatalf("unacknowledged allowed receipt=%s reason=%s", state, reason)
+	}
+	notices := noticesFor(t, w, denied.ID)
+	sender, ok := notices[""]
+	if len(notices) != 1 || !ok || sender.recipient != w.sender.ID || sender.session != nil ||
+		!strings.Contains(sender.body, "Not delivered") || !strings.Contains(sender.body, denied.ID) ||
+		!strings.Contains(sender.body, "assistant project denied") || !strings.Contains(sender.body, denied.Body) {
+		t.Fatalf("policy refusal must send exactly one standard System notice: %+v", notices)
+	}
+	if got := countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM inbox_wakes w JOIN inbox_messages m ON m.tenant_id=w.tenant_id AND m.id=w.message_id WHERE m.idempotency_key=$1 AND m.recipient_principal_id=$2::uuid AND m.sent_event_id IS NOT NULL`, "delivery-failed/"+denied.ID, w.sender.ID); got != 1 {
+		t.Fatalf("sender notice wakes=%d want 1", got)
+	}
+	for _, kind := range []string{"inbox.receipt_failed", "inbox.delivery_failed"} {
+		if got := countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.type=$1 AND e.after->>'message_id'=$2 AND p.name='System' AND 'system'=ANY(p.roles) AND coalesce(e.after->>'failure_reason',e.after->>'reason')='assistant_project_denied'`, kind, denied.ID); got != 1 {
+			t.Fatalf("system %s for policy refusal=%d want 1", kind, got)
+		}
 	}
 	for _, check := range []struct {
 		kind, id string

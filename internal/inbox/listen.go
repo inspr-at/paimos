@@ -158,6 +158,8 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 	var items []Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		items = nil
+		audit := &failureAudit{}
+		ctx := context.WithValue(ctx, failureAuditKey{}, audit)
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
 		}
@@ -231,7 +233,7 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 		if err = assistants.AppendDecisionsTx(ctx, tx, p, decisions...); err != nil {
 			return err
 		}
-		return nil
+		return audit.flush()
 	})
 	if err != nil {
 		items = nil

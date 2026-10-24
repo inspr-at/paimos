@@ -20,8 +20,11 @@ not execute an effect or grant a reusable permission.
 Each decision retains an `assistant_policy_receipts` row and
 `assistant.policy_evaluated` event. Policy-refused sends retain a failed inbox
 receipt and cannot later be fetched. A pull-time refusal fails that message's
-receipt with its policy reason and removes it from pickup; permitted messages
-in the same bounded page still return. Restoring the grant requires a new send.
+receipt with its policy reason and removes it from pickup through the shared
+terminal-failure path: System delivery events, one "Not delivered" notice to the
+sender and its inbox wake. Audit is deferred until the page's resource writes
+finish; permitted messages in the same bounded page still return. Restoring
+the grant requires a new send.
 A refusal after project access is withdrawn is recorded without a hidden
 project reference. Outward refusals/decisions keep the existing Desk, action
 history and durable outcome receipts. Assistants rows and the existing Policy
@@ -29,7 +32,8 @@ and Activity tabs show policy changes and decisions, including the refusal
 filter. Policy changes have a separate bounded query and audit list, so
 successful admissions stay in Activity without displacing policy edits. Known
 actors use their loaded names; unknown actors have a neutral member label with
-their identity available in a tooltip. Admission
+their identity available in a keyboard-focusable shared tooltip, dismissible
+with Escape. Admission
 evidence does not imply that a host is running.
 
 ## Weekly accounting and approvals

@@ -123,48 +123,15 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 			return nil, nil, err
 		}
 		if !d.Allowed {
-			changes, err := failAssistantPickupTx(ctx, tx, msg, d.Reason)
-			if err != nil {
+			if _, err := FailMessage(ctx, tx, msg.ID, d.Reason); err != nil {
 				return nil, nil, err
 			}
-			d.Changes = append(d.Changes, changes...)
 		} else {
 			kept = append(kept, msg)
 		}
 		decisions = append(decisions, d)
 	}
 	return kept, decisions, nil
-}
-
-// The page's message locks serialize acknowledgement and terminal failure.
-// Keep the exact policy reason on the sender's receipt, retire every delivery
-// path, and return audit for append after the permitted rows are handed over.
-// Unlike lifecycle expiry, a policy refusal is terminal even for durable pulls.
-func failAssistantPickupTx(ctx context.Context, tx pgx.Tx, msg Message, reason string) ([]events.Change, error) {
-	var state string
-	err := tx.QueryRow(ctx, `SELECT state FROM inbox_receipts WHERE message_id=$1::uuid`, msg.ID).Scan(&state)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && state != "queued" {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE inbox_message_deliveries d SET state='dead',reason='unavailable',assistant_policy_reason=$2,lease_token=NULL,lease_until=NULL FROM inbox_compat_messages c WHERE c.tenant_id=d.tenant_id AND c.id=d.message_id AND c.inbox_message_id=$1::uuid AND d.state IN ('pending','blocked')`, msg.ID, reason); err != nil {
-		return nil, err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE harness_deliveries SET released_at=clock_timestamp() WHERE message_id=$1::uuid AND completed_at IS NULL AND released_at IS NULL`, msg.ID); err != nil {
-		return nil, err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE inbox_messages SET expires_at=LEAST(coalesce(expires_at,clock_timestamp()),clock_timestamp()) WHERE id=$1::uuid`, msg.ID); err != nil {
-		return nil, err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE inbox_receipts SET state='failed',failure_reason=$2,handed_off_at=NULL WHERE message_id=$1::uuid AND state='queued'`, msg.ID, reason); err != nil {
-		return nil, err
-	}
-	return []events.Change{
-		receiptEvent(msg.ID, "failed", receiptTarget{}, "", reason),
-		{Type: "inbox.delivery_failed", After: map[string]string{"message_id": msg.ID, "reason": reason, "sender_principal_id": msg.SenderPrincipalID, "recipient_principal_id": msg.RecipientPrincipalID}},
-	}, nil
 }
 
 func assistantReceiptErrorTx(ctx context.Context, tx pgx.Tx, id string) error {
