@@ -1,8 +1,21 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 25,
+    "selectedTests": 8
+  },
   "spec": {
     "file": "tests/delivery-review-rounds.spec.ts",
     "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.811,
+        "median": 2.8645,
+        "min": 0.431
+      },
+      "seconds": 25,
+      "selectedTests": 8
+    },
     "weightSeconds": 60,
     "weightSource": "unmeasured-test-rate"
   }
