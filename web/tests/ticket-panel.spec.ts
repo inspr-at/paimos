@@ -208,6 +208,14 @@ test('s, p and a open status, priority and assignee from the panel', async ({ pa
   await page.keyboard.press('e')
   await expect(ws.locator('.edit-form')).toHaveCount(0)
   await headingStays('e while permissions are pending')
+  // AEON-1665: the heading is visible before project grants enable actions.
+  // An early letter is consumed; the later menu click cannot replay it.
+  for (const [key, label] of [['s', /Status: New/], ['p', /Priority: No priority/], ['a', /Assignee: nobody/]] as const) {
+    await expect(ws.getByRole('button', { name: label })).toBeDisabled()
+    await page.keyboard.press(key)
+    await expect(page.locator('.floating')).toHaveCount(0)
+  }
+  expect(writes(calls)).toHaveLength(0)
   // Fault control: the same oracle must reject an actual four-pixel shift.
   const previousStyle = await heading.getAttribute('style')
   try {
@@ -229,19 +237,22 @@ test('s, p and a open status, priority and assignee from the panel', async ({ pa
   await heading.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   await expect(ws.locator('.edit-form')).toHaveCount(0)
   await headingStays('read-only permissions have arrived')
-  // A denied pending e is spent. A fresh grant enables the existing shortcut
+  // Denied pending letters are spent. A fresh grant enables the existing shortcut
   // journey without opening an editor or changing its record behind the user.
   role = 'member'
   await page.evaluate(() => { window.dispatchEvent(new Event('focus')) })
   await expect(ws.getByRole('button', { name: /Status: New/ })).toBeEnabled()
   await expect(ws.locator('.edit-form')).toHaveCount(0)
+  await expect(page.locator('.floating')).toHaveCount(0)
   await ws.focus()
   await page.keyboard.press('s')
   await page.getByRole('menu', { name: 'Status of PHAROS-14' }).getByRole('menuitemradio', { name: 'Backlog' }).click()
   await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeVisible()
+  await expect(ws.getByRole('button', { name: /Priority: No priority/ })).toBeEnabled()
   await page.keyboard.press('p')
   await page.getByRole('menu', { name: 'Priority of PHAROS-14' }).getByRole('menuitemradio', { name: 'High' }).click()
   await expect(ws.getByRole('button', { name: /Priority: High/ })).toBeVisible()
+  await expect(ws.getByRole('button', { name: /Assignee: nobody/ })).toBeEnabled()
   await page.keyboard.press('a')
   await page.getByLabel('Find assignee').fill('mira')
   await page.keyboard.press('Enter')
