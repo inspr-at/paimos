@@ -10,7 +10,7 @@ import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, refer
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 import { pinCheckpoints, pinManifest, assertPinIdentity, pngTools, replayCandidates, publicationCommands } from '../../scripts/test-prune/visual-pin.mjs'
 import { compareCaptureRecords, proveCaptureIdentity, provePreparedIdentity, rendererPixelDiff, verifyCapture } from '../../scripts/test-prune/visual-identity.mjs'
-import { PROBE_REPEATS, PROBE_SLOTS, PROBE_SETTINGS, probeCheckpoints, visualProbe, summarizeProbe, summarizeProbeMatrix, writeProbeMatrix, runProbe } from '../../scripts/test-prune/visual-probe.mjs'
+import { PROBE_REPEATS, PROBE_FRAMES, PROBE_SLOTS, PROBE_SETTINGS, probeCheckpoints, visualProbe, sampleRasterFrames, summarizeProbe, summarizeProbeMatrix, writeProbeMatrix, runProbe } from '../../scripts/test-prune/visual-probe.mjs'
 import { checkContainerPin } from '../../scripts/test-prune/visual-container-check.mjs'
 import { pixelChanges } from '../../scripts/test-prune/visual-review.mjs'
 
@@ -20,6 +20,12 @@ import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const manifest = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
+const probeSample = (png: Buffer, quality: any) => {
+  const frames = Array.from({ length: PROBE_FRAMES }, (_, index) => ({ index, file: `${quality.id}-probe-${index}.png`, png }))
+  return { png, frames, quality: { ...quality,
+    diagnosticProbe: { ...quality.diagnosticProbe, frames: frames.map(({ index, file, png }) => ({ index, file, sha256: hash(png) })) },
+    captureSettling: { samples: frames.map(frame => hash(frame.png)) } } }
+}
 // Tick's set-3 receipt covers these exact 60 checkpoints from run 39975623900.
 // Keep this expectation independent of the manifest's editable approval list.
 const approvedSet3Checkpoints = [
@@ -586,23 +592,36 @@ test('visual references require approval, immutable attachment bytes and every e
     probeVisual.profiles.phone = { width: 16, height: 16 }
     for (const setting of PROBE_SETTINGS) {
       const probeRenderer = { ...renderer, runner: { ...renderer.runner, cpu }, browser: { ...renderer.browser, args: [...renderer.browser.args, ...setting.args] } }
-      const probeRecords = Array.from({ length: PROBE_REPEATS }, (_, repeatIndex) => ({ png: white, quality: {
+      const probeRecords = Array.from({ length: PROBE_REPEATS }, (_, repeatIndex) => probeSample(white, {
         id: probeID, captureSHA: candidate.captureSHA, captureMode: false, baselineCompared: false, requirementsRun: true,
         quality: { status: 'passed' }, viewport: { width: 16, height: 16 }, pngSHA256: hash(white), renderer: probeRenderer,
         diagnosticProbe: { setting: setting.id, args: probeRenderer.browser.args, repeatIndex },
-      } }))
+      }))
       assert.deepEqual(visualProbe(manifest, { ...probeEnv, AEON_VISUAL_PROBE_SETTING: setting.id }).args, setting.args)
       const summarize = (rows, options = {}) => summarizeProbe(rows, [probeID], setting, probeVisual, { cpu, ...options })
       assert.equal(summarize(probeRecords).allByteIdentical, true)
       assert.equal(summarize(probeRecords.slice(1)).complete, false)
       const duplicate = [...probeRecords.slice(0, -1), probeRecords[0]]
       assert.equal(summarize(duplicate).complete, false)
-      const changed = probeRecords.map((record, i) => i ? record : { ...record, png: blackCorner, quality: { ...record.quality, pngSHA256: hash(blackCorner) } })
+      const changed = probeRecords.map((record, i) => i ? record : probeSample(blackCorner, { ...record.quality, pngSHA256: hash(blackCorner) }))
       assert.equal(summarize(changed).complete, true)
       assert.equal(summarize(changed).allByteIdentical, false)
       // PNG encoding bytes alone also fail, with no pixel-tolerance escape.
       const encoded = Buffer.concat([white, Buffer.from('encoding-only')])
-      assert.equal(summarize(probeRecords.map((record, i) => i ? record : { ...record, png: encoded, quality: { ...record.quality, pngSHA256: hash(encoded) } })).allByteIdentical, false)
+      assert.equal(summarize(probeRecords.map((record, i) => i ? record : probeSample(encoded, { ...record.quality, pngSHA256: hash(encoded) }))).allByteIdentical, false)
+      const temporalQuality = structuredClone(probeRecords[0].quality)
+      temporalQuality.diagnosticProbe.frames[0].sha256 = hash(blackCorner)
+      temporalQuality.captureSettling.samples[0] = hash(blackCorner)
+      const temporalRecords = probeRecords.map((record, i) => i ? record : { ...record,
+        frames: record.frames.map((frame, index) => index ? frame : { ...frame, png: blackCorner }),
+        quality: temporalQuality })
+      assert.equal(summarize(temporalRecords).complete, true)
+      assert.equal(summarize(temporalRecords).allByteIdentical, false)
+      const missingFrame = probeRecords.map((record, i) => i ? record : { ...record, frames: record.frames.slice(1) })
+      assert.equal(summarize(missingFrame).complete, false)
+      const corruptFrame = probeRecords.map((record, i) => i ? record : { ...record,
+        frames: record.frames.map((frame, index) => index ? frame : { ...frame, png: blackCorner }) })
+      assert.ok(summarize(corruptFrame).checkpoints[0].failures.includes('Probe frame digest mismatch'))
       assert.equal(summarize(probeRecords, { exitCode: 1 }).complete, false)
       assert.equal(summarize(probeRecords, { error: 'timeout' }).complete, false)
       assert.equal(summarize(probeRecords.map((record, i) => i ? record : { ...record, quality: { ...record.quality, captureSHA: 'b'.repeat(40) } })).complete, false)
@@ -645,10 +664,12 @@ test('visual references require approval, immutable attachment bytes and every e
             mkdirSync(target, { recursive: true })
             const probeRenderer = { ...renderer, runner: { ...renderer.runner, cpu }, browser: { ...renderer.browser, args: [...renderer.browser.args, ...setting.args] } }
             writeFileSync(join(target, `${probeID}.png`), white)
-            writeFileSync(join(target, `${probeID}.md`), JSON.stringify({ id: probeID, captureSHA: candidate.captureSHA,
+            const sample = probeSample(white, { id: probeID, captureSHA: candidate.captureSHA,
               captureMode: false, baselineCompared: false, requirementsRun: true, reference: { mode: 'deferred' },
               quality: { status: 'passed' }, viewport: { width: 16, height: 16 }, pngSHA256: hash(white), renderer: probeRenderer,
-              diagnosticProbe: { setting: setting.id, args: probeRenderer.browser.args, repeatIndex } }))
+              diagnosticProbe: { setting: setting.id, args: probeRenderer.browser.args, repeatIndex } })
+            writeFileSync(join(target, `${probeID}.md`), JSON.stringify(sample.quality))
+            for (const frame of sample.frames) writeFileSync(join(target, frame.file), frame.png)
           }
           return { status: 0, stdout: '', stderr: '' }
         },
@@ -675,6 +696,7 @@ test('visual references require approval, immutable attachment bytes and every e
       }
       const changedMachine = structuredClone(matrix)
       changedMachine[5].settings[0].checkpoints[0].digests = Array(PROBE_REPEATS).fill(hash(blackCorner))
+      for (const repeat of changedMachine[5].settings[0].checkpoints[0].frameDigests) repeat.digests.fill(hash(blackCorner))
       const result = summarize(changedMachine)
       assert.equal(result.complete, true)
       assert.equal(result.settings[0].allByteIdentical, false)
@@ -840,6 +862,97 @@ test('visual references require approval, immutable attachment bytes and every e
     const tampered = Buffer.from(archive); tampered[600] ^= 1
     assert.throws(() => verifyReferenceArchive(tampered, detached, pinned, noExtraction), /archive SHA-256 mismatch/)
   } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+// Risk: an instability measurement aborts before quality evidence is saved,
+// then poisons unrelated six-repeat cells or falsely passes by picking a frame.
+test('raster probe records temporal differences and rejects incomplete evidence from the six-machine fixture', async () => {
+  const fixture = JSON.parse(readFileSync(new URL('./fixtures/raster-probe-40012177517.json', import.meta.url), 'utf8'))
+  const { reports, captureSHA, run, attempt } = fixture
+  const checkpoints = reports[0].checkpoints
+  assert.deepEqual(reports.map(report => report.slot), PROBE_SLOTS)
+  assert.deepEqual(reports.filter(report => !report.complete).map(report => report.slot), [1, 2, 3, 5, 6])
+  assert.equal(new Set(reports.map(report => report.cpu.model)).size, 3)
+  for (const report of reports) {
+    assert.equal(hash(Buffer.from(JSON.stringify(report, null, 2) + '\n')),
+      fixture.provenance.find(row => row.slot === report.slot).reportSHA256)
+    for (const setting of report.settings) {
+      assert.equal(setting.error, null, 'These failures were not subprocess timeouts or collection errors')
+      assert.ok(setting.checkpoints.every(row => row.failures.length === 0))
+      assert.ok(setting.checkpoints.filter(row => row.id !== 'V-projects-390-light').every(row => row.complete && row.repeats === 6))
+    }
+  }
+  const summarize = rows => summarizeProbeMatrix(rows, checkpoints, manifest, { captureSHA, run, attempt })
+  const original = summarize(reports)
+  assert.equal(original.complete, false)
+  for (const slot of fixture.invalidSlots) assert.ok(original.failures.includes(`Incomplete runner acquisition: ${slot}`))
+  assert.ok(original.settings.every(setting => setting.allByteIdentical === null))
+  // Preserve the real historical evidence: five of six checkpoints differ
+  // under each setting, including within the same machine/CPU model.
+  for (const [index, expected] of [[0, [4, 2, 2, 1, 4, 2]], [1, [2, 2, 2, 1, 3, 2]]] as const) {
+    assert.deepEqual(checkpoints.map(id => new Set(reports.flatMap(report =>
+      report.settings[index].checkpoints.find(row => row.id === id).digests)).size), expected)
+  }
+  assert.equal(fixture.failures.length, 8)
+  for (const failure of fixture.failures) {
+    assert.equal(failure.digests.length, PROBE_FRAMES)
+    assert.match(failure.message, /Visual viewport did not settle to three byte-identical samples within eight captures/)
+    // Opaque buffers replay the exact equality pattern logged by Chromium;
+    // this test does not launch a browser or invent missing historical PNGs.
+    const sequence = failure.digests.map(digest => Buffer.from(digest, 'hex'))
+    let index = 0
+    await assert.rejects(sampleRasterFrames(async () => sequence[index++]),
+      /Visual viewport did not settle to three byte-identical samples within eight captures/)
+    assert.equal(index, PROBE_FRAMES, 'Ordinary capture retains its exact settling bound')
+    index = 0
+    const diagnostic = await sampleRasterFrames(async () => sequence[index++], { diagnosticProbe: true })
+    assert.equal(index, PROBE_FRAMES)
+    assert.deepEqual(diagnostic.frames, sequence)
+    assert.deepEqual(diagnostic.evidence.samples, sequence.map(hash))
+    assert.equal(diagnostic.evidence.allByteIdentical, false)
+    assert.equal(diagnostic.evidence.settled, false)
+    assert.ok(diagnostic.png.equals(sequence.at(-1)))
+  }
+  const frame = Buffer.from('synthetic frame bytes'), digest = hash(frame)
+  let captures = 0
+  const ordinary = await sampleRasterFrames(async () => { captures++; return frame })
+  assert.equal(captures, 3)
+  assert.equal(ordinary.evidence.consecutive, 3)
+  captures = 0
+  const stable = await sampleRasterFrames(async () => { captures++; return frame }, { diagnosticProbe: true })
+  assert.equal(captures, PROBE_FRAMES, 'A later different frame cannot hide behind the first settled triple')
+  assert.equal(stable.evidence.allByteIdentical, true)
+  await assert.rejects(sampleRasterFrames(async () => { throw new Error('screenshot failed') }, { diagnosticProbe: true }),
+    { message: 'screenshot failed' })
+  // A fresh synthetic acquisition uses the original run/CPU/report shapes,
+  // with all six repeats and eight frames. It does not repair historical data.
+  const acquired = reports.map(report => ({ ...structuredClone(report), version: 3, framesPerRepeat: PROBE_FRAMES, complete: true,
+    settings: report.settings.map(setting => ({ ...setting, exitCode: 0, error: null, complete: true, allByteIdentical: true,
+      checkpoints: checkpoints.map(id => ({ id, repeats: PROBE_REPEATS, complete: true, failures: [], byteIdentical: true,
+        digests: Array(PROBE_REPEATS).fill(digest), frameDigests: Array.from({ length: PROBE_REPEATS }, (_, repeatIndex) =>
+          ({ repeatIndex, digests: Array(PROBE_FRAMES).fill(digest) })) })) })) }))
+  assert.equal(summarize(acquired).complete, true)
+  assert.ok(summarize(acquired).settings.every(setting => setting.allByteIdentical))
+  const changed = structuredClone(acquired)
+  changed[0].settings[0].checkpoints[0].frameDigests[0].digests[0] = hash(Buffer.from('baseline temporal difference'))
+  changed[5].settings[1].checkpoints[0].frameDigests[0].digests[0] = hash(Buffer.from('disabled-Skia temporal difference'))
+  const measured = summarize(changed)
+  assert.equal(measured.complete, true)
+  assert.ok(measured.settings.every(setting => setting.allByteIdentical === false))
+  for (const mutate of [
+    rows => { rows[0].settings[0].checkpoints[0].frameDigests[0].digests.pop() },
+    rows => { rows[0].settings[0].checkpoints[0].frameDigests[0].repeatIndex = 1 },
+    rows => { rows[0].settings[0].checkpoints[0].frameDigests[0].digests[7] = '0'.repeat(64) },
+    rows => { rows[0].settings[0].exitCode = 1 },
+    rows => { rows[0].settings[0].checkpoints[0].failures.push('quality failure') },
+    rows => { rows[0].settings[0].error = 'timeout' },
+    rows => { rows[0].version = 2 },
+    rows => { rows[0].attempt = '2' },
+  ]) {
+    const incomplete = structuredClone(changed); mutate(incomplete)
+    assert.equal(summarize(incomplete).complete, false)
+    assert.ok(summarize(incomplete).settings.every(setting => setting.allByteIdentical === null))
+  }
 })
 
 // Risk: within-run repeat identity does not prove that the 60 approved pins

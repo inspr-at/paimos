@@ -67,7 +67,12 @@ export function packCandidates(records, visual) {
 
 export function collectCandidates(directory, { diagnosticProbe = false } = {}) {
   const records = []
-  let entries = 0
+  let entries = 0, probeBytes = 0
+  const probePNG = path => {
+    const bytes = statSync(path).size
+    need(bytes <= MAX_PNG && (probeBytes += bytes) <= 256 * 1024 * 1024, 'Oversized probe frame evidence')
+    return readFileSync(path)
+  }
   function walk(path) {
     for (const entry of readdirSync(path, { withFileTypes: true })) {
       need(++entries <= 20_000, 'Too many review artifact entries')
@@ -80,7 +85,17 @@ export function collectCandidates(directory, { diagnosticProbe = false } = {}) {
         if (quality.reference?.mode === 'deferred' && quality.captureMode !== true && !diagnosticProbe) continue
         const pngPath = join(path, entry.name.replace(/\.md$/, '.png'))
         need(statSync(pngPath).size <= MAX_PNG, 'Oversized review PNG')
-        records.push({ quality, png: readFileSync(pngPath) })
+        const png = diagnosticProbe ? probePNG(pngPath) : readFileSync(pngPath)
+        const frames = []
+        if (diagnosticProbe && quality.diagnosticProbe?.frames) {
+          need(Array.isArray(quality.diagnosticProbe.frames) && quality.diagnosticProbe.frames.length <= 8, 'Too many probe frames')
+          for (const frame of quality.diagnosticProbe.frames) {
+            need(Number.isInteger(frame.index) && frame.index >= 0 && frame.index < 8 &&
+              frame.file === `${quality.id}-probe-${frame.index}.png`, 'Invalid probe frame path')
+            frames.push({ index: frame.index, file: frame.file, png: probePNG(join(path, frame.file)) })
+          }
+        }
+        records.push({ quality, png, ...(diagnosticProbe ? { frames } : {}) })
       }
     }
   }
