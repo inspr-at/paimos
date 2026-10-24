@@ -319,5 +319,205 @@
       "final_evidence_check": "The public-name guard and git diff --check also pass after recording these results."
     },
     "completed_at_utc": "2026-10-24T11:00:50Z"
+  },
+  "fix_round_3": {
+    "status": "blocked: original CI click timeout not reproduced; no fix claimed",
+    "finding": "PR #938 job 120856196903: anonymous live-agent chip text matched, then locator.click timed out at live-agents.spec.ts:159.",
+    "delivery_baseline": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+    "ci_merge_source": "291162386790932a5a01c0b70a5375e30358d6d4",
+    "ci_evidence": {
+      "run": "https://github.com/inspr-at/paimos/actions/runs/40088302308/job/120856196903",
+      "artifact": "web-shard-5-evidence (12558044434)",
+      "native_report": "attachment-security-combined/aeon-chunks-1v2nfK/reports/report-7.jsonl",
+      "case_duration_ms": 35020,
+      "navigation_duration_ms": 1145,
+      "card_visibility_assertion_duration_ms": 280,
+      "chip_text_assertion_duration_ms": 42,
+      "click_started_ms_after_test_start": 1561,
+      "click_duration_ms": 33470,
+      "context_teardown_duration_ms": 5011,
+      "page_snapshot_present": false,
+      "trace_present": false,
+      "observation": "The exact named chip matched 1 ms before click began. The click log contains only waiting for locator, and error-context has no Page snapshot. The test did not spend its budget on startup.",
+      "inference": "This evidence suggests a blocked browser page or selector evaluation. It does not prove a missing chip, changed accessible name, polling race or product defect."
+    },
+    "targeted_unchanged_linux": {
+      "run": "spec-91fb0fa693-7644",
+      "passed": 1,
+      "failed": 0,
+      "exit_code": 0
+    },
+    "diagnostic_linux_repetitions": {
+      "source_commit": "fa52dd67d922ab297fc7ffbe3fae24a033446c8a",
+      "run": "spec-fa52dd67d9-29243",
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "native_blob_reports": 30,
+      "per_chunk_workers": 1,
+      "case_duration_ms_range": [
+        613,
+        1260
+      ],
+      "changes": "Temporary repeatEach:30 plus a read-only DOM mutation observer and failure logging, isolated on scratch/aeon-1662-fix3-diagnosis. Original chip locator, click and assertions are unchanged.",
+      "delivery_includes_diagnostics": false,
+      "limitation": "The extra page.evaluate before the assertion can affect scheduling; these passes alone do not disprove a race.",
+      "native_repeat_indices": "0 through 29"
+    },
+    "affected_linux_specs": {
+      "source_commit": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+      "run": "spec-91fb0fa693-66161",
+      "specs": [
+        "tests/live-agents.spec.ts",
+        "tests/header-glimpse.spec.ts",
+        "tests/resilient-polling.spec.ts"
+      ],
+      "passed": 55,
+      "failed": 0,
+      "skipped": 14,
+      "retries": 0,
+      "exit_code": 0,
+      "cleanup_complete": true,
+      "skips": "Existing optional LIVE_SHOTS screenshots; no skips were added or changed.",
+      "summary": "55 passed, 14 skipped (2.7m)"
+    },
+    "cpu_throttled_trace_run": {
+      "status": "fallback passed; selected more cases than requested because the external wrapper split a multiword grep",
+      "requested_source_commit": "6b182e1e46b291d00c0ac55d8c31871e4da52aca",
+      "requested_cpu_throttle_rate": 4,
+      "requested_repeat_each": 30,
+      "platform": "approved macOS test host after Linux refused load 35.92 > 30",
+      "passed": 810,
+      "failed": 0,
+      "exit_code": 0,
+      "summary": "810 passed (26.1m)",
+      "last_anonymous_case_click_duration_ms": 124,
+      "last_anonymous_case_observation": "Console diagnostics show the exact working-agent label before click; click completed from 1792842845113 to 1792842845237.",
+      "limitation": "The macOS fallback transfers PNG/Markdown artifacts but not native JSON/blob reports or trace ZIPs. Its final stdout proves the suite passed and includes the throttled case, but is not used for the 132 unchanged Linux execution count."
+    },
+    "static_check": {
+      "status": "non-green on two executions; final isolated retry pending now that browser runs ended",
+      "command": "ci-static-remote.sh",
+      "source_commit": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+      "initial_refusal": {
+        "exit_code": 3,
+        "message": "remote busy ([approved macOS test host] host guard OPS-300); retry later or rely on PR CI",
+        "public_evidence_note": "Operator host name neutralized here; the exact refusal is retained in the ignored local worker status."
+      },
+      "first_execution": {
+        "exit_code": 1,
+        "passed_checks": 45,
+        "optional_skips": 0,
+        "duration_seconds": 195.26,
+        "check": "test-tiers",
+        "error": "ci-static: test-tiers exceeded timeout_seconds=180 after 180.07s (process group termination requested)",
+        "node_summary": "198 passed, 0 failed, 1 cancelled; pending Promise after interruption",
+        "fixture_output_note": "FAIL go entries for TestFailed and TestOther are deliberately emitted by runner fixtures, not actual Go package failures."
+      },
+      "second_execution": {
+        "exit_code": 1,
+        "passed_checks": 44,
+        "optional_skips": 0,
+        "duration_seconds": 209.93,
+        "previously_failing_check": "test-tiers passed in 176.35s",
+        "budget_failures": [
+          {
+            "check": "releaseworkflow-tests",
+            "error": "ci-static: releaseworkflow-tests exceeded timeout_seconds=180 after 180s (process group termination requested)"
+          },
+          {
+            "check": "apt-step-bounds",
+            "error": "ci-static: apt-step-bounds exceeded timeout_seconds=60 after 60.02s (process group termination requested)",
+            "node_summary": "15 passed, 0 failed, 1 cancelled"
+          }
+        ],
+        "scope_note": "No source in either timed-out check or the code it measures was changed by this branch. Budget limits and assertions are unchanged."
+      }
+    },
+    "scope": {
+      "product_changes": false,
+      "delivery_spec_changes": false,
+      "assertions_weakened": false,
+      "timeouts_increased": false,
+      "retries_added": false,
+      "review_gates_run": false,
+      "model_clis_called": false,
+      "origin_push": false,
+      "deployment": false
+    },
+    "ci_sequence_repetitions": {
+      "status": "passed",
+      "source_commit": "6d4b1feccda006bf73c8c0b247c3420622206941",
+      "run": "spec-6d4b1feccd-59242",
+      "repeat_each": 30,
+      "cases_per_repetition": 2,
+      "selection": "a card comes alive|without permission to know",
+      "spec_source_identical_to": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+      "changes": "Temporary UI config only: repeatEach:30 and trace:retain-on-failure. No DOM observer, CDP throttle, added evaluate or test-source change. Same first two cases and order as CI chunk 7.",
+      "delivery_includes_diagnostics": false,
+      "passed": 60,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "native_blob_reports": 30,
+      "native_repeat_indices": "0 through 29",
+      "per_chunk_workers": 1,
+      "exit_code": 0,
+      "cleanup_complete": true,
+      "summary": "60 passed (3.3m)"
+    },
+    "extended_ci_sequence_repetitions": {
+      "status": "passed",
+      "source_commit": "15dbab725a7f7de4a3ebb14385a3ffbdd9f6f176",
+      "run": "spec-15dbab725a-11135",
+      "repeat_each": 100,
+      "cases_per_repetition": 2,
+      "selection": "a card comes alive|without permission to know",
+      "spec_source_identical_to": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+      "changes": "Temporary UI config only: repeatEach:100 and trace:retain-on-failure. Original test source and assertions unchanged.",
+      "delivery_includes_diagnostics": false,
+      "passed": 200,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "native_blob_reports": 100,
+      "native_repeat_indices": "0 through 99",
+      "per_chunk_workers": 1,
+      "exit_code": 0,
+      "cleanup_complete": true,
+      "summary": "200 passed (8.8m)"
+    },
+    "unchanged_anonymous_case_linux_passes": 132,
+    "go_and_unit_scope": "No Go, web unit-test, application or runner source changed in this fix round. All seven Go and four web-unit shards on the original PR run passed; the two remote static executions also passed web typecheck, lint, shard tests, audit tests and their configured web-unit checks.",
+    "conclusion": "The original exact test source passes 132 Linux executions of the anonymous case (1 targeted + 1 affected-suite + 30 CI-sequence + 100 extended CI-sequence); 30 instrumented Linux executions also pass. The original CI artifact establishes a click stall after a successful match, but retains neither a Page snapshot nor a browser trace. No product or test defect has been established, and no failing regression against 91fb0fa6 can responsibly be claimed. Follow the brief stop condition instead of changing assertions, clocks or locators on a guess.",
+    "remaining": "The blocking CI timeout remains open. Needed evidence is a retained trace or sampled browser stack from an actual recurrence; passing quiet repetitions alone do not establish its cause. Static validation is also non-green because unchanged checks exceeded their hard file budgets on the remote host.",
+    "external_fallback_runner_issue": {
+      "owner": "Coordinator / OPS; external harness left unchanged",
+      "file": "remote-spec-mbp.sh",
+      "issue": "The unquoted remote heredoc removes the quotes in the GREP parameter expansion. A grep containing spaces becomes separate shell arguments on the remote side.",
+      "requested_argv": [
+        "tests/live-agents.spec.ts",
+        "-g",
+        "without permission to know",
+        "--workers=1",
+        "--reporter=line"
+      ],
+      "locally_reproduced_actual_argv": [
+        "tests/live-agents.spec.ts",
+        "-g",
+        "without",
+        "permission",
+        "to",
+        "know",
+        "--workers=1",
+        "--reporter=line"
+      ],
+      "effect": "Playwright sees grep=without and extra file selectors permission, to and know. The optional 30-case diagnostic therefore ran 810 cases from several files, serially; all passed.",
+      "reproduction": "Argument-only local Bash heredoc reproduces the same expansion; it launches no browser, test suite or remote command.",
+      "proposed_repair": "Pass the validated specs and grep as separately shell-quoted remote arguments and expand them as an argv array, as the Linux wrapper already does. Add a harness test proving a multiword grep remains one argument.",
+      "modified": false,
+      "relation_to_original_ci_failure": "This explains the unexpectedly broad fallback run, not the original GitHub CI click timeout."
+    }
   }
 }
