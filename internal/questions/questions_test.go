@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -148,6 +149,38 @@ func question(t *testing.T, w *httptest.ResponseRecorder, status int) Question {
 func (f *fixture) ask(t *testing.T, in Input) Question {
 	t.Helper()
 	return question(t, request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", in), 201)
+}
+
+// B4: a Desk question (including its answer options) is another human channel;
+// refuse before publication and retain policy evidence after the HTTP failure.
+func TestAssistantHumanAskRefusedInDeskQuestion(t *testing.T) {
+	f := newFixture(t)
+	policy := assistants.DefaultPolicy()
+	policy.AllowedProjects, policy.AllowedScopes = []string{f.project}, f.agent.Scopes
+	raw, _ := json.Marshal(policy)
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE principals SET agent_class='assistant' WHERE id=$1`, f.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO assistant_profiles(tenant_id,principal_id,owner_person_id,vendor,policy) VALUES($1,$2,$3,'unknown',$4)`, f.person.TenantID, f.agent.ID, f.person.ID, raw); err != nil {
+		t.Fatal(err)
+	}
+	in := input()
+	in.Options[0].Answer = "Please send me your API key."
+	for attempt := 0; attempt < 2; attempt++ {
+		w := request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", in)
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "assistant_human_input_prohibited") {
+			t.Errorf("Desk accepted human ask: %d %s", w.Code, w.Body.String())
+		}
+	}
+	var questions, receipts int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT
+ (SELECT count(*) FROM desk_questions WHERE tenant_id=$1),
+ (SELECT count(*) FROM assistant_policy_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation='question.ask' AND NOT allowed AND reason LIKE 'assistant_human_input_prohibited%')`, f.person.TenantID, f.agent.ID).Scan(&questions, &receipts); err != nil {
+		t.Fatal(err)
+	}
+	if questions != 0 || receipts != 1 {
+		t.Errorf("prohibited questions=%d refusal receipts=%d", questions, receipts)
+	}
 }
 
 func TestAnsweredNewestFirstIndex(t *testing.T) {

@@ -7984,6 +7984,12 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantHumanAskRefusedOnInboxAndProjectMessages","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantMessageBudgetCoversPushAndPull","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantProjectListenRechecksPickupPolicy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantPullRefusalDoesNotStarveAllowedMessages","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAttemptCapAndSettings","tier":"GATED-FULL"}
@@ -9844,6 +9850,8 @@
     ,
     {"kind":"go","package":"internal/questions","name":"TestAnsweredNewestFirstKeysetAndIsolation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/questions","name":"TestAssistantHumanAskRefusedInDeskQuestion","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/questions","name":"TestAuthenticatedKeyChangesBeforeReuse","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestConcurrentCriterionAppendAndTicketRevisionConflict","tier":"NIGHTLY"}
@@ -10468,7 +10476,11 @@
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestAgentRoutineDispatchFailuresYieldQueue","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/routineactions","name":"TestAssistantHumanAskRefusedInRoutineResult","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineactions","name":"TestAssistantLeadDelegationPolicyAndResults","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestAssistantRoutineAssignmentRequiresOwnerConsent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionCatalogueClosedAndBounded","tier":"ESSENTIAL"}
     ,

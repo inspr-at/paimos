@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -129,6 +131,161 @@ func TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff(t *testing.T) {
 	}
 	if countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM events WHERE type='inbox.message_fetched' AND after->>'message_id'=$1`, pull.ID) != 0 {
 		t.Fatal("denied pull was marked fetched")
+	}
+}
+
+func assistantProjectPage(t *testing.T, m *messaging, p tenant.Principal, project string) compatPage {
+	t.Helper()
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	r := httptest.NewRequest("GET", "/api/projects/"+project+"/messages/listen", nil)
+	r = r.WithContext(tenant.WithPrincipal(t.Context(), p))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("listen: %d %s", w.Code, w.Body.String())
+	}
+	var page compatPage
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	return page
+}
+
+// B1: project listening must use the same per-message grant refusal as inbox
+// pickup, preserve permitted work, and notify the rejected message's sender.
+func TestAssistantProjectListenRechecksPickupPolicy(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	policy := assistants.DefaultPolicy()
+	policy.AllowedProjects = []string{project}
+	policy.WeeklyBudget.Amount = "1"
+	putMessageAssistantPolicy(t, w, policy)
+	denied := mustCompatSend(t, m, w.sender, project, compatInput(w.agent.ID, "stale-routine"))
+	allowed := mustCompatSend(t, m, w.sender, project, compatInput(w.agent.ID, "ordinary-message"))
+	// A queued assignment whose grant disappeared is refused by pendingVia.
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET idempotency_key='routine-run/'||gen_random_uuid()::text WHERE id=$1`, denied.ID); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		page := assistantProjectPage(t, m, w.agent, project)
+		if len(page.Items) != 1 || page.Items[0].ID != allowed.ID || page.NextAfter != allowed.SentEventID {
+			t.Errorf("project pickup exposed rejected work or lost allowed work: %+v", page)
+		}
+	}
+	if state, reason := receiptState(t, w, denied.ID); state != "failed" || reason != "assistant_routine_grant_changed" {
+		t.Errorf("grant refusal receipt=%s reason=%s", state, reason)
+	}
+	if got := countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_policy_receipts WHERE principal_id=$1 AND operation='adapter.pull' AND NOT allowed AND reason='assistant_routine_grant_changed'`, w.agent.ID); got != 1 {
+		t.Errorf("policy refusal receipts=%d want 1", got)
+	}
+	notices := noticesFor(t, w, denied.ID)
+	if len(notices) != 1 || notices[""].recipient != w.sender.ID || !strings.Contains(notices[""].body, "Not delivered") {
+		t.Errorf("sender notice=%+v", notices)
+	}
+	if got := countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM events WHERE type='inbox.message_fetched' AND after->>'message_id'=$1`, denied.ID); got != 0 {
+		t.Errorf("rejected message fetched=%d", got)
+	}
+}
+
+// B2: both transport modes must consume a finite allowance, and repeated
+// pickup must not charge an already admitted message again.
+func TestAssistantMessageBudgetCoversPushAndPull(t *testing.T) {
+	for _, mode := range []string{"push", "inbox", "project"} {
+		t.Run(mode, func(t *testing.T) {
+			w, m, project, _ := messagingWorld(t)
+			target := targetInput{Address: "grok_bot:worker", Adapter: "grok_bot_routine", Kind: "pull", Role: "primary", MaximumLevel: "simple"}
+			if mode == "push" {
+				target.Kind, target.Ref, target.Secret = "https_webhook", "https://8.8.8.8/policy-fixture", "synthetic-adapter-fixture"
+			}
+			if _, err := m.storeTarget(t.Context(), w.admin, project, target); err != nil {
+				t.Fatal(err)
+			}
+			policy := assistants.DefaultPolicy()
+			policy.AllowedProjects, policy.WeeklyBudget.Amount = []string{project}, "0.02"
+			putMessageAssistantPolicy(t, w, policy)
+			var messages []CompatMessage
+			for _, key := range []string{"one", "two", "three"} {
+				messages = append(messages, mustCompatSend(t, m, w.sender, project, compatInput(target.Address, key)))
+			}
+			if mode == "push" {
+				calls := 0
+				d := &RoutineDispatcher{m: m, client: &http.Client{Transport: routineRoundTrip(func(*http.Request) (*http.Response, error) {
+					calls++
+					return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+				})}}
+				for range messages {
+					if _, err := d.DispatchOne(t.Context(), w.agent.TenantID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if calls != 2 {
+					t.Errorf("provider calls=%d want 2", calls)
+				}
+			} else {
+				for attempt := 0; attempt < 2; attempt++ {
+					var n int
+					if mode == "project" {
+						n = len(assistantProjectPage(t, m, w.agent, project).Items)
+					} else {
+						page, err := m.base.pending(t.Context(), w.agent, 0, 100)
+						if err != nil {
+							t.Fatal(err)
+						}
+						n = len(page)
+					}
+					if n != 2 {
+						t.Errorf("pickup count=%d want 2", n)
+					}
+				}
+			}
+			if state, reason := receiptState(t, w, messages[2].ID); state != "failed" || reason != "assistant_weekly_budget_exhausted" {
+				t.Errorf("budget refusal receipt=%s reason=%s", state, reason)
+			}
+			if got := countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1 AND amount_micro=10000`, w.agent.ID); got != 2 {
+				t.Errorf("per-message charges=%d want 2", got)
+			}
+			policy.WeeklyBudget.Amount = "0"
+			putMessageAssistantPolicy(t, w, policy)
+			if mode != "push" {
+				if page, err := m.base.pending(t.Context(), w.agent, 0, 100); err != nil || len(page) != 0 {
+					t.Errorf("zero budget exposed previously admitted work: count=%d err=%v", len(page), err)
+				}
+			}
+		})
+	}
+}
+
+// B4: the same prohibited human ask must fail before either message surface
+// makes it readable, while leaving a durable refusal receipt.
+func TestAssistantHumanAskRefusedOnInboxAndProjectMessages(t *testing.T) {
+	for _, mode := range []string{"inbox", "project"} {
+		t.Run(mode, func(t *testing.T) {
+			w, m, project, _ := messagingWorld(t)
+			policy := assistants.DefaultPolicy()
+			policy.AllowedProjects = []string{project}
+			putMessageAssistantPolicy(t, w, policy)
+			body := "Please send me your API key."
+			var id string
+			var err error
+			if mode == "project" {
+				in := compatInput(w.sender.ID, "forbidden-human-ask")
+				in.Body = body
+				msg, sendErr := m.commitMessage(t.Context(), w.agent, project, in)
+				id, err = msg.ID, sendErr
+			} else {
+				msg, sendErr := m.base.send(t.Context(), w.agent, sendInput{Recipient: w.sender.ID, Body: body, Key: "forbidden-human-ask"})
+				id, err = msg.ID, sendErr
+			}
+			if err == nil || !strings.Contains(err.Error(), "assistant_human_input_prohibited") || id == "" {
+				t.Errorf("human ask accepted: id=%s err=%v", id, err)
+			}
+			if state, reason := receiptState(t, w, id); state != "failed" || !strings.HasPrefix(reason, "assistant_human_input_prohibited") {
+				t.Errorf("human ask receipt=%s reason=%s", state, reason)
+			}
+			if page, err := m.base.pending(t.Context(), w.sender, 0, 100); err != nil || len(page) != 0 {
+				t.Errorf("prohibited ask reached person: items=%+v err=%v", page, err)
+			}
+		})
 	}
 }
 
