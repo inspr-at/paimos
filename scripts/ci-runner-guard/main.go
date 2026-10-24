@@ -150,6 +150,11 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 	var problems []string
 	reject := func(reason string) { problems = append(problems, name+": "+reason) }
+	if name == "ci.yml" || name == "nightly-full.yml" {
+		if err := checkVisualCheckpointEvidence(workflow); err != nil {
+			reject(err.Error())
+		}
+	}
 	if name != "visual-capture.yml" && fixedCaptureRunner.MatchString(fmt.Sprint(workflow)) {
 		reject("agm2 is reserved to visual-capture.yml dispatched on main")
 	}
@@ -252,6 +257,39 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		}
 	}
 	return problems
+}
+
+func checkVisualCheckpointEvidence(workflow map[string]any) error {
+	job := mapping(mapping(workflow["jobs"])["visual-comparison"])
+	steps, _ := job["steps"].([]any)
+	collectAt, uploadAt, runAt := -1, -1, -1
+	for i, value := range steps {
+		step := mapping(value)
+		switch step["name"] {
+		case "Run every visual case without retries":
+			runAt = i
+		case "Collect deliberate visual checkpoint PNGs":
+			want := map[string]any{"name": "Collect deliberate visual checkpoint PNGs", "if": "always()",
+				"run": `node scripts/test-prune/visual-evidence.mjs web/test-results "$RUNNER_TEMP/visual-checkpoints"`}
+			if collectAt != -1 || !reflect.DeepEqual(step, want) {
+				return fmt.Errorf("visual checkpoint evidence must use the bounded collector on always()")
+			}
+			collectAt = i
+		case "Preserve passing and failing visual checkpoint PNGs":
+			want := map[string]any{"name": "Preserve passing and failing visual checkpoint PNGs", "if": "always()",
+				"uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+				"with": map[string]any{"name": "visual-checkpoints-${{ github.run_attempt }}",
+					"path": "${{ runner.temp }}/visual-checkpoints/*.png", "if-no-files-found": "warn", "retention-days": 7, "overwrite": true}}
+			if uploadAt != -1 || !reflect.DeepEqual(step, want) {
+				return fmt.Errorf("visual checkpoint evidence must upload only collected PNGs on always() for seven days")
+			}
+			uploadAt = i
+		}
+	}
+	if runAt < 0 || collectAt <= runAt || uploadAt != collectAt+1 {
+		return fmt.Errorf("visual checkpoint evidence must collect and upload once after visual execution")
+	}
+	return nil
 }
 
 // OPS-444 is enforced by GitHub's org runner group, restricted to this exact

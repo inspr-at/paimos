@@ -484,6 +484,18 @@ jobs:
       - name: Report every visual checkpoint and preserve comparison failures
         if: always()
         run: node scripts/test-prune/visual-baselines.mjs report web/test-results >> "$GITHUB_STEP_SUMMARY"
+      - name: Collect deliberate visual checkpoint PNGs
+        if: always()
+        run: node scripts/test-prune/visual-evidence.mjs web/test-results "$RUNNER_TEMP/visual-checkpoints"
+      - name: Preserve passing and failing visual checkpoint PNGs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-checkpoints-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/visual-checkpoints/*.png
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
       - name: Confirm full visual tier execution
         env:
           TIER_REPORT: tmp/test-tiers/visual-comparison-measurement.json

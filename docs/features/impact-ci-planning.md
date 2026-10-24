@@ -1,5 +1,42 @@
 # Impact CI: planning and capacity
 
+AEON-1730 adds evidence without changing browser scheduling or test tiers.
+The dedicated `visual-comparison` jobs in CI and nightly collect the 80
+manifest-owned checkpoint PNGs after passing or failing checks, including
+failure pixels captured before a prerequisite completes. Collection verifies
+the checkout SHA, owning spec, PNG digest and viewport. It rejects symlinks,
+duplicates, stale captures and oversized inputs before creating a fresh
+PNG-only artifact directory. The collector bounds all report/PNG reads to
+64 MiB in total (each PNG at most 4 MiB); the artifact therefore contains at
+most 64 MiB of PNG payload, retained for seven days. Missing checkpoints are
+listed explicitly; traces, fixture screenshots, baseline/diff PNGs and reports
+are excluded from this additional artifact. The existing visual gate remains
+responsible for test completeness and comparison failures.
+
+Read-only packing evidence uses the current committed catalogue and the
+runner's whole-file packing and weights:
+
+```sh
+node scripts/test-prune/ci-repack.mjs report > tmp/packing-evidence.json
+node scripts/test-prune/ci-repack.mjs --check tmp/packing-evidence.json
+node scripts/test-prune/ci-repack.mjs --check
+```
+
+Create `tmp/` first if needed. `--check` recomputes the evidence; an optional
+report must match exactly. It succeeds for an honestly blocked packing plan:
+it checks evidence validity, not permission to reduce the matrix. Reports bind
+the source commit/tree and newest fetched `origin/main`, refusing dirty or
+untracked inputs and missing main ancestry. No P12 or wave B data is imported.
+Per-shard files, case counts, work and setup costs accompany perfect-balance
+and indivisible-file lower bounds. The current full plan is compared with
+eight-shard full/nightly estimates using P12's proposed 300-second setup
+allowance and 900/960-second budgets (860/840-second targets). These estimates
+use existing timings, including the runner's fallback for unmeasured nightly
+files; they are not new hosted measurements. Visual work is excluded only
+where assigned to its dedicated execution owner. No report authorizes cuts,
+rollout activation, shard changes or timeout changes. Tooling regressions run
+through the existing static test entry without adding native tier rows.
+
 AEON-1337 runs classification, tier scheduling, PR checkout identity and shadow
 publication in one `ci-plan` job. It shares one checkout and Node setup, removing
 one hosted job start from the planning dependency chain. The job publishes the
