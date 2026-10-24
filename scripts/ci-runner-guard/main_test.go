@@ -148,7 +148,7 @@ func TestVisualCaptureRunnerBoundary(t *testing.T) {
 				if err != nil {
 					t.Fatalf("guarded hosted partition rejected: %v", err)
 				}
-			} else if err == nil || !strings.Contains(err.Error(), "Go shard count must retain the guarded four-way layout") {
+			} else if err == nil || !strings.Contains(err.Error(), "hosted shard count must retain the guarded four-way layout") {
 				t.Fatalf("unsafe partition accepted or wrong rejection: %v", err)
 			}
 		})

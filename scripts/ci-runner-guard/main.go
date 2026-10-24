@@ -697,7 +697,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		}
 	}
 	if mapping(mapping(mapping(jobs["go-test"])["strategy"])["matrix"])["shard"] != routedGoShards {
-		return fmt.Errorf("Go shard count must retain the guarded four-way layout and two/seven fallback")
+		return fmt.Errorf("hosted shard count must retain the guarded four-way layout and two/seven fallback")
 	}
 	if mapping(tiers["outputs"])["web_shards"] != "${{ steps.tiers.outputs.web_shards }}" {
 		return fmt.Errorf("ci-plan must publish the planned web shard list")
