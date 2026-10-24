@@ -202,10 +202,51 @@ func TestAssistantLeadDelegationPolicyAndResults(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE assistant_profiles SET policy=$2,revision=revision+1 WHERE principal_id=$1`, assistant.ID, raw)
 		return err
 	})
+	// The third run was already dispatched under the live grant. Ending the
+	// original lead (even with a successor) cannot discard its completed work.
+	// The result is still authorized by the person grant and assistant policy;
+	// the pointer must fail for the original session instead of being rerouted.
+	var successor string
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,phase,heartbeat_at) VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','coordinator',decode(repeat('03',32),'hex'),decode(repeat('04',32),'hex'),'working',clock_timestamp()) RETURNING id::text`, f.p.TenantID, f.project, lead.ID, f.p.ID).Scan(&successor)
+	})
+	revokedInput := input("lead-revoked-after-acceptance")
+	revokedInput["session_id"] = successor
 	var revoked Occurrence
-	if err := json.Unmarshal(f.call(lead, "POST", path, input("lead-revoked-after-acceptance"), 200), &revoked); err != nil || revoked.Run == nil {
+	if err := json.Unmarshal(f.call(lead, "POST", path, revokedInput, 200), &revoked); err != nil || revoked.Run == nil {
 		t.Fatal("missing revoke fixture run")
 	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='completed' WHERE id=$1`, session)
+		return err
+	})
+	stoppedPath := "/api/recurrences/" + r.ID + "/runs/" + occurrences[2].Run.ID + "/agent-result"
+	var completed AgentResult
+	if err := json.Unmarshal(f.call(assistant, "POST", stoppedPath, resultInput, 200), &completed); err != nil || completed.NodeID == "" || completed.LeadMessageID == "" {
+		t.Fatalf("result after lead stopped must retain output and pointer receipt: %+v err=%v", completed, err)
+	}
+	var retried AgentResult
+	if err := json.Unmarshal(f.call(assistant, "POST", stoppedPath, resultInput, 200), &retried); err != nil || !reflect.DeepEqual(completed, retried) {
+		t.Fatalf("stopped-lead result retry changed output or receipt: %+v err=%v", retried, err)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var state, reason, boundSession string
+		var stored, outputs, rerouted, failures int
+		if err := tx.QueryRow(t.Context(), `SELECT r.state,r.failure_reason,m.recipient_session_id::text,
+ (SELECT count(*) FROM routine_runs WHERE id=$2::uuid AND state='done' AND agent_result->>'node_id'=$3::text),
+ (SELECT count(*) FROM nodes WHERE id=$3::uuid AND state='proposed' AND body=$5),
+ (SELECT count(*) FROM inbox_messages WHERE idempotency_key='assistant-result/'||$2::text AND (recipient_session_id=$4 OR recipient_session_id IS NULL)),
+ (SELECT count(*) FROM events WHERE type='inbox.receipt_failed' AND after->>'message_id'=$1::text)
+ FROM inbox_messages m JOIN inbox_receipts r ON r.message_id=m.id WHERE m.id=$1`, completed.LeadMessageID, occurrences[2].Run.ID, completed.NodeID, successor, resultInput.Body).Scan(&state, &reason, &boundSession, &stored, &outputs, &rerouted, &failures); err != nil {
+			return err
+		}
+		if state != "failed" || reason != "session_ended" || boundSession != session || stored != 1 || outputs != 1 || rerouted != 0 || failures != 1 {
+			t.Fatalf("stopped-lead result: state=%s reason=%s session=%s stored=%d outputs=%d rerouted=%d failures=%d", state, reason, boundSession, stored, outputs, rerouted, failures)
+		}
+		return nil
+	})
+	// The successor is still live, so only revoking the exact key can
+	// cause this separate pending delegation to be refused at dispatch.
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1`, lead.KeyID)
 		return err
@@ -221,42 +262,6 @@ func TestAssistantLeadDelegationPolicyAndResults(t *testing.T) {
 		}
 		if state != "cancelled" || reason != "agent_dispatch_refused" || messages != 0 || events != 1 {
 			t.Fatalf("revoked lead state=%s reason=%s messages=%d events=%d", state, reason, messages, events)
-		}
-		return nil
-	})
-	// The third run was already dispatched under the live grant. Ending the
-	// original lead (even with a successor) cannot discard its completed work.
-	// The result is still authorized by the person grant and assistant policy;
-	// the pointer must fail for the original session instead of being rerouted.
-	var successor string
-	f.tx(func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='completed' WHERE id=$1`, session); err != nil {
-			return err
-		}
-		return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,phase,heartbeat_at) VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','coordinator',decode(repeat('03',32),'hex'),decode(repeat('04',32),'hex'),'working',clock_timestamp()) RETURNING id::text`, f.p.TenantID, f.project, lead.ID, f.p.ID).Scan(&successor)
-	})
-	stoppedPath := "/api/recurrences/" + r.ID + "/runs/" + occurrences[2].Run.ID + "/agent-result"
-	var completed AgentResult
-	if err := json.Unmarshal(f.call(assistant, "POST", stoppedPath, resultInput, 200), &completed); err != nil || completed.NodeID == "" || completed.LeadMessageID == "" {
-		t.Fatalf("result after lead stopped must retain output and pointer receipt: %+v err=%v", completed, err)
-	}
-	var retried AgentResult
-	if err := json.Unmarshal(f.call(assistant, "POST", stoppedPath, resultInput, 200), &retried); err != nil || !reflect.DeepEqual(completed, retried) {
-		t.Fatalf("stopped-lead result retry changed output or receipt: %+v err=%v", retried, err)
-	}
-	f.tx(func(tx pgx.Tx) error {
-		var state, reason, boundSession string
-		var stored, outputs, rerouted, failures int
-		if err := tx.QueryRow(t.Context(), `SELECT r.state,r.failure_reason,m.recipient_session_id::text,
- (SELECT count(*) FROM routine_runs WHERE id=$2 AND state='done' AND agent_result->>'node_id'=$3),
- (SELECT count(*) FROM nodes WHERE id=$3 AND fields->>'status'='proposed'),
- (SELECT count(*) FROM inbox_messages WHERE idempotency_key='assistant-result/'||$2::text AND (recipient_session_id=$4 OR recipient_session_id IS NULL)),
- (SELECT count(*) FROM events WHERE type='inbox.receipt_failed' AND after->>'message_id'=$1::text)
- FROM inbox_messages m JOIN inbox_receipts r ON r.message_id=m.id WHERE m.id=$1`, completed.LeadMessageID, occurrences[2].Run.ID, completed.NodeID, successor).Scan(&state, &reason, &boundSession, &stored, &outputs, &rerouted, &failures); err != nil {
-			return err
-		}
-		if state != "failed" || reason != "session_ended" || boundSession != session || stored != 1 || outputs != 1 || rerouted != 0 || failures != 1 {
-			t.Fatalf("stopped-lead result: state=%s reason=%s session=%s stored=%d outputs=%d rerouted=%d failures=%d", state, reason, boundSession, stored, outputs, rerouted, failures)
 		}
 		return nil
 	})
