@@ -1,8 +1,8 @@
 {
   "license": "SPDX-License-Identifier: AGPL-3.0-only",
   "ticket": "AEON-1726",
-  "testedHead": null,
-  "recordedAt": "2026-10-24T09:54:05.694Z",
+  "testedHead": "1b15b1af8b65066fe194af4f5e5227d1e09d4921",
+  "recordedAt": "2026-10-24T10:00:40.357Z",
   "checks": {
     "workflowAndGuard": {
       "command": "node --test scripts/full-ui-qa.test.mjs",
@@ -30,8 +30,15 @@
     },
     "remoteStatic": {
       "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
-      "exit": null,
-      "summary": "Awaiting committed-HEAD static check for fix1."
+      "exit": 0,
+      "passed": 46,
+      "skipped": 0,
+      "summary": "Static pre-filter: 160.31s; 46 passed, 0 optional skipped. Hosted CI remains the proof."
+    },
+    "repositoryWorkflowGuard": {
+      "command": "go test ./scripts/ci-runner-guard -count=1",
+      "via": "ci-static-remote.sh runner-guard-tests",
+      "exit": 0
     }
   },
   "inventory": {
@@ -150,11 +157,21 @@
   "scope": {
     "ciYmlChanged": false,
     "browserSpecsChanged": false,
-    "existingAssertionsChanged": false,
     "originPushed": false,
     "deployed": false,
     "modelReviewRun": false,
     "auditOwnership": "Existing S7 scripts/** and docs/** globs",
-    "tierRegistration": "New cases in existing full-ui-qa-tests static check; script tests are outside Go/web tier catalogue"
+    "tierRegistration": "Existing full-ui-qa-tests static check and registered scripts/ci-runner-guard tests; no new Go/web test names or tier rows",
+    "browserAssertionsChanged": false,
+    "filesChanged": [
+      ".github/workflows/full-ui-qa.yml",
+      "scripts/ci/full-ui-qa-shards.json",
+      "scripts/full-ui-qa-shard.mjs",
+      "scripts/full-ui-qa.test.mjs",
+      "scripts/ci-runner-guard/main.go",
+      "scripts/ci-runner-guard/main_test.go",
+      "docs/features/full-ui-qa-shards.md",
+      "docs/qa/aeon-1726-evidence.json"
+    ]
   }
 }
