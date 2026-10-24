@@ -4,9 +4,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import { useRoute, useRouter } from 'vue-router'
 import type { Project } from '../../stores/projects'
 import { useSession } from '../../stores/session'
+import { deliveryLanguage } from '../../lib/delivery'
 import { can, onAccessRevalidate } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
-import { readDeliveryMetrics, type MetricSource } from '../../lib/deliveryNumbers'
+import { historyReadReason, readDeliveryMetrics, type MetricSource } from '../../lib/deliveryNumbers'
 import { HISTORY_DAYS, checkRepositoryHistory, linkProjectRepository, readRepositoryHistory, repositoryState, workflowFile, type HistoryPosition } from '../../lib/projectDeliverySettings'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
@@ -119,7 +120,7 @@ onBeforeUnmount(() => { poller.stop(); stopAccess(); scope.dispose(); closeMenu(
         <div class="dstat" :class="{ 'has-source': !!source.history_source, wait: ['noactions', 'appoff', 'unavailable'].includes(state), ok: state === 'done', run: state === 'reading' }" role="status">
           <span class="ds-ic"><AppIcon :name="state === 'noactions' ? 'key' : state === 'appoff' ? 'signal-off' : state === 'unavailable' ? 'alert' : state === 'reading' ? 'history' : state === 'done' ? 'check' : 'clock'" :size="16" /></span>
           <div class="ds-t">
-            <p class="ds-h"><b>Linked.</b> <template v-if="state === 'noactions'">History can’t be read: the GitHub App lacks Actions read access.</template><template v-else-if="state === 'appoff'">The GitHub App doesn’t receive events for {{ source.repository }}.</template><template v-else-if="state === 'stale'">No events from GitHub for {{ staleDays }} days.</template><template v-else-if="state === 'unavailable'">History can’t be read: GitHub is unavailable.</template><template v-else-if="state === 'done'">History read back to {{ source.backfill_since ? date(source.backfill_since) : 'the recorded start' }}; live since then.</template><template v-else>Reading history<template v-if="progressDay !== null"> · day {{ progressDay }} of {{ historyDays }}</template></template></p>
+            <p class="ds-h"><b>Linked.</b> <template v-if="state === 'noactions'">History can’t be read: the GitHub App lacks Actions read access.</template><template v-else-if="state === 'appoff'">The GitHub App doesn’t receive events for {{ source.repository }}.</template><template v-else-if="state === 'stale'">No events from GitHub for {{ staleDays }} days.</template><template v-else-if="state === 'unavailable'">{{ historyReadReason(source, deliveryLanguage()) }}</template><template v-else-if="state === 'done'">History read back to {{ source.backfill_since ? date(source.backfill_since) : 'the recorded start' }}; live since then.</template><template v-else>Reading history<template v-if="progressDay !== null"> · day {{ progressDay }} of {{ historyDays }}</template></template></p>
             <div class="ds-content" role="region" aria-label="Repository history details" tabindex="0">
             <template v-if="state === 'reading'">
               <div v-if="progressDay !== null" class="prog" role="progressbar" aria-label="History read" aria-valuemin="0" :aria-valuemax="historyDays" :aria-valuenow="progressDay"><span :style="{ width: `${progressDay / historyDays * 100}%` }" /></div>

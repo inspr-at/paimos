@@ -20,7 +20,7 @@ import TicketsSection from './TicketsSection.vue'
 import TrendChart from './TrendChart.vue'
 import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
-import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, numbersOf, openingPrefs, readDefaults, readDeliveryMetrics, shortDate, type DeliveryDefaults, type DeliveryMetrics, type DeliveryPrefs, type Level, type StoredDeliveryPrefs, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
+import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, historyReadReason, numbersOf, openingPrefs, readDefaults, readDeliveryMetrics, shortDate, type DeliveryDefaults, type DeliveryMetrics, type DeliveryPrefs, type Level, type StoredDeliveryPrefs, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
 import { deliveryText, fill } from '../../lib/deliveryNumbersText'
 import { FLOW_MODES, type FlowMode } from '../../lib/deliveryFlowModes'
 import { timeLabel } from '../../lib/deliveryFlow'
@@ -197,8 +197,8 @@ const chips = computed(() => {
   const day = (iso: string | null) => iso ? shortDate(iso.slice(0, 10), lang.value) : ''
   const stale = repositoryState(s, Date.parse(data.value?.generated_at ?? '')) === 'stale'
   const readError = s.last_read_error?.reason
-  const historyProblem = lang.value === 'de' ? { actions_read_missing: 'Actions-Lesezugriff fehlt', not_installed: 'App nicht installiert', github_unavailable: 'GitHub nicht erreichbar' } : { actions_read_missing: 'Actions read access missing', not_installed: 'App not installed', github_unavailable: 'GitHub unavailable' }
-  const back = readError ? { icon: 'history' as const, b: lang.value === 'de' ? 'Historie' : 'History', rest: ` · ${historyProblem[readError]}` }
+
+  const back = readError ? { icon: 'history' as const, b: lang.value === 'de' ? 'Historie' : 'History', rest: ` · ${historyReadReason(s, lang.value)}` }
     : s.backfill === 'done' ? { icon: 'history' as const, b: t.srcBack[0], rest: fill(t.srcBack[1], { d: day(s.backfill_since) }) }
     : s.backfill === 'running' ? { icon: 'history' as const, b: t.srcRun[0], rest: s.covered_since ? fill(t.srcRun[1], { d: day(s.covered_since) }) : t.srcRunNone[1] }
       : { icon: 'history' as const, b: t.srcNone[0], rest: t.srcNone[1] }

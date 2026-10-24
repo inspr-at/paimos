@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"time"
 
@@ -28,18 +29,34 @@ func historyDays(days *int) int {
 func metricError(err error, at time.Time) MetricReadError {
 	out := MetricReadError{Reason: "github_unavailable", At: at.UTC()}
 	var response *crossreview.GitHubHTTPError
+	var upstream *webhookGitHubError
+	var network net.Error
+	if errors.As(err, &response) {
+		out.StatusCode = &response.StatusCode
+	}
 	switch {
 	case errors.Is(err, errNotConfigured):
 		out.Reason = "not_installed"
 	case metricRateLimited(err):
-		// A rate-limited Actions read is not evidence of a missing grant.
+		out.Reason = "rate_limited"
+		if errors.As(err, &upstream) {
+			reset := maxTime(upstream.reset, at.Add(upstream.retryAfter))
+			if reset.After(at) {
+				out.ResetAt = &reset
+			}
+		}
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, crossreview.ErrTimedOut), errors.As(err, &network) && network.Timeout(), errors.As(err, &upstream) && upstream.timedOut:
+		out.Reason = "timed_out"
 	case errors.As(err, &response):
+		out.Reason = "github_error"
 		if response.StatusCode == http.StatusForbidden && response.ActionsReadRequired {
 			permission := "actions:read"
 			out.Reason, out.Permission = "actions_read_missing", &permission
 		} else if response.StatusCode == http.StatusNotFound {
 			out.Reason = "not_installed"
 		}
+	case errors.As(err, &upstream) && upstream.class == "network", errors.Is(err, crossreview.ErrTransient), errors.As(err, &network):
+		out.Reason = "unreachable"
 	}
 	return out
 }
@@ -63,6 +80,9 @@ func metricRateLimited(failure error) bool {
 
 func metricRetry(failure error, readError MetricReadError, source *metricSourceRow) time.Time {
 	if metricRateLimited(failure) {
+		if readError.ResetAt != nil && readError.ResetAt.After(readError.At) {
+			return *readError.ResetAt
+		}
 		return readError.At.Add(webhookLimitBackoff(failure, readError.At))
 	}
 	if crossreview.IsTransientGitHubError(failure) {
@@ -130,11 +150,26 @@ func (m *Module) scheduleMetricBackfill(ctx context.Context, p tenant.Principal,
 			days = source.BackfillDays
 		}
 		var raw []byte
+		now := m.now().UTC()
 		if source.Cursor == nil || in.Restart {
-			since := dayStart(m.now().AddDate(0, 0, -days))
-			raw, err = json.Marshal(backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1, Workflows: fullBackfillWorkflows(source)})
+			since := dayStart(now.AddDate(0, 0, -days))
+			raw, err = json.Marshal(backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1, ReadUntil: &now, Workflows: fullBackfillWorkflows(source)})
 			if err != nil {
 				return err
+			}
+		} else if source.Cursor.Phase == "done" && source.DoneAt != nil && (check || source.Cursor.ReadThrough == nil || now.After(*source.Cursor.ReadThrough)) {
+			// Fill already stored runs first. A history refresh then starts at its
+			// persisted watermark, including after a different server takes over.
+			pending, err := jobWorklistTx(ctx, tx, source, now, 1)
+			if err != nil {
+				return err
+			}
+			if len(pending) == 0 {
+				fresh := incrementalCursor(*source.Cursor, *source.DoneAt, now)
+				raw, err = json.Marshal(fresh)
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if check {
@@ -143,14 +178,29 @@ func (m *Module) scheduleMetricBackfill(ctx context.Context, p tenant.Principal,
 				return err
 			}
 		}
+		limited := source.LastReadError != nil && source.LastReadError.Reason == "rate_limited" && source.RetryAt != nil && source.RetryAt.After(now)
 		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_pending=true,backfill_actor_id=$2,backfill_key_id=NULLIF($3,'')::uuid,
    backfill_cursor=coalesce($4,backfill_cursor),backfill_since=CASE WHEN $4::jsonb IS NOT NULL THEN ($4::jsonb->>'since')::timestamptz ELSE backfill_since END,
-   backfill_done_at=CASE WHEN $4::jsonb IS NULL THEN backfill_done_at END,
-   backfill_retry_at=CASE WHEN NOT $5 AND NOT $7 THEN backfill_retry_at END,
-   last_read_error=CASE WHEN NOT $7 THEN last_read_error END,backfill_days=$6,backfill_revision=backfill_revision+1
-   WHERE project_id=$1`, project, p.ID, p.KeyID, raw, check, days, in.Restart)
+   backfill_done_at=CASE WHEN $4::jsonb IS NULL OR $4::jsonb->'refresh_since' IS NOT NULL THEN backfill_done_at END,
+   backfill_retry_at=CASE WHEN $8 OR (NOT $5 AND NOT $7) THEN backfill_retry_at END,
+   last_read_error=CASE WHEN $8 OR NOT $7 THEN last_read_error END,backfill_days=$6,backfill_revision=backfill_revision+1
+   WHERE project_id=$1`, project, p.ID, p.KeyID, raw, check, days, in.Restart, limited)
 		return err
 	})
+}
+
+func incrementalCursor(previous backfillCursor, fallback, now time.Time) backfillCursor {
+	from := fallback
+	if previous.ReadThrough != nil {
+		from = *previous.ReadThrough
+	}
+	if from.After(now) {
+		from = now
+	}
+	return backfillCursor{Since: previous.Since, Phase: "runs", Day: dayStart(from).Format("2006-01-02"), Page: 1,
+		ReadSource: previous.ReadSource, ReadUntil: &now, ReadThrough: previous.ReadThrough, RefreshSince: &from,
+		PendingRuns: previous.WaitingRuns, Workflows: previous.Workflows, PreflightAbsent: previous.PreflightAbsent,
+		Truncated: previous.Truncated, DefaultBranch: previous.DefaultBranch}
 }
 
 func (m *Module) checkMetricSource(w http.ResponseWriter, r *http.Request) {
@@ -177,6 +227,7 @@ func (m *Module) metricReadFailed(ctx context.Context, p tenant.Principal, proje
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	readError := metricError(failure, m.now())
+	logMetricFailure(ctx, failure, readError)
 	raw, err := json.Marshal(readError)
 	if err != nil {
 		return err
@@ -201,6 +252,24 @@ func (m *Module) metricReadFailed(ctx context.Context, p tenant.Principal, proje
 		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET last_read_error=$2,backfill_retry_at=$3,backfill_pending=true,backfill_revision=backfill_revision+1 WHERE project_id=$1`, project, raw, metricRetry(failure, readError, current))
 		return err
 	})
+}
+
+// Only fixed classifications and bounded response metadata cross the log
+// boundary. Never log an error string, request URL, headers or response body.
+func logMetricFailure(ctx context.Context, failure error, diagnostic MetricReadError) {
+	var upstream *webhookGitHubError
+	endpoint, duration := "history", time.Duration(0)
+	var remaining *int
+	reset := diagnostic.ResetAt
+	if errors.As(failure, &upstream) {
+		endpoint, duration, remaining = upstream.endpoint, upstream.duration, upstream.remaining
+		if reset == nil && !upstream.reset.IsZero() {
+			reset = &upstream.reset
+		}
+	}
+	slog.WarnContext(ctx, "delivery history read failed", "reason", diagnostic.Reason,
+		"endpoint", endpoint, "status", diagnostic.StatusCode, "rate_limit_remaining", remaining,
+		"rate_limit_reset", reset, "timeout", diagnostic.Reason == "timed_out", "duration_ms", duration.Milliseconds())
 }
 
 func (m *Module) runMetrics(ctx context.Context) {

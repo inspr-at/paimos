@@ -30,11 +30,23 @@ export interface MetricSource {
   history_source?: 'actions' | 'checks' | null
   repository: string; ci_workflow: string; nightly_workflow: string; app_connected: boolean
   backfill: 'not_started' | 'running' | 'done'; backfill_since: string | null; backfill_done_at: string | null; covered_since: string | null
-  last_read_error?: { reason: 'actions_read_missing' | 'not_installed' | 'github_unavailable'; permission: 'actions:read' | null; at: string } | null
+  last_read_error?: { reason: 'actions_read_missing' | 'not_installed' | 'github_unavailable' | 'rate_limited' | 'timed_out' | 'github_error' | 'unreachable'; permission: 'actions:read' | null; at: string; reset_at?: string; status_code?: number } | null
   last_event_at?: string | null
   retry_at?: string | null
 }
 export interface DeliveryMetrics { project_id: string; generated_at: string; source: MetricSource | null; metrics: Metric[] }
+
+/** One catalogue supplies the settings card and every Delivery history notice. */
+export function historyReadReason(source: MetricSource | null, lang: DeliveryLanguage): string {
+  const error = source?.last_read_error
+  if (!error) return ''
+  const words = deliveryText(lang).historyRead
+  if (error.reason === 'rate_limited') {
+    const reset = error.reset_at ?? source?.retry_at
+    return reset && Number.isFinite(Date.parse(reset)) ? fill(words.rate_limited, { t: clockTime(reset, lang) }) : words.rate_limited_unknown
+  }
+  return fill(words[error.reason], { status: error.status_code ?? '?' })
+}
 
 export async function readDeliveryMetrics(projectId: string, signal?: AbortSignal): Promise<DeliveryMetrics> {
   const response = await api(`/projects/${encodeURIComponent(projectId)}/delivery/metrics`, { signal })

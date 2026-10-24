@@ -24,9 +24,16 @@ async function request<T>(url: string, signal?: AbortSignal, init: RequestInit =
 }
 export async function readProjectDeliverySettings(project: string, signal?: AbortSignal): Promise<SettingsSnapshot> {
   const url = path(project, 'delivery-settings')
-  const [effective, overrides] = await Promise.all([request<DeliverySettings>(url, signal), request<DeliverySettings>(`${url}?view=overrides`, signal)])
-  if (!overrides.revision || effective.revision !== overrides.revision) throw new Error('Delivery settings changed while loading. Try again.')
-  return { effective: effective.value, overrides: overrides.value, revision: overrides.revision }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    signal?.throwIfAborted()
+    const [effective, overrides] = await Promise.all([request<DeliverySettings>(url, signal), request<DeliverySettings>(`${url}?view=overrides`, signal)])
+    if (overrides.revision && effective.revision === overrides.revision) return { effective: effective.value, overrides: overrides.value, revision: overrides.revision }
+    if (attempt === 1) {
+      if (!overrides.revision || !effective.revision) throw new Error('The delivery settings revision could not be read. Try again.')
+      throw new Error('Delivery settings changed while loading. Try again.')
+    }
+  }
+  throw new Error('The delivery settings could not be read.')
 }
 export async function saveProjectDeliverySettings(project: string, overrides: DeliverySettings, revision: string, signal?: AbortSignal): Promise<SettingsSnapshot> {
   const answer = await request<DeliverySettings>(path(project, 'delivery-settings'), signal, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'If-Match': revision }, body: JSON.stringify(overrides) })
@@ -41,7 +48,7 @@ export function repositoryState(source: MetricSource | null, now: number): Repos
   if (!source) return 'none'
   if (source.last_read_error?.reason === 'actions_read_missing') return 'noactions'
   if (!source.app_connected || source.last_read_error?.reason === 'not_installed') return 'appoff'
-  if (source.last_read_error?.reason === 'github_unavailable') return 'unavailable'
+  if (source.last_read_error) return 'unavailable'
   if (source.last_event_at && now - Date.parse(source.last_event_at) > 7 * 86_400_000) return 'stale'
   return source.backfill === 'done' ? 'done' : 'reading'
 }

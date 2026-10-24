@@ -18844,6 +18844,12 @@
     ,
     {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1639: repository status icons render only their selected artwork","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: a settings revision race is reread once without losing sparse overrides","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: continued edits stay bounded and a missing revision is not called a concurrent edit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1710: history copy names each known reason and its rate reset in English and German","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1040: a fresh external removal clears the card and outranks an older overlapping read","tier":"GATED-FULL"}

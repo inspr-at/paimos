@@ -5,6 +5,7 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -71,7 +72,7 @@ func (g AppReader) mergedPullState(ctx context.Context, number int64) (*MergeFac
 	}
 	var fact *MergeFact
 	var pending bool
-	err := g.readInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
+	err := g.readMergeInstallation(ctx, func(get func(string, any) error) error {
 		var err error
 		fact, pending, err = mergedPullState(get, g.App.Config.Repository, number)
 		return err
@@ -90,7 +91,7 @@ func (g AppReader) mergedGroupState(ctx context.Context, sha string, waitForProo
 	}
 	out := []MergeFact{}
 	pending := false
-	err := g.readInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
+	err := g.readMergeInstallation(ctx, func(get func(string, any) error) error {
 		var pulls []struct {
 			Number int64 `json:"number"`
 		}
@@ -123,4 +124,10 @@ func (g AppReader) mergedGroupState(ctx context.Context, sha string, waitForProo
 		return nil
 	})
 	return out, pending, err
+}
+
+func (g AppReader) readMergeInstallation(ctx context.Context, read func(func(string, any) error) error) error {
+	return g.observeGitHub(func(app *crossreview.GitHubApp) error {
+		return app.ReadMergeInstallation(ctx, read)
+	})
 }

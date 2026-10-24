@@ -23,6 +23,13 @@ const EN = {
   srcApp: ['GitHub App events', ' · live'], srcAppOff: ['GitHub App', ' · not receiving events'],
   srcBack: ['Backfill', ' from the GitHub API · back to {d}'], srcRun: ['Backfill running', ' · complete since {d}'], srcRunNone: ['Backfill running', ' · older days still loading'],
   srcNone: ['No backfill yet', ' · only events from now on'], srcTool: ['Reported by tooling', ' · merge rounds, releases'],
+  historyRead: {
+    rate_limited: 'GitHub’s rate limit for this app is used up until {t}.', rate_limited_unknown: 'GitHub has rate-limited this app.',
+    timed_out: 'GitHub did not answer in time.', github_error: 'GitHub returned HTTP {status}.',
+    unreachable: 'A network connection to GitHub could not be made.', github_unavailable: 'GitHub could not be read; no specific cause was recorded.',
+    actions_read_missing: 'The GitHub App lacks Actions read access.', not_installed: 'The GitHub App is not connected to this repository.',
+    kept: 'The last stored history is kept.', retry: 'The server retries {t}.',
+  },
   // AEON-1359: the ticket steps come from the event log.
   srcHistory: ['Status history', ' · every status change since {d}'], srcHistoryNone: ['Status history', ' · every status change'],
   nodataT: 'No delivery data yet.', nodataB: 'PAIMOS starts counting with the first pull request the GitHub App sees in {repo}. History is read once from the GitHub API.',
@@ -96,6 +103,13 @@ export type DeliveryText = typeof EN
 
 const DE: DeliveryText = {
   title: 'Lieferung',
+  historyRead: {
+    rate_limited: 'Das GitHub-Anfragelimit dieser App ist bis {t} ausgeschöpft.', rate_limited_unknown: 'GitHub begrenzt gerade die Anfragen dieser App.',
+    timed_out: 'GitHub hat nicht rechtzeitig geantwortet.', github_error: 'GitHub hat HTTP {status} zurückgegeben.',
+    unreachable: 'Es konnte keine Netzwerkverbindung zu GitHub hergestellt werden.', github_unavailable: 'GitHub konnte nicht gelesen werden; ein genauer Grund wurde nicht aufgezeichnet.',
+    actions_read_missing: 'Der GitHub-App fehlt der Actions-Lesezugriff.', not_installed: 'Die GitHub-App ist nicht mit diesem Repository verbunden.',
+    kept: 'Die zuletzt gespeicherte Historie bleibt erhalten.', retry: 'Der Server versucht es erneut am {t}.',
+  },
   sub: 'Wie schnell Tickets vom Anlegen bis live kommen und Änderungen vom Pull Request bis live, laufend gemessen; Änderungen an den Zielen von Project Arion.',
   views: { numbers: 'Zahlen', flow: 'Ablauf' }, viewsLabel: 'Ansichten der Lieferung',
   windowLabel: 'Zeitraum der Diagramme', days: 'Tage',

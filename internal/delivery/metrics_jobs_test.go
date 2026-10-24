@@ -335,7 +335,7 @@ func TestDeliverySevenDayJobBackfillIsIdempotentAndBounded(t *testing.T) {
 	if source.RetryAt == nil || !source.RetryAt.Equal(f.at.Add(2*time.Minute)) {
 		t.Fatalf("GitHub's rate limit was not persisted: %+v", source)
 	}
-	if source.LastReadError == nil || source.LastReadError.Reason != "github_unavailable" || source.LastReadError.Permission != nil {
+	if source.LastReadError == nil || source.LastReadError.Reason != "rate_limited" || source.LastReadError.Permission != nil {
 		t.Fatalf("rate limiting was mistaken for a missing permission: %+v", source.LastReadError)
 	}
 	calls := len(g.calls)
