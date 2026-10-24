@@ -220,12 +220,20 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		return msg, err
 	}
 	var out Message
-	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	var policyErr error
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) (txErr error) {
+		defer func() {
+			if txErr == nil && out.ID != "" {
+				policyErr = assistantReceiptErrorTx(ctx, tx, out.ID)
+			}
+		}()
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
 		}
 		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{}); err != nil {
-			return errForbidden
+			if reason, _ := authz.AssistantPolicyDenial(err); reason == "" {
+				return errForbidden
+			}
 		}
 		if err := authorizeLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, ""); err != nil {
 			return err
@@ -301,6 +309,9 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		})
 		return err
 	})
+	if err == nil {
+		err = policyErr
+	}
 	return out, err
 }
 
@@ -308,6 +319,7 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 // message. ProjectID scopes its sent event when an internal service knows the
 // project; ordinary principal messages keep their existing node-less event.
 type Acceptance struct {
+	policyOutcome  bool // a server-recorded refusal/decision stays deliverable
 	laneReportedAt time.Time
 	// MessageID lets an internal caller bind its durable outcome before the
 	// first event append. Empty preserves the ordinary generated identity.
@@ -377,6 +389,19 @@ func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	if err := recordLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, id, in.laneReportedAt); err != nil {
 		return Message{}, err
 	}
+	var policyChanges []events.Change
+	refusal := ""
+	if !in.policyOutcome {
+		project := ""
+		if in.ProjectID != nil {
+			project = *in.ProjectID
+		}
+		var err error
+		refusal, err = assistantDeliveryPolicyTx(ctx, tx, p, in.RecipientPrincipalID, project, id, "", func(c events.Change) error { policyChanges = append(policyChanges, c); return nil })
+		if err != nil {
+			return Message{}, err
+		}
+	}
 	eventID, err := appendEvent(events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
 		ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.RecipientPrincipalID,
 		ReplyToID: in.ReplyToID, IdempotencyKey: in.IdempotencyKey, ExpiresAt: in.ExpiresAt,
@@ -394,11 +419,30 @@ func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 		return Message{}, mapWrite(err)
 	}
 	appendChange := func(c events.Change) error { _, err := appendEvent(c); return err }
+	if refusal != "" {
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET expires_at=LEAST(coalesce(expires_at,clock_timestamp()),clock_timestamp()) WHERE id=$1::uuid`, id); err != nil {
+			return Message{}, err
+		}
+		if err := insertReceiptWith(ctx, tx, p, id, "failed", target, "", refusal, appendChange); err != nil {
+			return Message{}, err
+		}
+		for _, change := range policyChanges {
+			if err := appendChange(change); err != nil {
+				return Message{}, err
+			}
+		}
+		return out, nil
+	}
 	if err := enqueueWakesWith(ctx, tx, p.TenantID, out, appendChange); err != nil {
 		return Message{}, err
 	}
 	if err := insertReceiptWith(ctx, tx, p, out.ID, "queued", target, "", "", appendChange); err != nil {
 		return Message{}, err
+	}
+	for _, change := range policyChanges {
+		if err := appendChange(change); err != nil {
+			return Message{}, err
+		}
 	}
 	return out, nil
 }
@@ -425,6 +469,9 @@ func enqueueWakes(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg Messag
 
 // enqueueWakesWith lets System-authored notices append through their own path.
 func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Message, appendEvent func(events.Change) error) error {
+	if failed, err := receiptFailed(ctx, tx, msg.ID); err != nil || failed {
+		return err
+	}
 	if msg.RecipientSessionID != nil {
 		return nil
 	} // Wake targets belong to the principal, not this generation.
@@ -434,7 +481,7 @@ func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Messa
 	// and compatible with target writers' NO KEY UPDATE locks.
 	rows, err := tx.Query(ctx, `SELECT id::text FROM inbox_delivery_targets
 		WHERE principal_id = $1::uuid AND kind = 'webhook' AND enabled
-		AND NOT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND messaging_only IS TRUE)
+		AND NOT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND (messaging_only IS TRUE OR agent_class='assistant'))
 		AND NOT EXISTS(SELECT 1 FROM inbox_message_targets WHERE principal_id=$1::uuid AND target_kind='pull' AND enabled)
 		AND NOT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOIN inbox_message_targets t
 		 ON t.tenant_id=d.tenant_id AND t.id=COALESCE(d.effective_target_id,d.target_id)

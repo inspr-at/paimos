@@ -17,8 +17,9 @@ decide these requests. The Desk uses the project action adapter; authorization
 on existing general approval routes stays unchanged.
 
 Approval records consent for the exact effect; this module does not execute the
-effect or create an `agent_permission_grants` row. Policy and tool enforcement
-are integrated separately by AEON-754's policy wiring slice. Existing
+effect or create an `agent_permission_grants` row. Assistant policy, current
+approvers and budget availability are rechecked by the
+[policy integration](assistant-policy-enforcement.md). Existing
 messaging-only agent restrictions still apply until that integration.
 
 Decline and automatic expiry record a reason. Approved, denied, expired and

@@ -33,8 +33,11 @@ week boundaries. It must atomically check/reserve the owner's weekly allowance,
 including admitted runs and unknown costs. Missing policy holds the run with
 `budget_policy_unavailable`; refusal holds it with
 `owner_weekly_budget_exhausted`. The next scheduler pass retries budget holds.
-AEON-754 package F supplies the package A policy integration. Production dispatch
-therefore remains closed until that integration is installed.
+`Module.WithAssistantPolicy` supplies the package A policy integration in
+production. Its policy reset weekday is authoritative; the older hook's Monday
+arguments remain compatible. Positive person-granted `budget_ceiling` bounds
+each run; unknown cost reserves remaining weekly allowance. See
+[policy enforcement and delegation](assistant-policy-enforcement.md).
 
 Reconciliation cancels pending dispatches for retired routines, unavailable
 targets and permanently invalid grants or inputs. Temporary failures defer the

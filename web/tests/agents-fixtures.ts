@@ -442,6 +442,9 @@ export async function mockAssistants(page: Page, items: Assistant[], owner: stri
     }
     return route.fulfill({ status: 404, json: { error: 'Assistant route not available' } })
   })
-  await page.route('**/api/events?*', route => new URL(route.request().url()).searchParams.get('type')?.startsWith('assistant.') ? route.fulfill({ json: { items: events, next_after: null } }) : route.fallback())
+  await page.route('**/api/events?*', route => {
+    const types = new URL(route.request().url()).searchParams.get('type')?.split(',') ?? []
+    return types[0]?.startsWith('assistant.') ? route.fulfill({ json: { items: events.filter(event => types.includes(event.type)), next_after: null } }) : route.fallback()
+  })
   return { writes, events, routineWrites, routines, runOwners, routineReads }
 }

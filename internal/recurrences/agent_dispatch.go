@@ -9,9 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
@@ -114,6 +117,16 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 			return hold("routine_paused", false)
 		}
 		person, _, err := agentOwnerAuthority(ctx, tx, tid, item, c)
+		if reason, _ := authz.AssistantPolicyDenial(err); reason != "" {
+			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: tid, PrincipalID: c.OwnerPrincipalID, ProjectID: item.ProjectID, Operation: "routine.run", Key: "routine-run/" + id, Scopes: agentScopes(c)})
+			if err != nil {
+				return err
+			}
+			if err = hold(d.Reason, false); err != nil {
+				return err
+			}
+			return assistants.AppendDecisionsTx(ctx, tx, person, d)
+		}
 		if permanentAgentDispatchError(err) {
 			return hold("agent_owner_authority_revoked", true)
 		}
@@ -156,12 +169,36 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 			return err
 		}
 		if !decision.Allowed {
-			if err := admission.Rollback(ctx); err != nil {
+			if err := admission.Commit(ctx); err != nil {
 				return err
 			}
-			return hold("owner_weekly_budget_exhausted", false)
+			reason := decision.Reason
+			if reason == "" {
+				reason = "owner_weekly_budget_exhausted"
+			}
+			if err = hold(reason, false); err != nil {
+				return err
+			}
+			for _, change := range decision.Changes {
+				if _, err = events.Append(ctx, tx, person, change); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
-		message, changes, err := inbox.QueueAgentRoutineTx(ctx, admission, person, c.OwnerPrincipalID, item.ProjectID, id, body)
+		policyKey := "routine-run/" + id
+		var delegationRaw []byte
+		if err = tx.QueryRow(ctx, `SELECT agent_delegation FROM routine_runs WHERE id=$1`, id).Scan(&delegationRaw); err != nil {
+			return err
+		}
+		if len(delegationRaw) > 0 {
+			var d AgentDelegation
+			if json.Unmarshal(delegationRaw, &d) != nil {
+				return errInvalidAssistantGrant()
+			}
+			policyKey = d.BudgetKey
+		}
+		message, changes, err := inbox.QueueAgentRoutineTx(ctx, admission, person, c.OwnerPrincipalID, item.ProjectID, id, body, policyKey)
 		if err != nil {
 			if rollbackErr := admission.Rollback(ctx); rollbackErr != nil {
 				return errors.Join(err, rollbackErr)
@@ -174,6 +211,7 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 		if err = admission.Commit(ctx); err != nil {
 			return err
 		}
+		changes = append(changes, decision.Changes...)
 		if _, err = tx.Exec(ctx, `UPDATE routine_runs SET state='created',updated_at=clock_timestamp() WHERE id=$1`, id); err != nil {
 			return err
 		}
@@ -198,6 +236,10 @@ func permanentAgentDispatchError(err error) bool {
 }
 
 func holdAgentDispatchTx(ctx context.Context, tx pgx.Tx, run, outbox, reason string, terminal bool) error {
+	var tid, project, owner, priorReason, priorState string
+	if err := tx.QueryRow(ctx, `SELECT r.tenant_id::text,r.output_project_id::text,r.owner_principal_id::text,coalesce(o.result->>'reason',''),r.state FROM routine_runs r JOIN routine_effect_outbox o ON o.run_id=r.id AND o.id=$2::uuid WHERE r.id=$1::uuid`, run, outbox).Scan(&tid, &project, &owner, &priorReason, &priorState); err != nil {
+		return err
+	}
 	next := "pending"
 	if terminal {
 		next = "cancelled"
@@ -206,6 +248,10 @@ func holdAgentDispatchTx(ctx context.Context, tx pgx.Tx, run, outbox, reason str
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET state=$2,result=jsonb_build_object('reason',$3::text),reconcile_after=clock_timestamp()+interval '1 minute',updated_at=clock_timestamp() WHERE id=$1`, outbox, next, reason)
+	if err != nil || priorState == "held" && priorReason == reason {
+		return err
+	}
+	_, err = events.Append(ctx, tx, tenant.Principal{ID: owner, TenantID: tid, Kind: tenant.Agent}, events.Change{NodeID: &project, Type: "recurrence.agent_dispatch_held", After: map[string]any{"run_id": run, "principal_id": owner, "reason": reason, "terminal": terminal}})
 	return err
 }
 

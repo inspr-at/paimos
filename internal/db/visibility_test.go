@@ -197,6 +197,60 @@ func TestProjectVisibilityFailsClosed(t *testing.T) {
 	}
 }
 
+// Risk: assistant policy lookup turns an absent tenant identity into a read
+// error, or retains visibility from an earlier principal when no row exists.
+func TestPrincipalVisibilityMissingIdentityStaysEmpty(t *testing.T) {
+	d := dbtest.Open(t)
+	f := newVisibilityFixture(t, d, "missing-identity")
+	foreign := newVisibilityFixture(t, d, "foreign-identity")
+	dbtest.BindRole(t, d, f.tenant, f.actor, "member")
+	dbtest.BindRole(t, d, foreign.tenant, foreign.actor, "member")
+	for _, tc := range []struct {
+		name string
+		id   string
+	}{
+		{"missing", "00000000-0000-0000-0000-000000000001"},
+		{"foreign", foreign.actor},
+	} {
+		for _, actingPerson := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/acting-person=%t", tc.name, actingPerson), func(t *testing.T) {
+				ctx := t.Context()
+				err := db.InTenant(dbtest.Seed(ctx), d.App, f.tenant, func(tx pgx.Tx) error {
+					// First install real authority, so a no-op entry cannot pass.
+					if err := db.EnterPrincipal(ctx, tx, f.tenant, f.actor, nil, nil); err != nil {
+						return err
+					}
+					var visible int
+					if err := tx.QueryRow(ctx, `SELECT count(*) FROM nodes`).Scan(&visible); err != nil {
+						return err
+					}
+					if visible != 5 {
+						return fmt.Errorf("fixture principal sees %d nodes, want 5", visible)
+					}
+					var person any
+					if actingPerson {
+						person = f.actor
+					}
+					if err := db.EnterPrincipal(ctx, tx, f.tenant, tc.id, nil, person); err != nil {
+						return fmt.Errorf("enter absent tenant identity: %w", err)
+					}
+					var projects, nodes string
+					if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects'),current_setting('aeon.visible_nodes'),(SELECT count(*) FROM nodes)`).Scan(&projects, &nodes, &visible); err != nil {
+						return err
+					}
+					if projects != "" && projects != "{}" || nodes != "{}" || visible != 0 {
+						return fmt.Errorf("absent identity retained authority: projects=%q nodes=%q visible=%d", projects, nodes, visible)
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
 // The project root follows every insert, move, re-parent and kind change, down
 // the whole subtree, and cannot be written directly.
 func TestNodeProjectRootFollowsMoves(t *testing.T) {

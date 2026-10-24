@@ -227,6 +227,7 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		}
 	}
 	var out CompatMessage
+	var policyErr error
 	key, digest := messageDigest(in.Key), messageDigest(in)
 	if in.adapterTestID != "" {
 		digest = messageDigest(struct {
@@ -234,7 +235,12 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			AdapterID string
 		}{in, in.adapterTestID})
 	}
-	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) (txErr error) {
+		defer func() {
+			if txErr == nil && out.ID != "" {
+				policyErr = assistantReceiptErrorTx(ctx, tx, out.ID)
+			}
+		}()
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
 		}
@@ -249,7 +255,9 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			if in.ResendOf != nil || (in.ReplyTo != nil && in.SenderSessionID == nil) {
 				return errNotFound
 			}
-			return errForbidden
+			if reason, _ := authz.AssistantPolicyDenial(err); reason == "" {
+				return errForbidden
+			}
 		}
 		senderProject, senderProjectKey := project, ""
 		if in.peer {
@@ -490,6 +498,9 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		out, err = scanCompatMessage(tx.QueryRow(ctx, `SELECT `+compatMessageCols+` FROM inbox_compat_messages c `+compatObligationJoin+` WHERE c.id=$1::uuid`, id))
 		return err
 	})
+	if err == nil {
+		err = policyErr
+	}
 	return out, err
 }
 
@@ -508,6 +519,7 @@ type MessageDelivery struct {
 
 func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id string, in compatSend, appendEvent func(events.Change) error) error {
 	var target, fallback *string
+	var policyReason *string
 	state, reason := "pending", ""
 	if in.ActionRequest {
 		state, reason = "held", "action_request"
@@ -532,8 +544,45 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 			return errConflict
 		}
 	}
+	if !in.ActionRequest {
+		var recipient string
+		var policyKey *string
+		if err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,assistant_policy_key FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &policyKey); err != nil {
+			return err
+		}
+		policyProject := project
+		if in.adapterTestID != "" && in.adapterTestID == in.To && target == nil {
+			// The implicit pull adapter's project is an authorized inspection
+			// context, not project work. Its person-only live test is ordinary
+			// free principal-inbox transport and still checks inbox scopes.
+			var implicit bool
+			if err := tx.QueryRow(ctx, `SELECT messaging_only IS TRUE FROM principals WHERE id=$1::uuid`, recipient).Scan(&implicit); err != nil {
+				return err
+			}
+			if implicit {
+				policyProject = ""
+				diagnosticKey := "implicit-test/" + id
+				policyKey = &diagnosticKey
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET assistant_policy_project_id=nullif($2,'')::uuid,assistant_policy_key=$3 WHERE id=$1::uuid`, id, policyProject, policyKey); err != nil {
+			return err
+		}
+		key := ""
+		if policyKey != nil {
+			key = *policyKey
+		}
+		refusal, err := assistantDeliveryPolicyTx(ctx, tx, p, recipient, policyProject, id, key, appendEvent)
+		if err != nil {
+			return err
+		}
+		if refusal != "" {
+			state, reason = "dead", ReasonUnavailable
+			policyReason = &refusal
+		}
+	}
 	var d MessageDelivery
-	err := tx.QueryRow(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,target_id,fallback_target_id,state,reason) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6) RETURNING id::text,message_id::text,target_id::text,fallback_target_id::text,state,reason,attempts,COALESCE(effective_level,''),fallback_reason`, p.TenantID, id, target, fallback, state, reason).Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts, &d.EffectiveLevel, &d.FallbackReason)
+	err := tx.QueryRow(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,target_id,fallback_target_id,state,reason,assistant_policy_reason) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7) RETURNING id::text,message_id::text,target_id::text,fallback_target_id::text,state,reason,attempts,COALESCE(effective_level,''),fallback_reason`, p.TenantID, id, target, fallback, state, reason, policyReason).Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts, &d.EffectiveLevel, &d.FallbackReason)
 	if err != nil {
 		return err
 	}

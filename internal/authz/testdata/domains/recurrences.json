@@ -68,7 +68,8 @@
     "PUT /api/recurrences/{recurrenceId}": "recurrences.manage",
     "PUT /api/recurrences/{recurrenceId}/agent-owner": "recurrences.manage",
     "PUT /api/recurrences/{recurrenceId}/execution-consent": "recurrences.manage",
-    "PUT /api/recurrences/{recurrenceId}/guardrails": "recurrences.manage"
+    "PUT /api/recurrences/{recurrenceId}/guardrails": "recurrences.manage",
+    "POST /api/recurrences/{recurrenceId}/delegate": "inbox.send"
   },
   "words": {
     "resources": {

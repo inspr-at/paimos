@@ -4,14 +4,17 @@ package recurrences
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -38,6 +41,7 @@ type AgentResult struct {
 	RequestDigest string `json:"request_digest"`
 	NodeID        string `json:"node_id,omitempty"`
 	CostMicroUSD  *int64 `json:"cost_microusd,omitempty"`
+	LeadMessageID string `json:"lead_message_id,omitempty"`
 }
 
 func (v AgentResultInput) validate() error {
@@ -94,6 +98,7 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out AgentResult
+	var policyErr error
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -127,6 +132,14 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 			return workorders.Fail(409, "agent_owner_grant_changed")
 		}
 		if _, _, err = agentOwnerAuthority(ctx, tx, p.TenantID, item, c); err != nil {
+			if reason, _ := authz.AssistantPolicyDenial(err); reason != "" {
+				d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: item.ProjectID, Operation: "routine.result", Key: "routine-run/" + id, Scopes: agentScopes(c)})
+				if err != nil {
+					return err
+				}
+				policyErr = workorders.Fail(409, d.Reason)
+				return assistants.AppendDecisionsTx(ctx, tx, p, d)
+			}
 			return err
 		}
 		for _, permission := range []string{"nodes.read", Permission, agentOwnerPermission(c.Destination)} {
@@ -165,6 +178,35 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 		if dispatchState != "succeeded" {
 			return workorders.Fail(409, "agent_run_not_dispatched")
 		}
+		policyKey := "routine-run/" + id
+		var delegationRaw []byte
+		var delegation *AgentDelegation
+		leadFailure := ""
+		if err = tx.QueryRow(ctx, `SELECT agent_delegation FROM routine_runs WHERE id=$1`, id).Scan(&delegationRaw); err != nil {
+			return err
+		}
+		if len(delegationRaw) > 0 {
+			if len(delegationRaw) > 32768 || json.Unmarshal(delegationRaw, &delegation) != nil || delegation == nil || delegation.Instance != m.policyInstance {
+				return errInvalidAssistantGrant()
+			}
+			policyKey = delegation.BudgetKey
+			if err = validateDelegatingLeadTx(ctx, tx, p.TenantID, item.ProjectID, delegation.LeadPrincipalID, delegation.SessionID, delegation.OwnerPersonID, delegation.LeadKeyID); err != nil {
+				if !errors.Is(err, authz.ErrForbidden) {
+					return err
+				}
+				// The person grant and assistant policy authorize the stored
+				// output. Lost lead authority only fails its result pointer.
+				leadFailure = "assistant_delegating_lead_unavailable"
+			}
+		}
+		policy, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: item.ProjectID, Operation: "routine.result", Key: policyKey, Scopes: agentScopes(c), RequireBudget: true})
+		if err != nil {
+			return err
+		}
+		if !policy.Allowed {
+			policyErr = workorders.Fail(409, policy.Reason)
+			return assistants.AppendDecisionsTx(ctx, tx, p, policy)
+		}
 		out = AgentResult{RunID: id, Status: in.Status, RequestDigest: digestJSON(in), CostMicroUSD: in.CostMicroUSD}
 		var changes []events.Change
 		if in.Status == "succeeded" {
@@ -175,6 +217,15 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 				return workorders.Fail(409, "agent_result_writer_unavailable")
 			}
 			out.NodeID, changes, err = m.agentResultWriter(ctx, tx, p, item.ProjectID, item.ParentID, id, c.Destination, in)
+			if err != nil {
+				return err
+			}
+		}
+		var leadChanges []events.Change
+		if delegation != nil {
+			sender := tenant.Principal{ID: c.GrantedByPrincipalID, TenantID: p.TenantID, Kind: tenant.Person}
+			body := "Assistant routine " + id + ": " + in.Status + "\nResult node: " + out.NodeID + "\nResult receipt: /api/recurrences/" + item.ID + "/runs/" + id + "/agent-result\nThis is a stored result, not approval or execution authority."
+			out.LeadMessageID, leadChanges, err = inbox.QueueAgentLeadResultTx(ctx, tx, sender, delegation.LeadPrincipalID, delegation.SessionID, item.ProjectID, id, body, leadFailure)
 			if err != nil {
 				return err
 			}
@@ -206,7 +257,19 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &item.ProjectID, Type: "recurrence.agent_result", After: out, Metadata: meta})
+		if err != nil {
+			return err
+		}
+		if err = assistants.AppendDecisionsTx(ctx, tx, p, policy); err != nil {
+			return err
+		}
+		if out.LeadMessageID != "" {
+			return inbox.AppendAgentRoutineTx(ctx, tx, p, out.LeadMessageID, leadChanges)
+		}
 		return err
 	})
+	if err == nil {
+		err = policyErr
+	}
 	reply(w, 200, out, err)
 }

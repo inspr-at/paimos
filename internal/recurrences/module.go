@@ -26,6 +26,7 @@ type Module struct {
 	pool              *pgxpool.Pool
 	agentBudget       AgentBudgetTx
 	agentResultWriter AgentResultWriteTx
+	policyInstance    string
 	executionRuntime  ExecutionRuntimeReader
 	actionEvaluator   ActionEvaluatorTx
 	// now is an injected database-clock substitute for deterministic tests only.
@@ -55,6 +56,7 @@ func (m *Module) WithHistory(publications []Publication) *Module {
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountTemplates(mux)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/agent-owner", m.getAgentOwner)
+	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/delegate", m.delegateAssistant)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/agent-owner", m.setAgentOwner)
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/runs/{runId}/agent-result", m.completeAgentResult)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs/{runId}/agent-result", m.getAgentResult)

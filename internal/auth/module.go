@@ -314,6 +314,10 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 				}
 			}
 			if err := permissionErr; err != nil {
+				if auditErr := m.recordAssistantPolicyDenial(ctx, p, scope, err); auditErr != nil {
+					internalFailure(w, r, "assistant_policy_denial", auditErr)
+					return
+				}
 				var pairingErr *agentpairing.Error
 				if errors.As(err, &pairingErr) {
 					agentpairing.WriteError(w, err)

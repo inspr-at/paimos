@@ -11,6 +11,8 @@ export interface AssistantPolicy {
   weekly_budget: { amount: string; unit: 'USD' | 'EUR' | 'tokens' | 'credits' }
   outward_action_rule: 'approval_required'
   never_ask_person_for_secrets_or_manual_steps: true
+  approver_person_ids?: string[]
+  weekly_reset_day?: number
 }
 export interface AssistantSnapshot {
   principal_id: string; owner_person_id: string; status: 'active' | 'deactivated'; revision: number; policy: AssistantPolicy
@@ -22,10 +24,12 @@ export const cloneAssistantPolicy = (policy: AssistantPolicy): AssistantPolicy =
   allowed_projects: [...policy.allowed_projects], allowed_scopes: [...policy.allowed_scopes],
   weekly_budget: { ...policy.weekly_budget }, outward_action_rule: policy.outward_action_rule,
   never_ask_person_for_secrets_or_manual_steps: policy.never_ask_person_for_secrets_or_manual_steps,
+  ...(policy.approver_person_ids ? { approver_person_ids: [...policy.approver_person_ids] } : {}),
+  ...(policy.weekly_reset_day === undefined ? {} : { weekly_reset_day: policy.weekly_reset_day }),
 })
 export interface AssistantEvent {
   id: number; type: string; at: string; actor_principal_id: string
-  before?: AssistantSnapshot; after?: AssistantSnapshot
+  before?: Partial<AssistantSnapshot>; after?: Partial<AssistantSnapshot> & { allowed?: boolean; reason?: string; operation?: string }
 }
 export type AssistantStatus = 'waiting' | 'down' | 'working' | 'idle' | 'paused' | 'setup' | 'unavailable'
 export interface AssistantRoutine {
@@ -43,7 +47,7 @@ export interface AssistantFacts {
   approvalsTruncated?: boolean; approvalsError?: string; approvalsCanDecide?: boolean
   routinesTruncated?: boolean; routinesError?: string; activityIncomplete?: boolean
   activity: null | { at: string; text: string; kind: 'messages' | 'runs' | 'approvals'; href?: string; refused?: boolean }[]
-  lastActivity: null | { at: string; text: string }
+  lastActivity: null | { at: string; text: string; policyOnly?: boolean }
   paused: null | { by: string; at: string }
 }
 export const unavailableAssistantFacts = (): AssistantFacts => ({ adapter: null, spend: null, approvals: null, routines: null, activity: null, lastActivity: null, paused: null })
@@ -57,7 +61,7 @@ export function assistantStatus(item: Assistant, facts: AssistantFacts, now: num
   if (facts.adapter?.state === 'down') return 'down'
   if (facts.adapter?.state === 'setup') return 'setup'
   const at = Date.parse(facts.lastActivity?.at ?? '')
-  if (Number.isFinite(at) && now >= at && now - at < 15 * 60_000) return 'working'
+  if (!facts.lastActivity?.policyOnly && Number.isFinite(at) && now >= at && now - at < 15 * 60_000) return 'working'
   return facts.adapter === null ? 'unavailable' : 'idle'
 }
 export const ASSISTANT_STATUS_ICON: Record<AssistantStatus, IconName> = { waiting: 'hand', down: 'alert', working: 'pulse', idle: 'circle-dot', paused: 'pause', setup: 'link', unavailable: 'ring-dashed' }
@@ -131,15 +135,29 @@ export async function listAssistants(signal?: AbortSignal): Promise<{ items: Ass
 }
 export const saveAssistantPolicy = (id: string, revision: number, policy: AssistantPolicy) => assistantRequest<AssistantSnapshot>(`/assistants/${encodeURIComponent(id)}/policy`, 'PUT', { expected_revision: revision, policy })
 export const disconnectAssistant = (id: string) => assistantRequest<Assistant>(`/assistants/${encodeURIComponent(id)}/disable`, 'POST')
-export async function assistantPolicyEvents(now: number, signal?: AbortSignal): Promise<{ items: AssistantEvent[]; truncated: boolean }> {
+async function assistantEvents(types: string, now: number, signal?: AbortSignal): Promise<{ items: AssistantEvent[]; truncated: boolean }> {
   const from = new Date(now - 90 * 86400_000).toISOString(), to = new Date(now).toISOString()
-  const query = new URLSearchParams({ type: 'assistant.created,assistant.updated,assistant.disabled,assistant.policy_updated', from, to, limit: '100' })
+  const query = new URLSearchParams({ type: types, from, to, limit: '100' })
   const body = await assistantRequest<{ items: AssistantEvent[]; next_after: number | null }>(`/events?${query}`, 'GET', undefined, signal)
   if (!Array.isArray(body.items) || body.items.length > 100) throw new Error(assistantCopy().invalidResponse)
   return { items: body.items, truncated: body.next_after !== null }
 }
+// Successful admissions cannot consume the policy-change query's window.
+export const assistantPolicyEvents = (now: number, signal?: AbortSignal) => assistantEvents('assistant.created,assistant.updated,assistant.disabled,assistant.policy_updated', now, signal)
+export const assistantDecisionEvents = (now: number, signal?: AbortSignal) => assistantEvents('assistant.policy_evaluated,assistant.delegated', now, signal)
 export function policyChange(event: AssistantEvent): string {
   const words = assistantCopy(), before = event.before?.policy, after = event.after?.policy
+  if (event.type === 'assistant.delegated') return words.taskDelegated
+  if (event.type === 'assistant.policy_evaluated') {
+    if (event.after?.allowed === true) return words.policyAllowed
+    const reason = event.after?.reason ?? ''
+    if (reason.includes('budget')) return words.policyBudgetDenied
+    if (reason.includes('project')) return words.policyProjectDenied
+    if (reason.includes('scope')) return words.policyScopeDenied
+    if (reason.includes('instance')) return words.policyInstanceDenied
+    if (reason.includes('grant')) return words.policyGrantDenied
+    return words.policyDenied
+  }
   if (event.type === 'assistant.created') return words.identityCreated
   if (event.type === 'assistant.updated') return words.identityChanged
   if (event.type === 'assistant.disabled') return words.disconnected

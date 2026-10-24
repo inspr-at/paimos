@@ -296,7 +296,8 @@ func FailSessionMessages(ctx context.Context, tx pgx.Tx, tenantID, sessionID str
 // (already terminal, acknowledged, or a non-pull legacy message without a deadline),
 // so every caller is idempotent. The caller must not set acked_at first.
 // reason is deadline, attempts, session_ended, no_listener or an adapter
-// reason allowed by inbox_message_deliveries_reason_check.
+// reason allowed by inbox_message_deliveries_reason_check. An explicit
+// assistant_* policy refusal is terminal even when a pull lifecycle is healthy.
 func FailMessage(ctx context.Context, tx pgx.Tx, messageID, reason string) (bool, error) {
 	return failMessage(ctx, tx, messageID, reason, false)
 }
@@ -320,7 +321,42 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
 	return failMessageAt(ctx, tx, messageID, reason, respectLease, nil)
 }
 
+// A pull page prepares all failures and notices before handing over its allowed
+// messages. Its journal is transaction-local and flushed after every resource
+// write/lock, so System audit never takes the event counter ahead of those rows.
+type failureAuditKey struct{}
+type failureAudit struct{ pending []func() error }
+
+func (a *failureAudit) flush() error {
+	for _, appendEvent := range a.pending {
+		if err := appendEvent(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deferFailureAudit(ctx context.Context, appendEvent func() error) error {
+	if audit, ok := ctx.Value(failureAuditKey{}).(*failureAudit); ok {
+		audit.pending = append(audit.pending, appendEvent)
+		return nil
+	}
+	return appendEvent()
+}
+
+func failureEvent(ctx context.Context, tx pgx.Tx, tenantID, kind string, after any) error {
+	return deferFailureAudit(ctx, func() error {
+		_, err := systemEvent(ctx, tx, tenantID, kind, after)
+		return err
+	})
+}
+
 func failMessageAt(ctx context.Context, tx pgx.Tx, messageID, reason string, respectLease bool, now *time.Time) (bool, error) {
+	audit, deferred := ctx.Value(failureAuditKey{}).(*failureAudit)
+	if !deferred {
+		audit = &failureAudit{}
+		ctx = context.WithValue(ctx, failureAuditKey{}, audit)
+	}
 	// Lock order (AEON-280): the bound session before the message. KEY SHARE
 	// waits only for a close (FOR UPDATE) and never blocks a pull or an ack.
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM harness_sessions WHERE id=(SELECT recipient_session_id FROM inbox_messages WHERE id=$1::uuid) FOR KEY SHARE`, messageID); err != nil {
@@ -344,7 +380,7 @@ func failMessageAt(ctx context.Context, tx pgx.Tx, messageID, reason string, res
 	if err := tx.QueryRow(ctx, `SELECT `+pullInboxMessageSQL+` FROM inbox_messages m WHERE m.id=$1::uuid`, messageID).Scan(&pull); err != nil {
 		return false, err
 	}
-	if pull {
+	if pull && !strings.HasPrefix(reason, "assistant_") {
 		// Recheck lifecycle and retention under the final message lock. The pull
 		// sweeper also holds the tenant fence used by key/target access changes.
 		if err := tx.QueryRow(ctx, `SELECT `+pullFailureReasonSQL+` FROM inbox_messages m
@@ -384,14 +420,18 @@ func failMessageAt(ctx context.Context, tx pgx.Tx, messageID, reason string, res
 	// reasons. The receipt, failure event and sender notice carry the precise
 	// pull lifecycle reason without changing older writers' schema contract.
 	deliveryReason := reason
-	if reason == ReasonPickupExpired {
+	var policyReason *string
+	if strings.HasPrefix(reason, "assistant_") {
+		deliveryReason = ReasonUnavailable
+		policyReason = &reason
+	} else if reason == ReasonPickupExpired {
 		deliveryReason = ReasonDeadline
 	} else if reason == ReasonAssistantDisabled || reason == ReasonAssistantRevoked {
 		deliveryReason = ReasonUnavailable
 	}
-	err = tx.QueryRow(ctx, `UPDATE inbox_message_deliveries d SET state='dead',reason=$2,lease_token=NULL,lease_until=NULL
+	err = tx.QueryRow(ctx, `UPDATE inbox_message_deliveries d SET state='dead',reason=$2,assistant_policy_reason=coalesce($3,assistant_policy_reason),lease_token=NULL,lease_until=NULL
  FROM inbox_compat_messages c WHERE c.tenant_id=d.tenant_id AND c.id=d.message_id AND c.inbox_message_id=$1::uuid AND d.state IN ('pending','blocked')
- RETURNING d.id::text`, messageID, deliveryReason).Scan(&deliveryID)
+ RETURNING d.id::text`, messageID, deliveryReason, policyReason).Scan(&deliveryID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, err
 	}
@@ -410,7 +450,7 @@ func failMessageAt(ctx context.Context, tx pgx.Tx, messageID, reason string, res
 	if _, err := tx.Exec(ctx, `UPDATE inbox_receipts SET state='failed',failure_reason=$2,handed_off_at=NULL WHERE message_id=$1::uuid AND state='queued'`, messageID, reason); err != nil {
 		return false, err
 	}
-	if _, err := systemEvent(ctx, tx, f.tenant, "inbox.receipt_failed", map[string]any{"message_id": messageID, "state": "failed", "failure_reason": reason}); err != nil {
+	if err := failureEvent(ctx, tx, f.tenant, "inbox.receipt_failed", map[string]any{"message_id": messageID, "state": "failed", "failure_reason": reason}); err != nil {
 		return false, err
 	}
 	after := map[string]any{"message_id": messageID, "reason": reason, "sender_principal_id": f.sender, "recipient_principal_id": f.recipient}
@@ -420,14 +460,20 @@ func failMessageAt(ctx context.Context, tx pgx.Tx, messageID, reason string, res
 	if f.recipientSession != nil {
 		after["recipient_session_id"] = *f.recipientSession
 	}
-	if _, err := systemEvent(ctx, tx, f.tenant, "inbox.delivery_failed", after); err != nil {
+	if err := failureEvent(ctx, tx, f.tenant, "inbox.delivery_failed", after); err != nil {
 		return false, err
 	}
 	sys, err := systemActor(ctx, tx, f.tenant)
 	if err != nil {
 		return false, err
 	}
-	return true, notifyFailure(ctx, tx, sys, f, reason)
+	if err := notifyFailure(ctx, tx, sys, f, reason); err != nil {
+		return false, err
+	}
+	if !deferred {
+		return true, audit.flush()
+	}
+	return true, nil
 }
 
 // notifyFailure writes one durable system message to the sender, and a copy to
@@ -488,17 +534,38 @@ func postNotice(ctx context.Context, tx pgx.Tx, sys tenant.Principal, recipient 
 	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
 		return err
 	}
-	eventID, err := systemEvent(ctx, tx, sys.TenantID, "inbox.sent", messageMeta{ID: id, SenderPrincipalID: sys.ID, RecipientPrincipalID: recipient, IdempotencyKey: key})
-	if err != nil {
+	// Reserve the notice and wakes before any audit append, using the same
+	// deferred sent-event constraint as ordinary compat sends. The final bind
+	// updates only this transaction's newly inserted, already locked row.
+	if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,NULL,$5,$6,$7::uuid,'System')`, sys.TenantID, id, sys.ID, recipient, body, key, bound); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8::uuid,'System')`, sys.TenantID, id, sys.ID, recipient, eventID, body, key, bound); err != nil {
+	msg := Message{ID: id, SenderPrincipalID: sys.ID, RecipientPrincipalID: recipient, RecipientSessionID: bound}
+	var pending []events.Change
+	if err := enqueueWakesWith(ctx, tx, sys.TenantID, msg, func(c events.Change) error {
+		pending = append(pending, c)
+		return nil
+	}); err != nil {
 		return err
 	}
-	msg := Message{ID: id, SenderPrincipalID: sys.ID, RecipientPrincipalID: recipient, SentEventID: eventID, RecipientSessionID: bound}
-	return enqueueWakesWith(ctx, tx, sys.TenantID, msg, func(c events.Change) error {
-		_, err := systemEvent(ctx, tx, sys.TenantID, c.Type, c.After)
-		return err
+	return deferFailureAudit(ctx, func() error {
+		eventID, err := systemEvent(ctx, tx, sys.TenantID, "inbox.sent", messageMeta{ID: id, SenderPrincipalID: sys.ID, RecipientPrincipalID: recipient, IdempotencyKey: key})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET sent_event_id=$2 WHERE id=$1::uuid`, id, eventID); err != nil {
+			return err
+		}
+		for _, change := range pending {
+			if wake, ok := change.After.(wakeMeta); ok {
+				wake.EventID = eventID
+				change.After = wake
+			}
+			if _, err := systemEvent(ctx, tx, sys.TenantID, change.Type, change.After); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

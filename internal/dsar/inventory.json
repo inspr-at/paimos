@@ -269,6 +269,43 @@
     {
       "classification": "personal",
       "columns": {
+        "tenant_id": "metadata",
+        "principal_id": "personal",
+        "operation_key": "review",
+        "week_start": "personal",
+        "unit": "metadata",
+        "amount_micro": "personal",
+        "unknown_cost": "metadata",
+        "policy_revision": "metadata",
+        "created_at": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "assistant_budget_reservations"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "principal_id": "personal",
+        "project_id": "metadata",
+        "operation_key": "review",
+        "operation": "metadata",
+        "policy_revision": "metadata",
+        "allowed": "metadata",
+        "reason": "metadata",
+        "recorded_at": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "assistant_policy_receipts"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "created_at": "metadata",
         "owner_person_id": "personal",
         "policy": "personal",
@@ -1266,7 +1303,9 @@
       "columns": {
         "cancelled_at": "metadata",
         "lane_status": "personal",
-        "pickup_lease_until": "metadata"
+        "pickup_lease_until": "metadata",
+        "assistant_policy_key": "review",
+        "assistant_policy_project_id": "metadata"
       },
       "locator": {
         "person_column": "sender_principal_id",
@@ -2379,7 +2418,8 @@
         "tenant_id": "metadata",
         "updated_at": "personal",
         "work_node_id": "metadata",
-        "work_order_id": "metadata"
+        "work_order_id": "metadata",
+        "agent_delegation": "personal"
       },
       "locator": {
         "person_column": "owner_principal_id",

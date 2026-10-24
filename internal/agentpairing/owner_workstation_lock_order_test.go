@@ -15,6 +15,8 @@ import (
 // by the same parser, so a tenant lock before LockMutation cannot hide there.
 func TestOwnerWorkstationAuthLockInventory(t *testing.T) {
 	want := map[string]string{
+		"assistant_policy.go:recordAssistantPolicyDenial": "tenant.NO_KEY_UPDATE",
+
 		"key_scopes.go:agentKeyScopes":                "tenant:NO KEY UPDATE",
 		"key_trim.go:trimFence":                       "tenant:NO KEY UPDATE",
 		"messaging_assistant.go:messagingAssistant":   "tenant.NO_KEY_UPDATE",

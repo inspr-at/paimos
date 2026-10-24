@@ -194,7 +194,7 @@ func (w *Worker) claim(ctx context.Context, tenantID string) ([]claimedWake, err
 			  AND w.attempts < $1
 			  AND w.next_attempt_at <= clock_timestamp()
 			  AND t.kind = 'webhook'
-			  AND NOT EXISTS(SELECT 1 FROM principals WHERE id=m.recipient_principal_id AND messaging_only IS TRUE)
+			  AND NOT EXISTS(SELECT 1 FROM principals WHERE id=m.recipient_principal_id AND (messaging_only IS TRUE OR agent_class='assistant'))
 			  AND NOT EXISTS(SELECT 1 FROM inbox_message_targets WHERE principal_id=m.recipient_principal_id AND target_kind='pull' AND enabled)
 			  AND NOT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOIN inbox_message_targets at
 			   ON at.tenant_id=d.tenant_id AND at.id=COALESCE(d.effective_target_id,d.target_id)

@@ -3758,6 +3758,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestApprovals","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/approvals","name":"TestAssistantOutwardPolicyApproversAndReceipts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/approvals","name":"TestBriefingPendingApprovalsBeforeLimitRegression","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestDecisionRequiresPermissionBeingGranted","tier":"ESSENTIAL"}
@@ -3779,6 +3781,8 @@
     {"kind":"go","package":"internal/approvals","name":"TestRoutineHoldIsExactPersonOwnedAndRevocable","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestScopeWithinKey","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/assistants","name":"TestAssistantPolicyAdmissionMatrix","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/attachedmsg","name":"TestFrameLimitsAndEscaping","tier":"GATED-FULL"}
     ,
@@ -3887,6 +3891,8 @@
     {"kind":"go","package":"internal/auth","name":"TestAgentsPlanRealKeyScopeCreatorAndLiveGrants","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAgentsPlanRouteScopeIsReadOnly","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAssistantPolicyDirectAPICeilingAndRLS","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAttach","tier":"GATED-FULL"}
     ,
@@ -6110,6 +6116,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestPortalMigrationDoesNotResurrectDeletedStarterKinds","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestPrincipalVisibilityMissingIdentityStaysEmpty","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestProjectAccessMigrationsRunUnderForcedRLS","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestProjectVisibilityFailsClosed","tier":"GATED-FULL"}
@@ -7971,6 +7979,12 @@
     {"kind":"go","package":"internal/inbox","name":"TestAckWaitsBehindSessionClose","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAgentScope","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterMessagesPreserveRunBudget","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantPullRefusalDoesNotStarveAllowedMessages","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAttemptCapAndSettings","tier":"GATED-FULL"}
     ,
@@ -10453,6 +10467,8 @@
     {"kind":"go","package":"internal/routineactions","name":"TestAgentOwnedRoutineResearchBudgetAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestAgentRoutineDispatchFailuresYieldQueue","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestAssistantLeadDelegationPolicyAndResults","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionCatalogueClosedAndBounded","tier":"ESSENTIAL"}
     ,

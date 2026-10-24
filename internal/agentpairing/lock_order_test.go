@@ -21,6 +21,8 @@ import (
 // order; repeated helpers are reentrant, not new acquisitions after row locks.
 func TestTenantTreePairingLockOrder(t *testing.T) {
 	want := map[string]string{
+		"recurrences/assistant_delegation.go:delegateAssistant": "recurrence.lock",
+
 		// Native final launch/input enters the shared tenant/tree/pairing fence.
 		"agentaccounts/native_session.go:RequireNativeSessionTx": "pairing.Lock",
 

@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/assistants"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -103,6 +105,10 @@ func localDeliveryAdapter(name string) bool {
 func (m *messaging) claim(ctx context.Context, p tenant.Principal, project string, in claimInput) (*DeliveryWork, error) {
 	var work *DeliveryWork
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := attachedmsg.Lock(ctx, tx); err != nil {
+			return err
+		}
+		var policyChanges []events.Change
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}
@@ -226,6 +232,34 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 			work.State = "foreign_worker"
 			return nil
 		}
+		if m.adapters.byTarget[adapter] != nil {
+			var policyKey string
+			if err := tx.QueryRow(ctx, `SELECT coalesce(assistant_policy_key,'message/'||id::text) FROM inbox_messages WHERE id=$1::uuid`, messageID).Scan(&policyKey); err != nil {
+				return err
+			}
+			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.send", Key: policyKey, Scopes: []string{"inbox.read"}, RequireBudget: true, Now: now})
+			if err != nil {
+				return err
+			}
+			if !d.Allowed {
+				if _, err = FailMessage(ctx, tx, messageID, d.Reason); err != nil {
+					return err
+				}
+				work = nil
+				return assistants.AppendDecisionsTx(ctx, tx, p, d)
+			}
+			if d.Applicable {
+				actor := p
+				if actor.AuthKeyID == "" && actor.KeyID == "" {
+					actor.Scopes = []string{"inbox.read"}
+				}
+				if err = authz.RequireTx(ctx, tx, actor, "inbox.read", authz.Scope{ProjectID: project}); err != nil {
+					return err
+				}
+			}
+			// Append this audit with the claim after every receipt/resource write.
+			policyChanges = d.Changes
+		}
 		if len(sealed) < m.aead.NonceSize() {
 			return errors.New("target decryption failed")
 		}
@@ -257,6 +291,11 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		}
 		if err := MarkFetched(ctx, tx, p, "", message.ID); err != nil {
 			return err
+		}
+		for _, change := range policyChanges {
+			if _, err = events.Append(ctx, tx, p, change); err != nil {
+				return err
+			}
 		}
 		work.LeaseToken, work.TenantID, work.PrincipalID, work.TargetKind, work.TargetRef, work.TargetSecret, work.MaximumLevel, work.FallbackReason, work.Message = token, p.TenantID, p.ID, kind, private.Ref, private.Secret, maximum, priorFallback, &message
 		return nil

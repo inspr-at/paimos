@@ -88,6 +88,9 @@ func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	if err := permitEffective(p, permission, effective, scope); err != nil {
 		return err
 	}
+	if err := assistantCeilingTx(ctx, tx, p, permission, scope); err != nil {
+		return err
+	}
 	return recordKeyScopeUseTx(ctx, tx, p, permission)
 }
 
