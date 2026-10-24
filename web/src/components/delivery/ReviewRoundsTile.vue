@@ -58,8 +58,8 @@ watch([() => props.window, () => props.level, () => props.lang, () => props.rout
 .rr-tile :deep(.t-top), .rr-tile :deep(.t-value), .rr-tile :deep(.t-line), .rr-tile :deep(.t-foot) { pointer-events: none; }
 .rr-tile :deep(.info), .rr-tile :deep([data-clip-tip]), .rr-action { position: relative; z-index: 1; pointer-events: auto; }
 .rr-tile :deep(.t-value) { min-height: 40px; height: auto; flex-wrap: wrap; gap: 0 6px; }
-.rr-tile :deep(.t-main) { display: inline-block; min-width: 3.5ch; text-align: start; }
-.rr-gate { display: inline-block; min-width: 7ch; font-variant-numeric: tabular-nums; text-align: start; }
+.rr-tile :deep(.t-main) { display: inline-block; min-width: 5ch; text-align: start; }
+.rr-gate { display: inline-block; min-width: 10ch; font: 500 13px/1.3 var(--font); color: var(--ink-2); letter-spacing: 0; font-variant-numeric: tabular-nums; text-align: start; }
 .rr-tile :deep(.t-foot) { height: auto; min-height: 52px; }
 .rr-tile :deep(.t-line) { font-variant-numeric: tabular-nums; }
 .rr-action { display: inline-grid; place-items: center; flex: none; width: 44px; height: 44px; margin-left: auto; padding: 0; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--teal-ink); font: inherit; }

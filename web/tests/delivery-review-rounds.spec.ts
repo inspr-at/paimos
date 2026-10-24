@@ -4,7 +4,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { deliveryMetrics, mockDelivery } from './delivery-numbers-fixtures'
-import { settingsData, mockSettings } from './settings-fixtures'
 import { controlStability } from './control-stability'
 import { reviewAnswer, type ReviewAnswerKind } from './delivery-review-rounds-fixtures'
 import { reviewRuleText } from '../src/lib/reviewRuleText'
@@ -16,13 +15,12 @@ async function shot(page: Page, info: TestInfo, name: string, target = page.getB
   await target.scrollIntoViewIfNeeded(); await rest(page)
   await target.screenshot({ path: info.outputPath(`${name}.png`), animations: 'disabled' })
 }
-async function setup(page: Page, options: { width?: number; theme?: 'light' | 'dark'; lang?: 'en' | 'de'; hold?: boolean } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; hold?: boolean } = {}) {
   const world = fixtures()
   world.preferences.theme = { choice: options.theme ?? 'light' }
   world.preferences['delivery:numbers'] = { level: 'expert', window: 7 }
   await mockWork(page, world)
   await mockDelivery(page, () => ({ status: 200, body: deliveryMetrics() }))
-  if (options.lang === 'de') { const profile = settingsData(); profile.profile.locale = 'de-AT'; await mockSettings(page, profile) }
   const state = { work: world, kind: 'ready' as ReviewAnswerKind, status: 200, held: options.hold ? barrier() : null, reads: 0 }
   await page.route('**/api/projects/*/delivery/review-rounds?*', async route => {
     const url = new URL(route.request().url()), project = decodeURIComponent(url.pathname.split('/')[3]!), days = Number(url.searchParams.get('window') ?? 7) as WindowDays
@@ -57,6 +55,8 @@ for (const width of [1440, 1024, 390, 320]) {
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       await settled(page)
       await expect(tile(page).locator('.rr-gate')).toHaveText('gate 1.5')
+      const type = await tile(page).evaluate(root => ({ main: parseFloat(getComputedStyle(root.querySelector('.t-main')!).fontSize), gate: parseFloat(getComputedStyle(root.querySelector('.rr-gate')!).fontSize) }))
+      expect(type.gate).toBeLessThan(type.main)
       await expect(tile(page)).toContainText('4 tickets · 1 still open')
       await expect(tile(page).locator('.t-delta')).toHaveText('−1.0 · better')
       await expect(tile(page)).toContainText('Goal 1.0: ok on the first look')
@@ -71,6 +71,8 @@ for (const width of [1440, 1024, 390, 320]) {
       await expect(chart(page).locator('path.g-line.dashed')).toHaveCount(1)
       await expect(chart(page).locator('.g-reference')).toHaveCount(1)
       await expect(chart(page).locator('.g-target')).toHaveCount(0)
+      await chart(page).locator('.plot').evaluate(el => (el as HTMLElement).blur())
+      await page.mouse.move(3, 3)
       await shot(page, info, `expert-${width}-${theme}-trend`, chart(page))
       await trigger(page).scrollIntoViewIfNeeded()
       const guard = await controlStability(page, { tile: trigger(page), info: tile(page).locator('.info'), action: tile(page).locator('.rr-action') })
@@ -81,6 +83,7 @@ for (const width of [1440, 1024, 390, 320]) {
       expect(await panel(page).locator('.rr-chip').evaluateAll(chips => chips.every(chip => !chip.closest('a')))).toBe(true)
       const internal = await controlStability(page, { close: panel(page).getByRole('button', { name: 'Close Esc' }), row: panel(page).locator('.rr-ticket-link').first(), ...(width <= 520 ? { frame: panel(page) } : {}) })
       await internal.check(async () => {
+        await page.keyboard.press('Tab')
         await panel(page).locator('.rr-rules .rr-chip').first().focus()
         await expect(page.locator('.tooltip')).toHaveText(reviewRuleText('U2', 'en'))
       })
@@ -171,16 +174,16 @@ test('review rounds discard a late answer after the window changes', async ({ pa
 })
 
 for (const width of [1440, 390]) {
-  test(`review rounds German copy at ${width} keeps the long labels readable`, async ({ page }, info) => {
+  test(`review rounds German catalog at ${width} keeps the long labels readable`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
-    await setup(page, { lang: 'de' })
-    await page.goto('/p/AEON/delivery')
+    await page.goto('/tests/delivery-review-rounds-harness.html')
     await expect(tile(page).locator('.t-main')).toHaveText('2,0', { timeout: 45_000 })
     await expect(tile(page)).toContainText('4 Tickets · 1 noch offen')
     await expect(tile(page)).toContainText('Ziel 1,0: Freigabe beim ersten Blick')
     await shot(page, info, `german-${width}-tile`)
     await trigger(page).click()
     await expect(panel(page)).toContainText('Am häufigsten genannte Regeln')
+    await page.keyboard.press('Tab')
     await panel(page).locator('.rr-rules .rr-chip').first().focus()
     await expect(page.locator('.tooltip')).toHaveText(reviewRuleText('U2', 'de'))
     await shot(page, info, `german-${width}-panel`, panel(page))

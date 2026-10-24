@@ -79,7 +79,7 @@ watch(() => props.state, (next, prev) => {
 .s-top { display: flex; align-items: flex-start; gap: 8px; min-height: 26px; }
 .s-name { flex: 1; min-width: 0; margin: 3px 0 0; font: 600 13.5px/1.35 var(--font); color: var(--ink); overflow-wrap: anywhere; }
 .minimal .s-name { overflow-wrap: normal; hyphens: auto; }
-.minimal .s-val { display: inline-block; min-width: 4ch; text-align: start; }
+.minimal .s-val { display: inline-block; min-width: 5ch; text-align: start; }
 .s-valrow { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0 8px; min-height: 40px; }
 .s-val { font: 650 32px/40px var(--font); letter-spacing: -.025em; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
 .s-val small { margin-left: 4px; font: 500 14px/1 var(--font); letter-spacing: 0; color: var(--ink-2); }

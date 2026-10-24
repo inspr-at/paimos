@@ -70,7 +70,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .rr-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 4px 8px; }
 .rr-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 3ch; min-height: 24px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: var(--radius-row); background: transparent; color: var(--ink-2); font: 550 12px/1.5 var(--mono); white-space: nowrap; }
 .rr-rule-row { display: flex; align-items: center; gap: 8px; min-height: 44px; border-bottom: 1px solid var(--line); }
-.rr-rule-count { min-width: 4ch; font: 600 12.5px/1.5 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.rr-rule-count { min-width: 5ch; font: 600 12.5px/1.5 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
 .rr-rising { font-size: 12px; color: var(--ink-2); }
 .rr-empty { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .rr-actions { flex: none; display: flex; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--line); }

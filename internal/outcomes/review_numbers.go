@@ -207,6 +207,7 @@ func reviewWindow(all []reviewObservation, from, to time.Time, since *time.Time)
 	for id, ticket := range tickets {
 		row := reviewTicket{ID: id, Key: ticket.key, Title: ticket.title, Rules: topReviewRules(ticket.rules, nil, 3)}
 		selected := false
+		openRound := 0
 		for name, kind := range ticket.kinds {
 			at := kind.latest.At
 			round := kind.latest.Round
@@ -228,6 +229,9 @@ func reviewWindow(all []reviewObservation, from, to time.Time, since *time.Time)
 			}
 			if kind.firstOK == nil {
 				row.Open = true
+				if round > openRound {
+					openRound = round
+				}
 				continue
 			}
 			if name == "design" {
@@ -244,6 +248,7 @@ func reviewWindow(all []reviewObservation, from, to time.Time, since *time.Time)
 		result.Tickets++
 		if row.Open {
 			result.Open++
+			row.Latest = openRound
 		}
 		if row.Open || roundsValue(row.Design) > 1 || roundsValue(row.Gate) > 1 {
 			most = append(most, row)

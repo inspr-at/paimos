@@ -37,7 +37,7 @@ const EN = {
   emptyTickets: 'No tickets needed a second round.', emptyRules: 'No rules cited yet.',
   open: 'open · round {n}', openCount: '{n} still open',
   ticket: '{n} ticket', tickets: '{n} tickets',
-  coverage: 'covers {k} of {n} weeks', close: 'Close', retry: 'Retry',
+  coverage: 'covers {k} of {n} weeks', coverageOne: 'covers {k} of {n} week', close: 'Close', retry: 'Retry',
   openPanel: 'Show review round details', rising: 'rising', ruleMissing: 'Rule text is not available.',
   noDataReason: 'Numbers appear after the first recorded review round.',
 }
@@ -49,7 +49,7 @@ const DE: typeof EN = {
   emptyTickets: 'Kein Ticket brauchte eine zweite Runde.', emptyRules: 'Noch keine Regeln genannt.',
   open: 'offen · Runde {n}', openCount: '{n} noch offen',
   ticket: '{n} Ticket', tickets: '{n} Tickets',
-  coverage: 'deckt {k} von {n} Wochen ab', close: 'Schließen', retry: 'Erneut versuchen',
+  coverage: 'deckt {k} von {n} Wochen ab', coverageOne: 'deckt {k} von {n} Woche ab', close: 'Schließen', retry: 'Erneut versuchen',
   openPanel: 'Details zu Prüfrunden anzeigen', rising: 'steigend', ruleMissing: 'Regeltext nicht verfügbar.',
   noDataReason: 'Zahlen erscheinen nach der ersten erfassten Prüfrunde.',
 }
@@ -77,7 +77,7 @@ export function reviewDelta(data: ReviewRoundNumbers | null, days: WindowDays, l
 export function reviewRoundView(data: ReviewRoundNumbers | null, days: WindowDays, lang: DeliveryLanguage, state: 'loading' | 'error' | 'ready') {
   const t = reviewText(lang), page = deliveryText(lang), measure = data?.current
   const delta = reviewDelta(data, days, lang), partial = data?.status === 'partial'
-  const foot = measure && partial ? fill(t.coverage, { k: num(measure.weeks_covered, lang), n: num(measure.weeks_total, lang) }) : t.source
+  const foot = measure && partial ? fill(plurals[lang].select(measure.weeks_total) === 'one' ? t.coverageOne : t.coverage, { k: num(measure.weeks_covered, lang), n: num(measure.weeks_total, lang) }) : t.source
   const gate = `${t.gate} ${measure?.gate_mean == null ? '–' : num(measure.gate_mean, lang, 1)}`
   const expert: TicketTileModel = {
     def: { key: 'review-rounds' }, label: t.label, definition: t.definition, reason: !data?.since ? t.noDataReason : null,

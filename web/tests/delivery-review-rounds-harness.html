@@ -1,0 +1,35 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!doctype html>
+<html lang="de" data-theme="light">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Prüfrunden</title>
+<style>
+body { margin: 0; }
+.catalog { container: delivery / inline-size; max-width: 70rem; margin: auto; padding: 24px; }
+.catalog .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.catalog .trends { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+@media (max-width: 1024px) { .catalog .tiles, .catalog .trends { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .catalog { padding: 16px; } .catalog .tiles, .catalog .trends { grid-template-columns: minmax(0, 1fr); } }
+</style></head>
+<body><main id="catalog" class="catalog"></main>
+<script type="module">
+// Test-only component fixture: the current application intentionally remains
+// English (AEON-1609). Exercise the prepared German catalog without overriding
+// its language policy or adding a production route.
+import { createApp, h } from 'vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import ReviewRoundsTile from '../src/components/delivery/ReviewRoundsTile.vue'
+import TrendChart from '../src/components/delivery/TrendChart.vue'
+import TooltipHost from '../src/components/TooltipHost.vue'
+import { reviewRoundView } from '../src/lib/deliveryReviewRounds'
+import { deliveryText } from '../src/lib/deliveryNumbersText'
+import { reviewAnswer } from './delivery-review-rounds-fixtures'
+import '../src/styles/tokens.css'
+import '../src/styles/base.css'
+const data = reviewAnswer(), model = reviewRoundView(data, 7, 'de', 'ready')
+const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: { render: () => null } }] })
+createApp({ render: () => [
+  h('div', { class: 'tiles', role: 'list' }, [h(ReviewRoundsTile, { data, state: 'ready', level: 'expert', window: 7, lang: 'de', routeKey: 'AEON' })]),
+  h('div', { class: 'trends' }, [h(TrendChart, { model: model.chart, state: 'ready', text: deliveryText('de'), 'data-testid': 'review-rounds-trend' })]),
+  h(TooltipHost),
+] }).use(router).mount('#catalog')
+</script></body></html>

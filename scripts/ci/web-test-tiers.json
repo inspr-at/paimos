@@ -8000,9 +8000,9 @@
     ,
     {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review round states preserve controls and never replace missing or open outcomes with one","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds German copy at 1440 keeps the long labels readable","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds German catalog at 1440 keeps the long labels readable","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds German copy at 390 keeps the long labels readable","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds German catalog at 390 keeps the long labels readable","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds at 1024: tile, weekly trend and neutral panel at rest in both themes","tier":"ESSENTIAL"}
     ,

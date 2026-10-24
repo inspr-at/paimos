@@ -198,7 +198,9 @@ func authorizeReviewRoundTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	var matches bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM review_runs
  WHERE id=$1 AND ticket_node_id=$2 AND project_id=$3 AND reviewer_principal_id=$4
- AND kind=$5 AND head_sha=$6 AND verdict=$7 AND submitted_at IS NOT NULL)`,
+ AND kind=$5 AND head_sha=$6 AND verdict=$7 AND submitted_at IS NOT NULL
+ AND NOT EXISTS(SELECT 1 FROM nodes child WHERE child.parent_id=$2 AND child.deleted_at IS NULL
+   AND NOT EXISTS(SELECT 1 FROM work_orders wo WHERE wo.node_id=child.id)))`,
 		in.ReviewRunID, node.id, node.projectID, p.ID, runKind, in.Artifact, in.Verdict).Scan(&matches)
 	if err != nil {
 		return err

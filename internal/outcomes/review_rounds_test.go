@@ -211,4 +211,11 @@ func TestReviewRoundsUntilOKMath(t *testing.T) {
 	if open.Status != "partial" || open.Current.DesignMean != nil || open.Current.Open != 1 || open.Current.WeeksCovered != 1 {
 		t.Fatalf("open-only partial: %+v", open)
 	}
+	mixed := aggregateReviewNumbers("project", 7, now, []reviewObservation{
+		{Ticket: "mixed", Kind: "design", Round: 3, Verdict: "ok", At: now.Add(-time.Hour)},
+		{Ticket: "mixed", Kind: "gate", Round: 1, Verdict: "changes", At: now.Add(-time.Minute)},
+	})
+	if mixed.Current.Open != 1 || mixed.Current.GateMean != nil || len(mixed.Most) != 1 || mixed.Most[0].Latest != 1 {
+		t.Fatalf("open round belongs to the open kind: %+v", mixed)
+	}
 }
