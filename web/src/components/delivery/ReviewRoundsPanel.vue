@@ -30,7 +30,7 @@ const t = computed(() => reviewText(props.lang))
             <TicketPeekLink class="rr-ticket-link" :ticket-key="row.key" :href="ticketPath(routeKey, row.key)" @click="emit('close', false)">
               <span class="rr-key">{{ row.key }}<AppIcon name="external" :size="12" /></span>
               <span v-clip-tip class="rr-title">{{ row.title }}</span>
-              <span class="rr-counts">{{ reviewRowCounts(row, lang) }}</span>
+              <span v-clip-tip class="rr-counts">{{ reviewRowCounts(row, lang) }}</span>
             </TicketPeekLink>
             <div v-if="row.rules.length" class="rr-chips"><span v-for="rule in row.rules" :key="rule.rule" class="rr-chip" tabindex="0" :data-tip="reviewRuleText(rule.rule, lang)">{{ rule.rule }}</span></div>
           </li>
@@ -81,6 +81,12 @@ ul { list-style: none; margin: 0; padding: 0; }
   .rr-head { padding-top: max(16px, env(safe-area-inset-top)); }
   .rr-lists { grid-template-columns: minmax(0, 1fr); }
   .rr-actions { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .rr-tickets > li { position: relative; }
+  .rr-ticket-link { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 16px 24px; grid-template-areas: "key title" "counts counts"; gap: 0 8px; padding: 2px 4px; }
+  .rr-key { grid-area: key; align-self: start; line-height: 16px; }
+  .rr-title { grid-area: title; align-self: start; font-size: 12px; line-height: 16px; }
+  .rr-counts { grid-area: counts; align-self: center; min-width: 0; max-width: 15ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rr-chips { position: absolute; right: 4px; bottom: 2px; max-width: calc(100% - 15ch); padding: 0; }
 }
 </style>
 <style>

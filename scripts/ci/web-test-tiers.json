@@ -8016,6 +8016,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review rounds discard a late answer after the window changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-review-rounds.spec.ts","name":"review sheet scrolling retains its footer and never dismisses a scrolled list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 1440 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Delivery Simple at 400 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

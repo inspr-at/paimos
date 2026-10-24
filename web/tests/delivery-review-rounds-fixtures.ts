@@ -26,3 +26,19 @@ export function reviewAnswer(project = 'p-aeon', window: WindowDays = 7, kind: R
   if (kind === 'open_only') { out.current = { ...current, design_mean: null, gate_mean: null, design_tickets: 0, gate_tickets: 0, tickets: 1, still_open: 1 }; out.previous = { ...empty }; out.most_rounds = [b]; out.weekly.forEach(w => { w.design_mean = null; w.gate_mean = null }) }
   return out
 }
+
+// Nine completed design-3/gate-2 tickets and one open design-2 ticket.
+// Ten rule rows make the phone body scroll while its actions remain pinned.
+export function longReviewAnswer(project = 'p-aeon', window: WindowDays = 7): ReviewRoundNumbers {
+  const data = reviewAnswer(project, window)
+  const rules = ['U1', 'U2', 'U3'].map(rule => ({ rule, count: 2, previous_count: 0 }))
+  data.current = { ...data.current, design_mean: 3, gate_mean: 2, design_tickets: 9, gate_tickets: 9, tickets: 10 }
+  data.most_rounds = Array.from({ length: 10 }, (_, i) => ({
+    ticket_node_id: `long-${i}`, key: `AEON-${1800 + i}`, title: 'A recorded review with its full ticket title available',
+    design_rounds: i === 9 ? 2 : 3, gate_rounds: i === 9 ? null : 2, open: i === 9, latest_round: i === 9 ? 2 : 3, rules,
+  }))
+  data.rules_cited_most = Array.from({ length: 10 }, (_, i) => ({ rule: `U${i + 1}`, count: i < 3 ? 20 : 1, previous_count: 0 }))
+    .sort((a, b) => b.count - a.count || a.rule.localeCompare(b.rule))
+  data.weekly = data.weekly.map((week, i) => ({ ...week, ...(i === 0 ? { design_mean: null, gate_mean: null, design_tickets: 0, gate_tickets: 0, tickets: 9, still_open: 9 } : data.current), weeks_total: 1, weeks_covered: 1 }))
+  return data
+}

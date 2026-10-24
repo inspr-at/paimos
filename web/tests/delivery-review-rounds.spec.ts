@@ -6,7 +6,7 @@ import { writeFile } from 'node:fs/promises'
 import { fixtures, mockWork } from './work-fixtures'
 import { deliveryMetrics, mockDelivery } from './delivery-numbers-fixtures'
 import { controlStability } from './control-stability'
-import { reviewAnswer, type ReviewAnswerKind } from './delivery-review-rounds-fixtures'
+import { reviewAnswer, longReviewAnswer, type ReviewAnswerKind } from './delivery-review-rounds-fixtures'
 import { reviewRuleText } from '../src/lib/reviewRuleText'
 import type { WindowDays } from '../src/lib/deliveryNumbers'
 
@@ -25,13 +25,13 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; hold?: boo
   world.preferences['delivery:numbers'] = { level: 'expert', window: 7 }
   await mockWork(page, world)
   await mockDelivery(page, () => ({ status: 200, body: deliveryMetrics() }))
-  const state = { work: world, kind: 'ready' as ReviewAnswerKind, status: 200, held: options.hold ? barrier() : null, reads: 0 }
+  const state = { work: world, kind: 'ready' as ReviewAnswerKind, long: false, status: 200, held: options.hold ? barrier() : null, reads: 0 }
   await page.route('**/api/projects/*/delivery/review-rounds?*', async route => {
     const url = new URL(route.request().url()), project = decodeURIComponent(url.pathname.split('/')[3]!), days = Number(url.searchParams.get('window') ?? 7) as WindowDays
     state.reads++
     const held = state.held
     if (held) await held.promise
-    const answer = reviewAnswer(project, days, state.kind)
+    const answer = state.long ? longReviewAnswer(project, days) : reviewAnswer(project, days, state.kind)
     await route.fulfill({ status: state.status, json: state.status === 200 ? { ...answer, reviewer_name: 'REVIEWER-SENTINEL', builder_name: 'BUILDER-SENTINEL', model_name: 'MODEL-SENTINEL' } : { error: 'read failed' } })
   })
   return state
@@ -108,33 +108,10 @@ for (const width of [1440, 1024, 390, 320]) {
         const frame = (await panel(page).boundingBox())!, footer = (await panel(page).locator('.rr-actions').boundingBox())!
         expect(frame.height).toBeCloseTo(844, 0)
         expect(Math.abs(footer.y + footer.height - frame.y - frame.height)).toBeLessThanOrEqual(.5)
-        for (const row of await panel(page).locator('.rr-ticket-link, .rr-rule-row').all()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+        for (const row of await panel(page).locator('.rr-ticket-link, .rr-rule-row').all()) expect((await row.boundingBox())!.height).toBeCloseTo(44, 0)
       }
       await panel(page).getByRole('button', { name: 'Close Esc' }).focus()
       await shot(page, info, `expert-${width}-${theme}-panel`, panel(page))
-      if (width <= 520) {
-        await page.setViewportSize({ width, height: 500 })
-        await rest(page)
-        const body = panel(page).locator('.rr-lists')
-        expect(await body.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0)
-        const scrolling = await controlStability(page, { close: panel(page).getByRole('button', { name: 'Close Esc' }), frame: panel(page), row: panel(page).locator('.rr-ticket-link').first() })
-        await scrolling.check(async () => {
-          await body.evaluate(el => el.scrollTo(0, el.scrollHeight))
-          await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
-          await body.evaluate(el => {
-            const touch = (y: number) => new Touch({ identifier: 1, target: el, clientX: 80, clientY: y })
-            el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [touch(180)] }))
-            el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, changedTouches: [touch(270)] }))
-          })
-          await expect(panel(page)).toBeVisible()
-        })
-        scrolling.done()
-        const shortFrame = (await panel(page).boundingBox())!, shortFooter = (await panel(page).locator('.rr-actions').boundingBox())!
-        expect(Math.abs(shortFooter.y + shortFooter.height - shortFrame.y - shortFrame.height)).toBeLessThanOrEqual(.5)
-        await shot(page, info, `expert-${width}-${theme}-short-sheet`, panel(page))
-        await page.setViewportSize({ width, height: 844 })
-        await rest(page)
-      }
       await guard.check(async () => { await page.keyboard.press('Escape'); await expect(panel(page)).toHaveCount(0) })
       await expect(trigger(page)).toBeFocused()
       guard.done()
@@ -156,6 +133,38 @@ for (const width of [1440, 1024, 390, 320]) {
     expect(state.reads).toBeGreaterThan(0)
   })
 }
+
+test('review sheet scrolling retains its footer and never dismisses a scrolled list', async ({ page }, info) => {
+  const state = await setup(page)
+  state.long = true
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto('/p/AEON/delivery')
+    await expect(tile(page).locator('.t-main')).toHaveText('3.0', { timeout: 45_000 })
+    await expect(page.locator('.dl .sk')).toHaveCount(0)
+    await trigger(page).click()
+    await expect(panel(page).locator('.rr-ticket-link')).toHaveCount(10)
+    await rest(page)
+    const body = panel(page).locator('.rr-lists')
+    expect(await body.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0)
+    const scrolling = await controlStability(page, { close: panel(page).getByRole('button', { name: 'Close Esc' }), frame: panel(page), row: panel(page).locator('.rr-ticket-link').first() })
+    await scrolling.check(async () => {
+      await body.evaluate(el => el.scrollTo(0, el.scrollHeight))
+      await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+      await body.evaluate(el => {
+        const touch = (y: number) => new Touch({ identifier: 1, target: el, clientX: 80, clientY: y })
+        el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [touch(180)] }))
+        el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, changedTouches: [touch(270)] }))
+      })
+      await expect(panel(page)).toBeVisible()
+    })
+    scrolling.done()
+    const frame = (await panel(page).boundingBox())!, footer = (await panel(page).locator('.rr-actions').boundingBox())!
+    expect(Math.abs(footer.y + footer.height - frame.y - frame.height)).toBeLessThanOrEqual(.5)
+    await shot(page, info, `phone-${width}-scrolled-sheet`, panel(page))
+    await page.keyboard.press('Escape')
+  }
+})
 
 test('review round states preserve controls and never replace missing or open outcomes with one', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
