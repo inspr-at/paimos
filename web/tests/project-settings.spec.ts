@@ -50,7 +50,7 @@ async function setup(page: Page, readOnly = false) {
   await page.route('**/api/projects/*/delivery/metrics', route => route.fulfill({ json: {
     project_id: 'p-pharos', generated_at: '2026-09-23T12:00:00Z', metrics: [],
     source: { repository: 'example/delivery', ci_workflow: '.github/workflows/ci.yml', nightly_workflow: '.github/workflows/nightly-full.yml', history_source: 'actions', app_connected: true, backfill: 'running', backfill_since: '2026-08-24T00:00:00Z', backfill_done_at: null, covered_since: null, last_read_error: { reason: 'rate_limited', permission: null, at: '2026-09-23T11:59:00Z', reset_at: '2026-09-23T12:14:00Z', status_code: 403 }, retry_at: '2026-09-23T12:14:00Z' },
-  } })))
+  } }))
   await page.route('**/api/projects/*/delivery-settings**', route => route.fulfill({ json: new URL(route.request().url()).searchParams.has('view') ? {} : { required_workflow: 'CI', required_checks: ['go test'], deadlines: { reviewed: 30, pushed: 60, ci_green: 20, in_queue: 60, queue_failed: 120 } }, headers: { ETag: '"1"' } }))
   await page.route('**/api/recurrences**', route => route.fulfill({ json: { items: [], next_cursor: null } }))
   await page.route('**/api/projects/*/routine-execution-settings', route => route.fulfill({ status: 404, json: { error: 'not configured' } }))
