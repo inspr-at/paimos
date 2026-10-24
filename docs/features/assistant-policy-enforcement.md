@@ -118,4 +118,8 @@ injected policy weeks), `TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff`,
 `TestAssistantLeadDelegationPolicyAndResults`, and
 `TestAssistantPolicyDirectAPICeilingAndRLS`. Assistants unit/browser cases cover
 refusal presentation, preservation of unexposed policy settings and stable
-controls at phone, tablet and desktop widths in both themes.
+controls at phone, tablet and desktop widths in both themes. The mixed-page
+pickup regression checks the single System notice, its wake and failure events
+across repeated pulls. History cases verify focusable actor disclosures without
+native titles; the browser case tabs to both history surfaces and checks Escape
+dismissal and return of focus to the assistant row.
