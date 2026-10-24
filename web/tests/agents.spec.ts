@@ -1372,8 +1372,10 @@ test('assistant policy refusals remain visible in rows and the stable existing a
     evidence.push({ width, theme, overflow, tabs: await controls.tabs.boundingBox(), close: await controls.close.boundingBox() })
     await page.screenshot({ path: testInfo.outputPath(`aeon-1706-policy-refusal-${width}-${theme}.png`), fullPage: true })
     await page.keyboard.press('Escape')
-    await expect(page.locator('.tooltip:popover-open')).toHaveCount(0)
+    // Closing restores the row's focus and can reveal its separate name tip.
+    await expect(page.locator('.tooltip:popover-open').filter({ hasText: unknownActor })).toHaveCount(0)
     await expect(panel).toHaveCount(0)
+    await expect(row.locator('.assistant-open')).toBeFocused()
   }
   await testInfo.attach('aeon-1706-policy-refusal-checks.json', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' })
   expect(errors).toEqual([])
