@@ -157,7 +157,7 @@ func (m *Module) scheduleMetricBackfill(ctx context.Context, p tenant.Principal,
 			if err != nil {
 				return err
 			}
-		} else if check && source.Cursor.Phase == "done" && source.DoneAt != nil {
+		} else if check && source.Cursor.Phase == "done" && source.DoneAt != nil && !needsPreflightCatchup(source.Cursor) {
 			// Fill already stored runs first. A history refresh then starts at its
 			// persisted watermark, including after a different server takes over.
 			pending, err := jobWorklistTx(ctx, tx, source, now, 1)
