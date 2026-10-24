@@ -466,7 +466,14 @@ test('eight linked tickets appear once the viewport reaches 1280', async ({ page
 // measurement; another stale read must not leave the painted graph mounted.
 test('AEON-1401: the delivered viewport width clears a glimpse while geometry and media reads stay wide', async ({ page }) => {
   await page.addInitScript(() => {
-    const state = { holding: false, rootWidths: [] as number[], framesHeld: 0, tasksHeld: 0 }
+    const roots = new Map<ResizeObserver, (width: number) => void>()
+    const state = {
+      holding: false, rootWidths: [] as number[], framesHeld: 0, tasksHeld: 0,
+      deliverRoot(width: number) {
+        if (!roots.size) throw new Error('No root viewport observer was installed')
+        for (const deliver of roots.values()) deliver(width)
+      },
+    }
     ;(window as unknown as { __aeonDeliveredViewport: typeof state }).__aeonDeliveredViewport = state
     const rect = Element.prototype.getBoundingClientRect
     Element.prototype.getBoundingClientRect = function () {
@@ -498,11 +505,34 @@ test('AEON-1401: the delivered viewport width clears a glimpse while geometry an
     window.setInterval = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => interval(task(handler), delay, ...args)) as typeof window.setInterval
     const Observer = window.ResizeObserver
     window.ResizeObserver = class extends Observer {
+      private readonly deliverRoot: (width: number) => void
       constructor(callback: ResizeObserverCallback) {
         super((entries, observer) => {
-          for (const entry of entries) if (state.holding && entry.target === document.documentElement) state.rootWidths.push(entry.contentRect.width)
-          callback(entries, observer)
+          // Native root/body deliveries are competing paths. The test releases
+          // one root sample explicitly, even when software GL drops the native
+          // notification entirely; no body observer may clear it first.
+          if (!state.holding) callback(entries, observer)
         })
+        this.deliverRoot = width => {
+          state.rootWidths.push(width)
+          callback([{
+            target: document.documentElement,
+            contentRect: new DOMRect(0, 0, width, 844),
+            borderBoxSize: [{ inlineSize: width, blockSize: 844 }],
+          } as unknown as ResizeObserverEntry], this)
+        }
+      }
+      observe(target: Element, options?: ResizeObserverOptions) {
+        super.observe(target, options)
+        if (target === document.documentElement) roots.set(this, this.deliverRoot)
+      }
+      unobserve(target: Element) {
+        super.unobserve(target)
+        if (target === document.documentElement) roots.delete(this)
+      }
+      disconnect() {
+        super.disconnect()
+        roots.delete(this)
       }
     }
   })
@@ -515,12 +545,22 @@ test('AEON-1401: the delivered viewport width clears a glimpse while geometry an
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
   })
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect.poll(() => page.evaluate(() => ({
-    window: window.innerWidth,
-    geometry: document.documentElement.getBoundingClientRect().width,
-    media: matchMedia('(min-width: 1280px)').matches,
-    delivered: (window as unknown as { __aeonDeliveredViewport: { rootWidths: number[] } }).__aeonDeliveredViewport.rootWidths.at(-1),
-  }))).toEqual({ window: 1280, geometry: 1280, media: true, delivered: 390 })
+  await expect.poll(() => page.evaluate(() => window.visualViewport!.width)).toBe(390)
+  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
+  const result = await page.evaluate(async () => {
+    const state = (window as unknown as { __aeonDeliveredViewport: { rootWidths: number[]; deliverRoot: (width: number) => void } }).__aeonDeliveredViewport
+    state.deliverRoot(390)
+    await Promise.resolve()
+    return {
+      window: window.innerWidth,
+      geometry: document.documentElement.getBoundingClientRect().width,
+      media: matchMedia('(min-width: 1280px)').matches,
+      delivered: state.rootWidths.at(-1),
+      painted: !!document.querySelector('[data-header-glimpse="on"]'),
+      cleared: !!document.querySelector('[data-header-glimpse="off"]'),
+    }
+  })
+  expect(result).toEqual({ window: 1280, geometry: 1280, media: true, delivered: 390, painted: false, cleared: true })
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
 })
@@ -984,11 +1024,11 @@ async function expectSoftFittedGraph(page: Page, checkExtent = false) {
   // opacity layer can change the rasterization of otherwise identical text.
   // Visibility preserves every measured exclusion box and the current mask.
   const hiddenText = await page.addStyleTag({ content: `${protectedSelectors.join(', ')} { visibility: hidden !important; }` })
-  const masked = pngPixels(await page.screenshot({ clip }))
+  const masked = pngPixels(await page.screenshot({ clip, scale: 'css' }))
   // Height-led framing intentionally lets outliers enter the surrounding fade.
   const original = await layer.getAttribute('style')
   await layer.evaluate(el => { (el as HTMLElement).style.opacity = '0' })
-  const background = pngPixels(await page.screenshot({ clip }))
+  const background = pngPixels(await page.screenshot({ clip, scale: 'css' }))
   await layer.evaluate((el, style) => el.setAttribute('style', style ?? ''), original)
   await hiddenText.evaluate(el => el.remove())
   for (const [name, pixels] of [['masked', masked]] as const) {
@@ -1039,16 +1079,16 @@ for (const scheme of ['light', 'dark'] as const) {
         await expect(surface(page)).toHaveAttribute('data-dimension', '3d')
         await expect(page.locator('.glimpse-canvas')).toHaveCSS('opacity', scheme === 'light' ? '0.35' : '0.3')
       }
-      // Sample all protected text from the same captured frame. Three more
-      // compositor captures used to exhaust the test under parallel software GL.
-      const pixels = pngPixels(await page.screenshot({ path: testInfo.outputPath(`header-${width}-${scheme}.png`), scale: 'css' }))
+      // Capture only the header, keeping page coordinates for text sampling.
+      // The unrelated work list need not be rasterized for every header shot.
+      const toolbar = (await page.locator('.toolbar-wrap').boundingBox())!
+      const clip = { x: 0, y: 0, width, height: Math.ceil(toolbar.y + toolbar.height) }
+      const pixels = pngPixels(await page.screenshot({ path: testInfo.outputPath(`header-${width}-${scheme}.png`), clip, scale: 'css' }))
       for (const selector of ['#project-title', '.description', '.group-count b']) {
         expect(await textContrast(page, selector, pixels), `${selector} ${width} ${scheme}`).toBeGreaterThanOrEqual(4.5)
       }
       if (width >= 1280) {
         await expectSoftFittedGraph(page, true)
-        await page.locator('.project-head').hover()
-        await page.screenshot({ path: testInfo.outputPath(`header-${width}-${scheme}-hover.png`) })
       }
       expect(errors).toEqual([])
     })
