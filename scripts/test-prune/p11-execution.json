@@ -126,7 +126,7 @@
           ]
         }
       ],
-      "actualAfter": 5
+      "actualAfter": 6
     },
     {
       "file": "tests/portal-admin.spec.ts",
@@ -2649,7 +2649,7 @@
     "Hosted CI must prove the corrected six-spec boundaries after-run and full static; approved entry points refused with exit 3 at the bounded retry limit.",
     "Unique lower-layer conversions remain future work; their browser donors stay, including both mounted Delivery section-switch cases."
   ],
-  "actualAfter": 387,
+  "actualAfter": 388,
   "frozenBefore": 493,
   "afterOnInitialBase": 375,
   "latestMainCommit": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
@@ -2671,7 +2671,8 @@
     "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 light"
   ],
   "postPruneAdditionalCases": [
-    "browser:tests/delivery-numbers.spec.ts:AEON-1710: history failure pills stay on one line and expose the full reason"
+    "browser:tests/delivery-numbers.spec.ts:AEON-1710: history failure pills stay on one line and expose the full reason",
+    "browser:tests/status-icons.spec.ts:AEON-1666: 24 sliding icons cost at most 1 ms of main-thread CPU time per animation frame"
   ],
   "measurements": {
     "scope": "Five changed specs, identical mbp2606 LEAD entry point and one worker per spec; not the full P11 package.",

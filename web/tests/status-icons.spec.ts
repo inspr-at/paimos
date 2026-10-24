@@ -353,3 +353,60 @@ test('AEON-1362 bar form: diagonal stripes slide only live or under the pointer;
   expect((await state('live')).name).toBe('none')
   expect((await state('past')).name).toBe('none')
 })
+
+test('AEON-1666: 24 sliding icons cost at most 1 ms of main-thread CPU time per animation frame', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1600 })
+  await mockWork(page, workData('light', 23))
+  await page.goto('/p/PHAROS')
+  await showProjectHead(page)
+  const icons = grid(page).locator('tr.ticket-row .st-ip')
+  await expect(icons).toHaveCount(24)
+  await expect.poll(async () => (await slides(page)).filter(slide => slide.state === 'running' && !slide.offscreen).length).toBeGreaterThanOrEqual(24)
+  await page.mouse.move(0, 0)
+
+  const cdp = await page.context().newCDPSession(page)
+  const samples = new Map<string, Record<string, number>>()
+  cdp.on('Performance.metrics', ({ title, metrics }) => {
+    if (title.startsWith('status-budget-')) samples.set(title, Object.fromEntries(metrics.map(metric => [metric.name, metric.value])))
+  })
+  try {
+    // AEON-1666: the retired check used elapsed TaskDuration / (3 * 60), so
+    // scheduler preemption inside a task counted as icon work, startup/timers
+    // entered the window, and slow runners still pretended to render 180 frames.
+    // Chromium's threadTicks domain charges only CPU consumed by this thread:
+    // https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/inspector/inspector_performance_agent.cc
+    // console.timeStamp emits Performance.metrics synchronously at the two
+    // frame boundaries; no CDP round trip or assumed refresh rate defines them.
+    await cdp.send('Performance.enable', { timeDomain: 'threadTicks' })
+    const frames = 120
+    const motion = await icons.evaluateAll(async (elements, frameCount) => {
+      const animations = elements.flatMap(icon => icon.getAnimations({ subtree: true }))
+        .filter(animation => animation instanceof CSSAnimation && animation.animationName === 'ip-slide')
+      await Promise.all(animations.map(animation => animation.ready))
+      const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      // Exclude only initial layer promotion: twelve actual animation frames,
+      // not a sleep. Every measured task, including GC, remains in the budget.
+      for (let index = 0; index < 12; index++) await nextFrame()
+      const before = animations.map(animation => ({ time: Number(animation.currentTime), state: animation.playState }))
+      console.timeStamp('status-budget-start')
+      for (let index = 0; index < frameCount; index++) await nextFrame()
+      console.timeStamp('status-budget-end')
+      return animations.map((animation, index) => ({
+        before: before[index].state, after: animation.playState, advanced: Number(animation.currentTime) > before[index].time,
+      }))
+    }, frames)
+    expect(motion).toHaveLength(24)
+    for (const animation of motion) expect(animation).toEqual({ before: 'running', after: 'running', advanced: true })
+    expect([...samples.keys()]).toEqual(['status-budget-start', 'status-budget-end'])
+    const start = samples.get('status-budget-start')!, end = samples.get('status-budget-end')!
+    const cpuMs = (end.TaskDuration - start.TaskDuration) * 1000
+    const perFrame = cpuMs / frames
+    expect(Number.isFinite(perFrame) && perFrame > 0, 'thread CPU metrics must be present and advance').toBe(true)
+    const evidence = { icons: motion.length, frames, cpuMs, cpuMsPerFrame: perFrame, wallMs: (end.Timestamp - start.Timestamp) * 1000, timeDomain: 'threadTicks' }
+    console.log(`AEON-1666 sliding budget: ${JSON.stringify(evidence)}`)
+    await testInfo.attach('status-icon-cpu-budget', { body: JSON.stringify(evidence), contentType: 'application/json' })
+    expect(perFrame, '24 sliding icons: main-thread CPU ms per measured animation frame (budget 1 ms)').toBeLessThanOrEqual(1)
+  } finally {
+    await cdp.detach()
+  }
+})
