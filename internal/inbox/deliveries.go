@@ -561,9 +561,11 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 			}
 			if implicit {
 				policyProject = ""
+				diagnosticKey := "implicit-test/" + id
+				policyKey = &diagnosticKey
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET assistant_policy_project_id=nullif($2,'')::uuid WHERE id=$1::uuid`, id, policyProject); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET assistant_policy_project_id=nullif($2,'')::uuid,assistant_policy_key=$3 WHERE id=$1::uuid`, id, policyProject, policyKey); err != nil {
 			return err
 		}
 		key := ""

@@ -73,7 +73,7 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 				run = candidate
 			}
 		}
-		if err := tx.QueryRow(ctx, `SELECT coalesce(m.assistant_policy_project_id::text,(SELECT project_id::text FROM inbox_compat_messages WHERE inbox_message_id=m.id),(SELECT output_project_id::text FROM routine_runs WHERE id=nullif($2,'')::uuid),''),coalesce(m.assistant_policy_key,'message/'||m.id::text),
+		if err := tx.QueryRow(ctx, `SELECT CASE WHEN m.assistant_policy_key='implicit-test/'||m.id::text THEN '' ELSE coalesce(m.assistant_policy_project_id::text,(SELECT project_id::text FROM inbox_compat_messages WHERE inbox_message_id=m.id),(SELECT output_project_id::text FROM routine_runs WHERE id=nullif($2,'')::uuid),'') END,coalesce(m.assistant_policy_key,'message/'||m.id::text),
  (SELECT agent_owner_config FROM routine_runs WHERE id=nullif($2,'')::uuid),
  (SELECT d.agent_owner_config FROM recurrence_definitions d JOIN routine_runs r ON r.recurrence_id=d.recurrence_id WHERE r.id=nullif($2,'')::uuid)
  FROM inbox_messages m WHERE m.id=$1::uuid`, msg.ID, run).Scan(&project, &key, &raw, &current); err != nil {
