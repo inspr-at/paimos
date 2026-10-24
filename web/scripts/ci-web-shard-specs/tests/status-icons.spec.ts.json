@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/status-icons.spec.ts",
-    "listedTests": 5,
+    "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
         "max": 9.166,

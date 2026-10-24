@@ -13,8 +13,16 @@ Every status in the app is drawn by one component, `web/src/components/work/Stat
   disc or square never blanks. A control is the nearest button, link, label, menu item or option around the icon,
   or any element marked `data-status-motion` (the rows of "What the statuses mean").
 - **Nothing moves** with `prefers-reduced-motion: reduce`. Slides pause off-screen and in hidden tabs. Only
-  transform, opacity and stroke-dashoffset animate, so nothing shifts. 24 sliding icons cost about 0.02 ms of
-  main-thread time per frame (budget 1 ms, checked in `web/tests/status-icons.spec.ts`).
+  transform, opacity and stroke-dashoffset animate, so nothing shifts. The budget for 24 sliding icons is 1 ms of
+  main-thread CPU time per animation frame, checked in `web/tests/status-icons.spec.ts` using Chromium's thread
+  CPU clock over one CSS animation cycle after a warm-up cycle. CDP tracing counts the actual compositor frames
+  drawn by the list's renderer, without a per-frame JavaScript sampler waking the main thread. Scheduler waits
+  are excluded; all measured CPU work including GC and other page work remains included. AEON-1666 restores
+  this guarantee after AEON-1683 retired the elapsed-time check.
+
+Linux verification for AEON-1666: 30/30 repetitions passed at 0.104–0.312 ms CPU/frame, with 67–109 actual drawn
+frames per measured cycle. Deliberately expensive JavaScript-driven icons failed the same 1 ms assertion at
+11.689 ms/frame. The full six-case status-icon spec and all 46 remote static checks passed without skips.
 
 ## For views that build on it
 
