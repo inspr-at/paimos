@@ -1541,13 +1541,13 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 					t.Fatal("Go build cache restore and save must run only on GitHub-hosted runners")
 				}
 				delete(cache, "if")
-				// AEON-1713 keeps every CI execution job hosted. Verify its full
-				// hosted shard partition before projecting onto the historical pool
-				// expressions; all other pinned fields and checks remain required.
+				// AEON-1713 keeps every CI execution job hosted. Verify the guarded
+				// four-way/essential/full partition before projecting onto the historical
+				// pool expressions; all other pinned fields and checks remain required.
 				const oldRoute = `contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && `
 				matrix := treeMap(treeMap(j["strategy"])["matrix"])
-				if j["runs-on"] != "ubuntu-latest" || matrix["shard"] != `${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}` {
-					t.Fatal("CI Go execution must stay hosted with the complete essential/full partition")
+				if j["runs-on"] != "ubuntu-latest" || matrix["shard"] != `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}` {
+					t.Fatal("CI Go execution must stay hosted with the complete guarded four-way/essential/full partition")
 				}
 				j["runs-on"] = `${{ fromJSON(` + oldRoute + `needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 				matrix["shard"] = `${{ fromJSON(` + oldRoute + `needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
