@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,6 +35,129 @@ func TestRepositoryWorkflows(t *testing.T) {
 	}
 	if len(problems) != 0 {
 		t.Fatal(strings.Join(problems, "\n"))
+	}
+}
+
+// Risk: a public-repository event or an edited route could reach the fixed
+// renderer. GitHub's workflow-restricted org runner group owns admission;
+// these controls keep our checked-in side of that boundary fail closed.
+func TestVisualCaptureRunnerBoundary(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/visual-capture.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems, err := checkWorkflow("visual-capture.yml", body); err != nil || len(problems) != 0 {
+		t.Fatalf("dedicated manual capture rejected: %v %v", problems, err)
+	}
+	mutations := map[string]struct {
+		want string
+		edit func(map[string]any)
+	}{
+		"missing manual trigger": {"only on workflow_dispatch", func(w map[string]any) { w["on"] = nil }},
+		"scalar trigger":         {"only on workflow_dispatch", func(w map[string]any) { w["on"] = "workflow_dispatch" }},
+		"writable token":         {"contents: read and no secrets", func(w map[string]any) { w["permissions"] = map[string]any{"contents": "write"} }},
+		"inherited secret":       {"contents: read and no secrets", func(w map[string]any) { w["env"] = map[string]any{"KEY": "${{ secrets.APP_KEY }}"} }},
+		"hosted setting": {"only the two prepared", func(w map[string]any) {
+			mapping(mapping(mapping(mapping(w["on"])["workflow_dispatch"])["inputs"])["visual_renderer"])["options"] = []any{"baseline"}
+		}},
+		"wrong runner": {"prepared agm2 labels", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["visual-reference-capture"])["runs-on"] = "ubuntu-latest"
+		}},
+		"extra job": {"exactly one job", func(w map[string]any) {
+			mapping(w["jobs"])["extra"] = map[string]any{"runs-on": []any{"self-hosted", "linux", "x64", "agm2"}}
+		}},
+		"job environment": {"no environment", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["visual-reference-capture"])["environment"] = "production"
+		}},
+		"job token override": {"inherited read-only", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["visual-reference-capture"])["permissions"] = map[string]any{"actions": "write"}
+		}},
+		"missing refusal": {"refuse a non-main ref", func(w map[string]any) {
+			job := mapping(mapping(w["jobs"])["visual-reference-capture"])
+			job["steps"] = job["steps"].([]any)[1:]
+		}},
+		"skipped refusal": {"refuse a non-main ref", func(w map[string]any) {
+			mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["steps"].([]any)[0])["if"] = "false"
+		}},
+		"weakened ref check": {"refuse a non-main ref", func(w map[string]any) {
+			step := mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["steps"].([]any)[0])
+			step["run"] = strings.Replace(step["run"].(string), `"$GITHUB_REF" != refs/heads/main`, "false", 1)
+		}},
+		"persisted credentials": {"without persisted credentials", func(w map[string]any) {
+			mapping(mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["steps"].([]any)[1])["with"])["persist-credentials"] = true
+		}},
+		"arbitrary checkout": {"dispatched main SHA", func(w map[string]any) {
+			mapping(mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["steps"].([]any)[1])["with"])["ref"] = "work/unreviewed"
+		}},
+		"mutable image": {"digest-pinned Playwright", func(w map[string]any) {
+			mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["container"])["image"] = "mcr.microsoft.com/playwright:latest"
+		}},
+	}
+	for _, event := range []string{"pull_request", "pull_request_target", "push", "merge_group", "schedule", "workflow_run", "workflow_call", "repository_dispatch"} {
+		mutations["added event/"+event] = struct {
+			want string
+			edit func(map[string]any)
+		}{"only on workflow_dispatch", func(w map[string]any) { mapping(w["on"])[event] = nil }}
+	}
+	for name, mutation := range mutations {
+		t.Run(name, func(t *testing.T) {
+			var workflow map[string]any
+			if err := yaml.Unmarshal(body, &workflow); err != nil {
+				t.Fatal(err)
+			}
+			mutation.edit(workflow)
+			if got := strings.Join(checkWorkflowPolicy("visual-capture.yml", workflow), "\n"); !strings.Contains(got, mutation.want) {
+				t.Fatalf("unsafe capture accepted or wrong rejection: %q, want %q", got, mutation.want)
+			}
+		})
+	}
+	for _, name := range []string{"ci.yml", "nightly-full.yml", "another.yml", "visual-capture.yaml"} {
+		t.Run("runner reserved/"+name, func(t *testing.T) {
+			problems, err := checkWorkflow(name, body)
+			if err != nil || !strings.Contains(strings.Join(problems, "\n"), "agm2 is reserved to visual-capture.yml") {
+				t.Fatalf("another workflow admitted the fixed renderer: %v %v", problems, err)
+			}
+		})
+	}
+	ci := readPolicyWorkflows(t)["ci.yml"]
+	for _, selection := range []string{"self-hosted", "[self-hosted, linux, x64]", routedRunner, "${{ matrix.runner }}"} {
+		t.Run("CI remains hosted/"+selection, func(t *testing.T) {
+			changed := strings.Replace(string(ci), "runs-on: ubuntu-latest", "runs-on: "+selection, 1)
+			problems, err := checkWorkflow("ci.yml", []byte(changed))
+			if err != nil || !strings.Contains(strings.Join(problems, "\n"), "must use literal runs-on: ubuntu-latest") {
+				t.Fatalf("CI self-hosted route admitted: %v %v", problems, err)
+			}
+		})
+	}
+	var workflow map[string]any
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	run := mapping(mapping(mapping(workflow["jobs"])["visual-reference-capture"])["steps"].([]any)[0])["run"].(string)
+	for _, sample := range []struct {
+		event, ref, workflowRef string
+		allowed                 bool
+	}{
+		{"workflow_dispatch", "refs/heads/main", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", true},
+		{"workflow_dispatch", "refs/heads/work/candidate", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"workflow_dispatch", "refs/tags/main", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"merge_group", "refs/heads/gh-readonly-queue/main/pr-42", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"pull_request", "refs/pull/42/merge", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"push", "refs/heads/main", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"workflow_dispatch", "refs/heads/main", "fork/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+	} {
+		t.Run("actual refusal/"+sample.event+"/"+sample.ref, func(t *testing.T) {
+			cmd := exec.Command("bash", "-c", run)
+			cmd.Env = scenarioEnviron(map[string]string{"GITHUB_EVENT_NAME": sample.event, "GITHUB_REF": sample.ref, "GITHUB_WORKFLOW_REF": sample.workflowRef})
+			out, err := cmd.CombinedOutput()
+			if sample.allowed {
+				if err != nil {
+					t.Fatalf("main dispatch refused: %v %s", err, out)
+				}
+			} else if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), "Fixed renderer capture requires") {
+				t.Fatalf("unsafe event/ref did not fail with the refusal: %v %s", err, out)
+			}
+		})
 	}
 }
 

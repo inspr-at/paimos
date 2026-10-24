@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -61,6 +62,73 @@ function reportOnlyManifest() {
     }
   }
   return visual
+}
+
+// Execute the real dispatch helper with isolated git/gh stubs. This proves the
+// route and published-SHA checks without contacting GitHub or dispatching work.
+function verifyCandidateDispatch(cpu: { model: string, flagsSHA256: string }) {
+  const directory = mkdtempSync(join(tmpdir(), 'visual-capture-dispatch-'))
+  try {
+    const scriptRoot = join(directory, 'scripts/test-prune')
+    const bin = join(directory, 'bin')
+    mkdirSync(scriptRoot, { recursive: true }); mkdirSync(bin); mkdirSync(join(directory, 'web'))
+    writeFileSync(join(directory, 'web/package.json'), '{"type":"module"}')
+    for (const name of ['lead-commands.sh', 'visual-renderer.mjs'])
+      cpSync(new URL(`../../scripts/test-prune/${name}`, import.meta.url), join(scriptRoot, name))
+    const calls = join(directory, 'calls.jsonl')
+    const sha = 'a'.repeat(40)
+    writeFileSync(join(bin, 'git'), `#!/usr/bin/env node
+if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(['rev-parse', 'HEAD'])) process.exit(2)
+console.log('${sha}')
+`)
+    writeFileSync(join(bin, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs'); const args = process.argv.slice(2)
+fs.appendFileSync(process.env.AEON_CAPTURE_TEST_CALLS, JSON.stringify(args) + '\\n')
+if (args[0] === 'api') console.log(process.env.AEON_CAPTURE_TEST_PUBLISHED_SHA)
+else if (args[0] !== 'workflow' || args[1] !== 'run') process.exit(2)
+`)
+    for (const command of ['git', 'gh']) chmodSync(join(bin, command), 0o700)
+    const visual = structuredClone(manifest)
+    const path = join(scriptRoot, 'visual-manifest.json')
+    const invoke = (ref: string, setting: string, published = sha) => {
+      writeFileSync(calls, '')
+      const result = spawnSync('bash', [join(scriptRoot, 'lead-commands.sh'), 'dispatch-candidate', ref, setting], {
+        cwd: directory, encoding: 'utf8', timeout: 10_000,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, AEON_CAPTURE_TEST_CALLS: calls, AEON_CAPTURE_TEST_PUBLISHED_SHA: published },
+      })
+      assert.equal(result.error, undefined)
+      return { ...result, calls: readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) }
+    }
+    const fixedSettings = Object.entries(visual.rendererPreparation.settings).filter(([, policy]: [string, any]) => policy.machine)
+    writeFileSync(path, JSON.stringify(visual))
+    for (const [setting] of fixedSettings) {
+      const refused = invoke('main', setting)
+      assert.equal(refused.status, 1); assert.match(refused.stderr, /OPS-pinned CPU identity/); assert.deepEqual(refused.calls, [])
+    }
+    for (const [, policy] of fixedSettings as [string, any][])
+      Object.assign(policy.machine, { cpuModel: cpu.model, cpuFlagsSHA256: cpu.flagsSHA256 })
+    writeFileSync(path, JSON.stringify(visual))
+    for (const [setting] of fixedSettings) {
+      const dispatched = invoke('main', setting)
+      assert.equal(dispatched.status, 0, dispatched.stderr)
+      assert.deepEqual(dispatched.calls, [
+        ['api', 'repos/inspr-at/paimos/commits/main', '--jq', '.sha'],
+        ['workflow', 'run', 'visual-capture.yml', '--repo', 'inspr-at/paimos', '--ref', 'main', '-f', `visual_renderer=${setting}`],
+      ])
+      const branch = invoke('work/candidate', setting)
+      assert.equal(branch.status, 1); assert.match(branch.stderr, /require the published main ref/); assert.deepEqual(branch.calls, [])
+      const stale = invoke('main', setting, 'b'.repeat(40))
+      assert.equal(stale.status, 1); assert.match(stale.stderr, /Published ref does not match/); assert.equal(stale.calls.length, 1)
+    }
+    const hosted = invoke('work/candidate', 'skia-runtime-disabled')
+    assert.equal(hosted.status, 0, hosted.stderr)
+    assert.deepEqual(hosted.calls, [
+      ['api', 'repos/inspr-at/paimos/commits/work/candidate', '--jq', '.sha'],
+      ['workflow', 'run', 'ci.yml', '--repo', 'inspr-at/paimos', '--ref', 'work/candidate', '-f', 'visual_capture=true', '-f', 'visual_renderer=skia-runtime-disabled'],
+    ])
+    const staleHosted = invoke('work/candidate', 'skia-runtime-disabled', 'b'.repeat(40))
+    assert.equal(staleHosted.status, 1); assert.match(staleHosted.stderr, /Published ref does not match/); assert.equal(staleHosted.calls.length, 1)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 }
 
 test('visual references require approval, immutable attachment bytes and every exact member', async () => {
@@ -284,6 +352,20 @@ test('visual references require approval, immutable attachment bytes and every e
   const [fixedSetting, fixedPolicy] = Object.entries(manifest.rendererPreparation.settings).find(([, setting]) => setting.machine && setting.browserArgs.length === 1)!
   const fixedLabel = fixedPolicy.machine.runnerLabel
   assert.throws(() => preparedRenderer(manifest, fixedSetting), /OPS-pinned CPU identity/)
+  const fixedEnv = { ...candidateEnv, AEON_VISUAL_RENDERER_SETTING: fixedSetting, GITHUB_WORKFLOW: 'Visual capture',
+    GITHUB_REF: 'refs/heads/main', GITHUB_WORKFLOW_REF: 'inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main' }
+  assert.equal(captureEnabled(manifest, fixedEnv), true)
+  assert.throws(() => captureVisual(manifest, fixedEnv), /OPS-pinned CPU identity/)
+  for (const unsafe of [
+    { GITHUB_WORKFLOW: 'CI' }, { GITHUB_EVENT_NAME: 'pull_request' }, { GITHUB_EVENT_NAME: 'merge_group' },
+    { GITHUB_REF: 'refs/heads/work/candidate' }, { GITHUB_REF: 'refs/tags/main' }, { GITHUB_WORKFLOW_REF: '' },
+    { GITHUB_WORKFLOW_REF: 'fork/paimos/.github/workflows/visual-capture.yml@refs/heads/main' },
+    { AEON_VISUAL_RENDERER_SETTING: 'skia-runtime-disabled' },
+  ]) assert.throws(() => captureEnabled(manifest, { ...fixedEnv, ...unsafe }), /only by the manual/)
+  const pinnedFixture = structuredClone(manifest)
+  Object.assign(pinnedFixture.rendererPreparation.settings[fixedSetting].machine, { cpuModel: cpu.model, cpuFlagsSHA256: cpu.flagsSHA256 })
+  assert.equal(captureVisual(pinnedFixture, fixedEnv).renderer.machine.cpuModel, cpu.model)
+  verifyCandidateDispatch(cpu)
   const machineVisual = structuredClone(manifest)
   machineVisual.renderer.machine = { runnerLabel: fixedLabel, cpuModel: cpu.model, cpuFlagsSHA256: cpu.flagsSHA256 }
   assertMachine(machineVisual, { env: { AEON_VISUAL_RUNNER: fixedLabel }, cpu })
@@ -329,6 +411,9 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.doesNotMatch(job, /playwright install|bounded-apt|install-fonts|FONTCONFIG/)
   }
   assert.equal(checkContainerPin(workflow, manifest, manifest), true)
+  const fixedWorkflow = readFileSync(new URL('../../.github/workflows/visual-capture.yml', import.meta.url), 'utf8')
+  assert.equal(checkContainerPin(workflow, manifest, manifest, undefined, fixedWorkflow), true)
+  assert.throws(() => checkContainerPin(workflow, manifest, manifest, undefined, fixedWorkflow.replaceAll(renderer.container.digest, 'sha256:' + '0'.repeat(64))), /Fixed capture container pin differs/)
   assert.throws(() => checkContainerPin(workflow, candidateVisual, manifest), /Raster setting or fixed machine changed without regenerated, approved baselines/)
   const bumped = structuredClone(manifest); bumped.renderer.container.digest = 'sha256:' + '1'.repeat(64)
   const bumpedWorkflow = workflow.replaceAll(renderer.container.digest, bumped.renderer.container.digest)

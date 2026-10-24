@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Visual capture
+
+# OPS-444: GitHub's org runner group must allow exactly
+# inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main.
+# This public repository's PRs and merge queue must never enter that group.
+on:
+  workflow_dispatch:
+    inputs:
+      visual_renderer:
+        description: 'Prepared fixed renderer; refuses capture until OPS pins the in-container CPU identity'
+        required: true
+        type: choice
+        options: [agm2-baseline, agm2-skia-runtime-disabled]
+        default: agm2-baseline
+
+permissions:
+  contents: read
+
+jobs:
+  visual-reference-capture:
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        runner: [1, 2]
+    runs-on: [self-hosted, linux, x64, agm2]
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+      options: --ipc=host --init
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 60
+    env:
+      PW_RETRIES: '0'
+      PW_WORKERS: '1'
+      AEON_REQUIRE_BACKEND: 'off'
+      AEON_VISUAL_CAPTURE: '1'
+      AEON_VISUAL_RENDERER_SETTING: ${{ inputs.visual_renderer }}
+      AEON_VISUAL_RUNNER: agm2
+      AEON_VISUAL_CONTAINER_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+    steps:
+      - name: Refuse capture outside the trusted main workflow
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$GITHUB_REF" != refs/heads/main ] || [ "$GITHUB_WORKFLOW_REF" != inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main ]; then
+            echo '::error::Fixed renderer capture requires visual-capture.yml dispatched on main.'
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Trust the visual container checkout
+        run: git config --global --add safe.directory "$(pwd -P)"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.22.1"
+      - name: Record runner CPU evidence before capture
+        run: node scripts/test-prune/visual-renderer.mjs cpu-evidence web/test-results/cpu-evidence.json
+      - name: Verify the container pin and baseline update policy
+        run: node scripts/test-prune/visual-container-check.mjs
+      - name: Require OPS-pinned prepared renderer before installing dependencies
+        run: node scripts/test-prune/visual-renderer.mjs prepare "$AEON_VISUAL_RENDERER_SETTING" "$RUNNER_TEMP/visual-renderer.json"
+      - name: Install locked web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Capture the same commit twice with strict quality checks
+        run: |
+          set -euo pipefail
+          node scripts/test-prune/visual-candidates.mjs specs > "$RUNNER_TEMP/visual-specs.txt"
+          mapfile -t specs < "$RUNNER_TEMP/visual-specs.txt"
+          npm --prefix web test -- "${specs[@]}" --workers=1 --retries=0 --reporter=line --output=test-results/container-run-1/capture-run
+          node scripts/test-prune/visual-candidates.mjs web/test-results/container-run-1/capture-run web/test-results/container-run-1/linux-candidate
+          npm --prefix web test -- "${specs[@]}" --workers=1 --retries=0 --reporter=line --output=test-results/container-run-2/capture-run
+          node scripts/test-prune/visual-candidates.mjs web/test-results/container-run-2/capture-run web/test-results/container-run-2/linux-candidate
+      - name: Record candidate handoff
+        if: always()
+        run: echo 'Candidate evidence only. Both fixed-renderer jobs capture the same main SHA twice. CPU pins, byte identity, changed-checkpoint review and explicit approval remain required before publication or activation.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload both candidate captures and CPU evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-linux-candidate-${{ github.sha }}-${{ github.run_attempt }}-runner-${{ matrix.runner }}
+          path: |
+            web/test-results/container-run-1/
+            web/test-results/container-run-2/
+            web/test-results/cpu-evidence.json
+          retention-days: 7
+          if-no-files-found: error
