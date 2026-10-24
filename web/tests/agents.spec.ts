@@ -1297,7 +1297,8 @@ test('assistant admission waiting sort retries after hover and focus leave the s
 
 test('assistant policy refusals remain visible in rows and the stable existing activity panel', async ({ page }, testInfo) => {
   test.setTimeout(150_000)
-  const { work, errors } = await setup(page)
+  const { work } = await setup(page)
+  const errors = watchErrors(page)
   work.preferences['ui.agents.sections'] = { dial: false }
   const now = Date.now(), { items } = assistantEvidence(now, me.id)
   const amy = items.find(item => item.display_name === 'Amy')!

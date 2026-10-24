@@ -545,19 +545,32 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		}
 	}
 	if !in.ActionRequest {
-		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET assistant_policy_project_id=$2::uuid WHERE id=$1::uuid`, id, project); err != nil {
-			return err
-		}
 		var recipient string
 		var policyKey *string
 		if err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,assistant_policy_key FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &policyKey); err != nil {
+			return err
+		}
+		policyProject := project
+		if in.adapterTestID != "" && in.adapterTestID == in.To && target == nil {
+			// The implicit pull adapter's project is an authorized inspection
+			// context, not project work. Its person-only live test is ordinary
+			// free principal-inbox transport and still checks inbox scopes.
+			var implicit bool
+			if err := tx.QueryRow(ctx, `SELECT messaging_only IS TRUE FROM principals WHERE id=$1::uuid`, recipient).Scan(&implicit); err != nil {
+				return err
+			}
+			if implicit {
+				policyProject = ""
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET assistant_policy_project_id=nullif($2,'')::uuid WHERE id=$1::uuid`, id, policyProject); err != nil {
 			return err
 		}
 		key := ""
 		if policyKey != nil {
 			key = *policyKey
 		}
-		refusal, err := assistantDeliveryPolicyTx(ctx, tx, p, recipient, project, id, key, appendEvent)
+		refusal, err := assistantDeliveryPolicyTx(ctx, tx, p, recipient, policyProject, id, key, appendEvent)
 		if err != nil {
 			return err
 		}

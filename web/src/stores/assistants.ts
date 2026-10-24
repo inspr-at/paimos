@@ -195,7 +195,7 @@ export const useAssistants = defineStore('assistants', () => {
         // the same Desk store once per burst, without another routine sweep.
         if (refreshApprovals) await desk.refresh()
         if (stopped || epoch !== generation) return
-        if (refreshIdentity) { await load(); await loadHistory() }
+        if (refreshIdentity) { await load(); void loadHistory() }
         if (!refreshRoutines || stopped || epoch !== generation) return
         // A hint received during discovery must be read after that snapshot.
         if (routineFlight) await routineFlight
