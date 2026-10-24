@@ -117,6 +117,12 @@ func TestReviewRoundOutcomes(t *testing.T) {
 	if got := personPost(imported, "imported-design-one"); got.Code != 200 {
 		t.Fatalf("import replay: %d %s", got.Code, got.Body.String())
 	}
+	// Complete the fixture's review processes before the work leaf can
+	// legitimately become a parent; retain the sessions and submitted proof.
+	inTenant(t, d, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='completed' WHERE ticket_node_id=$1`, ticket)
+		return err
+	})
 	insertNode(t, d, owner, "work", "RND-4", "A new child", &ticket)
 	parent := in
 	parent.Round = 2
