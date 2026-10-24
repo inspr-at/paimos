@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
+import { checkAssignment, fullUIInventory, loadAssignment, main, rebalance, shardArgs } from './full-ui-qa-shard.mjs'
 
 const workflow = readFileSync(new URL('../.github/workflows/full-ui-qa.yml', import.meta.url), 'utf8')
 const source = workflow.split('  qa-source:\n')[1].split('\n  qa-shard:')[0]
@@ -92,6 +93,67 @@ test('full inventory runs in five hosted shards without retries, filters or secr
   const auditTimeoutMs = Number(audit.match(/test.setTimeout\(([\d_]+)\)/)[1].replaceAll('_', ''))
   const shardTimeoutMs = Number(shard.match(/timeout-minutes: (\d+)/)[1]) * 60_000
   assert.ok(shardTimeoutMs >= auditTimeoutMs + 15 * 60_000, 'allow the existing audit timeout plus setup and other specs')
+})
+
+// Risk: an explicit list could silently omit a new nested spec, or execute an
+// existing file twice. Negative controls corrupt the actual checked-in list.
+test('Full QA assignment covers the config exactly once and rejects missing and duplicate specs', () => {
+  const assignment = loadAssignment(), inventory = fullUIInventory()
+  assert.equal(checkAssignment(assignment, inventory).specs, inventory.length)
+  assert.ok(inventory.includes('tests/visual/tickets.spec.ts'))
+  assert.ok(!inventory.includes('tests/performance.spec.ts'))
+  const missing = structuredClone(assignment), removed = missing.specs.pop()
+  assert.throws(() => checkAssignment(missing, inventory), { message: `Unassigned Full QA spec: ${removed.file}` })
+  const duplicate = structuredClone(assignment), repeated = { ...duplicate.specs[0], shard: duplicate.specs[0].shard % 5 + 1 }
+  duplicate.specs.push(repeated)
+  assert.throws(() => checkAssignment(duplicate, inventory), { message: `Duplicate Full QA spec: ${repeated.file}` })
+  assert.throws(() => checkAssignment(assignment, [...inventory, 'tests/nested/new.spec.ts']),
+    { message: 'Unassigned Full QA spec: tests/nested/new.spec.ts' })
+  assert.throws(() => checkAssignment(assignment, inventory.slice(1)), /Stale or unexpected Full QA spec:/)
+})
+
+test('Full QA uses the canonical whole-file writer and spreads all ten audit files', () => {
+  const assignment = loadAssignment()
+  assert.deepEqual(rebalance(assignment), assignment)
+  assert.deepEqual(rebalance({ ...assignment, specs: [...assignment.specs].reverse() }), assignment)
+  const report = checkAssignment(assignment)
+  assert.equal(report.projected.reduce((sum, row) => sum + row.audits.length, 0), 10)
+  for (const row of report.projected) assert.ok(row.audits.length > 0, `shard ${row.shard} must share the audit`)
+  const minutes = report.projected.map(row => row.minutes)
+  assert.ok(Math.max(...minutes) - Math.min(...minutes) < 0.1, 'duration balancing keeps the five projections within six seconds')
+})
+
+test('Full QA launch selects each exact file once, keeps launch policy and propagates failure', async () => {
+  const assignment = loadAssignment(), inventory = fullUIInventory(), calls = []
+  // A regex metacharacter in a checkout path must not widen file selection.
+  const root = '/checkout/aeon.[qa]+/web'
+  const env = { CI: 'true', RUNNER_ENVIRONMENT: 'github-hosted', PLAYWRIGHT_JSON_OUTPUT_FILE: 'test-results/full-ui-results.json' }
+  assert.match(shard, /if \[ "\$\{\{ matrix.config \}\}" = playwright.ui.config.ts \]; then\n\s+node ..\/scripts\/full-ui-qa-shard.mjs '\$\{\{ matrix.partition \}\}';\n\s+else/)
+  for (let i = 1; i <= 5; i++) {
+    const code = await main([`${i}/5`], { assignment, expected: inventory, root, env, out() {},
+      run: async (args, options) => { calls.push({ args, options }); return i === 3 ? 17 : 0 } })
+    assert.equal(code, i === 3 ? 17 : 0)
+  }
+  for (const { args, options } of calls) {
+    assert.deepEqual(args.slice(0, 7), ['test', '--config=playwright.ui.config.ts', '--workers=1', '--retries=0',
+      '--forbid-only', '--trace=retain-on-failure', '--reporter=github,line,json'])
+    assert.equal(options.env, env)
+    assert.ok(args.every(arg => !/^--(?:shard|grep|test-list|project|pass-with-no-tests)/.test(arg)))
+  }
+  for (const file of inventory) {
+    const matches = calls.flatMap(call => call.args.slice(7)).filter(pattern => new RegExp(pattern).test(`${root}/${file}`))
+    assert.equal(matches.length, 1, `${file} must run once`)
+    assert.equal(new RegExp(matches[0]).test(`${root}/${file}.extra`), false)
+    assert.equal(new RegExp(matches[0]).test(`${root}/tests/${file}`), false)
+  }
+  assert.equal(calls.reduce((count, call) => count + call.args.length - 7, 0), inventory.length)
+  assert.throws(() => shardArgs(assignment, '1/4'), /requires shard i\/5/)
+  assert.throws(() => shardArgs(assignment, '0/5'), /Shard must satisfy/)
+  await assert.rejects(main(['1/5'], { assignment, expected: inventory, env: {}, run() { assert.fail('local browser launch') } }),
+    /Full QA shards require GitHub-hosted CI/)
+  const missing = { ...assignment, specs: assignment.specs.slice(1) }
+  await assert.rejects(main(['1/5'], { assignment: missing, expected: inventory, env, run() { assert.fail('launch before guard') } }),
+    /Unassigned Full QA spec:/)
 })
 
 test('aggregate check reports source failures and every shard failure or cancellation', () => {
