@@ -63,7 +63,7 @@ jobs:
       - name: Verify the container pin and baseline update policy
         run: node scripts/test-prune/visual-container-check.mjs
       - name: Require OPS-pinned prepared renderer before installing dependencies
-        run: node scripts/test-prune/visual-renderer.mjs prepare "$AEON_VISUAL_RENDERER_SETTING" "$RUNNER_TEMP/visual-renderer.json"
+        run: node scripts/test-prune/visual-renderer.mjs prepare "$AEON_VISUAL_RENDERER_SETTING" web/test-results/prepared-renderer.json
       - name: Install locked web dependencies
         working-directory: web
         run: npm ci

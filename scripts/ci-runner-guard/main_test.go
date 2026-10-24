@@ -2,12 +2,16 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -216,6 +220,84 @@ func TestVisualCaptureRunnerBoundary(t *testing.T) {
 			}
 		})
 	}
+	// Risk: unset production CPU pins can hide an invalid prepare output path.
+	// Run the workflow's real command with pins only in an isolated fixture.
+	t.Run("actual prepare command", func(t *testing.T) {
+		var prepare string
+		for _, value := range mapping(mapping(workflow["jobs"])["visual-reference-capture"])["steps"].([]any) {
+			step := mapping(value)
+			if step["name"] == "Require OPS-pinned prepared renderer before installing dependencies" {
+				prepare, _ = step["run"].(string)
+			}
+		}
+		if prepare == "" {
+			t.Fatal("capture workflow must execute renderer preparation")
+		}
+		script, err := os.ReadFile("../test-prune/visual-renderer.mjs")
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := os.ReadFile("../test-prune/visual-manifest.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, setting := range []string{"agm2-baseline", "agm2-skia-runtime-disabled"} {
+			t.Run(setting, func(t *testing.T) {
+				var visual map[string]any
+				if err := json.Unmarshal(manifest, &visual); err != nil {
+					t.Fatal(err)
+				}
+				policy := mapping(mapping(mapping(visual["rendererPreparation"])["settings"])[setting])
+				machine := mapping(policy["machine"])
+				if machine == nil {
+					t.Fatal("prepared setting must define a fixed machine")
+				}
+				machine["cpuModel"] = "Synthetic CPU"
+				machine["cpuFlagsSHA256"] = strings.Repeat("a", 64)
+				pinned, err := json.Marshal(visual)
+				if err != nil {
+					t.Fatal(err)
+				}
+				directory := t.TempDir()
+				for path, body := range map[string][]byte{
+					"scripts/test-prune/visual-renderer.mjs":  script,
+					"scripts/test-prune/visual-manifest.json": pinned,
+					"web/package.json":                        []byte(`{"type":"module"}`),
+				} {
+					path = filepath.Join(directory, path)
+					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", prepare)
+				cmd.Dir = directory
+				cmd.Env = scenarioEnviron(map[string]string{
+					"AEON_VISUAL_RENDERER_SETTING": setting,
+					"RUNNER_TEMP":                  filepath.Join(directory, "runner-temp"),
+				})
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("workflow prepare command failed with pinned fixture: %v\n%s", err, out)
+				}
+				body, err := os.ReadFile(filepath.Join(directory, "web/test-results/prepared-renderer.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var renderer map[string]any
+				if err := json.Unmarshal(body, &renderer); err != nil {
+					t.Fatal(err)
+				}
+				if renderer["rasterSetting"] != setting || !reflect.DeepEqual(renderer["machine"], machine) ||
+					!reflect.DeepEqual(mapping(renderer["browser"])["args"], policy["browserArgs"]) {
+					t.Fatal("prepared output must retain the selected setting, CPU pins and browser arguments")
+				}
+			})
+		}
+	})
 }
 
 func TestTreeProofFailureCannotSkipRequiredChecks(t *testing.T) {
