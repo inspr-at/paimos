@@ -67,15 +67,6 @@ func TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff(t *testing.T) {
 	if state, reason := receiptState(t, w, denied.ID); state != "failed" || reason != "assistant_weekly_budget_exhausted" {
 		t.Fatalf("refused receipt %s %s", state, reason)
 	}
-	page, err := m.base.pending(t.Context(), w.agent, 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, msg := range page {
-		if msg.ID == denied.ID {
-			t.Fatal("denied work was readable")
-		}
-	}
 	// Revoke after acceptance. The final claim, before any network attempt,
 	// must fail the first message and preserve the exact refusal reason.
 	policy.AllowedScopes = []string{"inbox.send"}
@@ -94,6 +85,9 @@ func TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff(t *testing.T) {
 	if state, reason := receiptState(t, w, first.ID); state != "failed" || reason != "assistant_scope_denied: inbox.read" {
 		t.Fatalf("revoked receipt %s %s", state, reason)
 	}
+	if page, err := m.base.pending(t.Context(), w.agent, 0, 100); err != nil || len(page) != 0 {
+		t.Fatalf("denied work was readable: count=%d err=%v", len(page), err)
+	}
 	policy.AllowedScopes = []string{"inbox.read", "inbox.send"}
 	policy.WeeklyBudget.Amount = "2"
 	put()
@@ -110,8 +104,8 @@ func TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff(t *testing.T) {
 	if _, err := dispatcher.DispatchOne(t.Context(), w.agent.TenantID); err != nil || calls != 1 {
 		t.Fatal("handoff replay")
 	}
-	if countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, w.agent.ID) != 1 {
-		t.Fatal("send/claim created a reservation beyond the granted run")
+	if countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, w.agent.ID) != 2 {
+		t.Fatal("expected one run hold and one hosted message charge")
 	}
 	// Scope revocation also applies to pull pickup after work was queued.
 	if _, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "grok_bot:worker", Adapter: "grok_bot_routine", Kind: "pull", Role: "primary", MaximumLevel: "simple"}); err != nil {
@@ -303,9 +297,9 @@ func putMessageAssistantPolicy(t *testing.T, w *world, policy assistants.Policy)
 	}
 }
 
-// Risk: accepting one hosted message consumes a whole week's run allowance.
-// Messages check admission, while only person-granted work reserves spend.
-func TestAssistantAdapterMessagesPreserveRunBudget(t *testing.T) {
+// Risk: message processing is free or takes the entire week's allowance.
+// Fixed per-message charges share the allowance with person-granted runs.
+func TestAssistantAdapterMessagesChargeBudget(t *testing.T) {
 	w, m, project, _ := messagingWorld(t)
 	if _, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "grok_bot:worker", Adapter: "grok_bot_routine", Kind: "https_webhook", Ref: "https://8.8.8.8/policy-fixture", Secret: "synthetic-adapter-fixture", Role: "primary", MaximumLevel: "simple"}); err != nil {
 		t.Fatal(err)
@@ -320,7 +314,7 @@ func TestAssistantAdapterMessagesPreserveRunBudget(t *testing.T) {
 	for _, key := range []string{"first-send", "second-send"} {
 		msg, err := m.commitMessage(t.Context(), w.sender, project, compatInput("grok_bot:worker", key))
 		if err != nil {
-			t.Fatalf("message %s should fit unchanged run allowance: %v", key, err)
+			t.Fatalf("message %s should fit per-message allowance: %v", key, err)
 		}
 		if worked, err := dispatcher.DispatchOne(t.Context(), w.agent.TenantID); err != nil || !worked {
 			t.Fatalf("handoff %s: worked=%v err=%v", key, worked, err)
@@ -329,19 +323,19 @@ func TestAssistantAdapterMessagesPreserveRunBudget(t *testing.T) {
 			t.Fatalf("message %s receipt=%s reason=%s", key, state, reason)
 		}
 	}
-	if calls != 2 || countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, w.agent.ID) != 0 {
-		t.Fatalf("message transport reserved run budget; provider calls=%d", calls)
+	if calls != 2 || countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1 AND amount_micro=10000`, w.agent.ID) != 2 {
+		t.Fatalf("message transport did not charge per-message budget; provider calls=%d", calls)
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(t.Context(), tx, w.agent.TenantID); err != nil {
 			return err
 		}
-		d, err := assistants.EvaluateTx(t.Context(), tx, assistants.Check{TenantID: w.agent.TenantID, PrincipalID: w.agent.ID, ProjectID: project, Operation: "routine.admit", Key: "granted-run", Charge: true, Ceiling: &policy.WeeklyBudget})
+		d, err := assistants.EvaluateTx(t.Context(), tx, assistants.Check{TenantID: w.agent.TenantID, PrincipalID: w.agent.ID, ProjectID: project, Operation: "routine.admit", Key: "granted-run", Charge: true, Ceiling: &assistants.Budget{Amount: "0.98", Unit: "USD"}})
 		if err != nil {
 			return err
 		}
 		if !d.Allowed {
-			t.Fatalf("message sends exhausted routine allowance: %s", d.Reason)
+			t.Fatalf("routine could not reserve the remaining allowance: %s", d.Reason)
 		}
 		return assistants.AppendDecisionsTx(t.Context(), tx, w.admin, d)
 	}); err != nil {

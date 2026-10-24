@@ -68,12 +68,6 @@ type ActionReceipt struct {
 
 var actionKindPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 
-// Structured human_input is mandatory and is the primary refusal gate. These
-// recognizers also refuse common asks directed at a person when human_input=none.
-// Mentioning credentials or requesting deploy/merge approval is not a human ask.
-// This is defense in depth, not arbitrary natural-language classification.
-var forbiddenHumanAsk = regexp.MustCompile(`(?i)(?:\b(?:(?:give|send|provide|paste|share|supply)[ \t]+(?:me|us)|(?:gib|sende|schick|teile)[ \t]+(?:mir|uns))\b[^\n.!?]{0,120}\b(?:secrets?|tokens?|api[ _-]?keys?|passwords?|passwörter|passwort|zugangsdaten|schlüssel)\b|\b(?:secrets?|tokens?|api[ _-]?keys?|passwords?|passwörter|passwort|zugangsdaten|schlüssel)\b[^\n.!?]{0,80}\b(?:from you|from the user|from the human|von dir|vom menschen)\b|\b(?:please|you must|you need to|can you|could you|bitte|du musst)\b[^\n.!?]{0,80}\b(?:manually|manual steps?|run this|run the command|execute this|manuell|ausführen)\b)`)
-
 func normalizeAction(in *ActionInput) error {
 	fields := []struct {
 		text *string
@@ -104,10 +98,7 @@ func normalizeAction(in *ActionInput) error {
 }
 
 func actionRefusal(in ActionInput) string {
-	if in.HumanInput != "none" || forbiddenHumanAsk.MatchString(strings.Join([]string{in.What, in.Why, in.ExactEffect, in.ReversalPlan}, "\n")) {
-		return "Refused: agents must use existing authorized tools; asking a person for secrets, tokens or manual steps is prohibited."
-	}
-	return ""
+	return assistants.HumanInputRefusal(in.HumanInput, in.What, in.Why, in.ExactEffect, in.ReversalPlan)
 }
 
 func actionDigest(p tenant.Principal, project string, in ActionInput) string {
@@ -231,7 +222,7 @@ func (m *Module) requestAction(ctx context.Context, p tenant.Principal, authoriz
 			return err
 		}
 		out.Reason = actionRefusal(in)
-		policy, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "action.request", Key: "action/" + out.ID, Scopes: []string{"approvals.request"}, RequireBudget: true, Now: now})
+		policy, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "action.request", Key: "action/" + out.ID, Scopes: []string{"approvals.request"}, RequireBudget: true, Now: now, Refusal: out.Reason})
 		if err != nil {
 			return err
 		}

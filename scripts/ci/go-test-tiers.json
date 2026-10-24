@@ -7980,7 +7980,7 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAgentScope","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterMessagesPreserveRunBudget","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterMessagesChargeBudget","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff","tier":"ESSENTIAL"}
     ,

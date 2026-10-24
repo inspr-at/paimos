@@ -128,6 +128,10 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 			return assistants.AppendDecisionsTx(ctx, tx, person, d)
 		}
 		if permanentAgentDispatchError(err) {
+			var refusal *workorders.Error
+			if errors.As(err, &refusal) && strings.HasPrefix(refusal.Error(), "assistant_") {
+				return hold(refusal.Error(), true)
+			}
 			return hold("agent_owner_authority_revoked", true)
 		}
 		if err != nil {

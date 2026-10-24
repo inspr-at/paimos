@@ -32,9 +32,11 @@ type Policy struct {
 	AllowedProjects                       []string `json:"allowed_projects"`
 	AllowedScopes                         []string `json:"allowed_scopes"`
 	WeeklyBudget                          Budget   `json:"weekly_budget"`
+	MessageCost                           string   `json:"message_cost,omitempty"`
 	OutwardActionRule                     string   `json:"outward_action_rule"`
 	NeverAskPersonForSecretsOrManualSteps bool     `json:"never_ask_person_for_secrets_or_manual_steps"`
 	ApproverPersonIDs                     []string `json:"approver_person_ids,omitempty"`
+	DelegatorPersonIDs                    []string `json:"delegator_person_ids,omitempty"`
 	WeeklyResetDay                        *int     `json:"weekly_reset_day,omitempty"`
 }
 
@@ -68,28 +70,39 @@ type PolicyReader interface {
 func DefaultPolicy() Policy {
 	scopes := authz.MessagingAssistantScopes()
 	slices.Sort(scopes)
-	return Policy{AllowedProjects: []string{}, AllowedScopes: scopes, WeeklyBudget: Budget{Amount: "0", Unit: "USD"}, OutwardActionRule: "approval_required", NeverAskPersonForSecretsOrManualSteps: true}
+	return Policy{AllowedProjects: []string{}, AllowedScopes: scopes, WeeklyBudget: Budget{Amount: "0", Unit: "USD"}, MessageCost: "0.01", OutwardActionRule: "approval_required", NeverAskPersonForSecretsOrManualSteps: true}
 }
 
 func cleanPolicy(p Policy) (Policy, error) {
 	if p.AllowedProjects == nil || p.AllowedScopes == nil || len(p.AllowedProjects) > 100 || len(p.AllowedScopes) > 200 || !decimal.MatchString(p.WeeklyBudget.Amount) || !slices.Contains([]string{"USD", "EUR", "tokens", "credits"}, p.WeeklyBudget.Unit) || p.OutwardActionRule != "approval_required" || !p.NeverAskPersonForSecretsOrManualSteps {
 		return Policy{}, errInput
 	}
-	p.AllowedProjects = slices.Clone(p.AllowedProjects)
-	p.AllowedScopes = slices.Clone(p.AllowedScopes)
-	if len(p.ApproverPersonIDs) > 32 || p.WeeklyResetDay != nil && (*p.WeeklyResetDay < 0 || *p.WeeklyResetDay > 6) {
+	if p.MessageCost == "" {
+		p.MessageCost = "0.01"
+		if p.WeeklyBudget.Unit == "tokens" || p.WeeklyBudget.Unit == "credits" {
+			p.MessageCost = "1"
+		}
+	}
+	if amount, err := micro(p.MessageCost); err != nil || amount <= 0 {
 		return Policy{}, errInput
 	}
-	p.ApproverPersonIDs = slices.Clone(p.ApproverPersonIDs)
-	approvers := map[string]bool{}
-	for i, id := range p.ApproverPersonIDs {
-		id = strings.ToLower(id)
-		if !uuid.MatchString(id) || approvers[id] {
-			return Policy{}, errInput
-		}
-		approvers[id], p.ApproverPersonIDs[i] = true, id
+	p.AllowedProjects = slices.Clone(p.AllowedProjects)
+	p.AllowedScopes = slices.Clone(p.AllowedScopes)
+	if len(p.ApproverPersonIDs) > 32 || len(p.DelegatorPersonIDs) > 32 || p.WeeklyResetDay != nil && (*p.WeeklyResetDay < 0 || *p.WeeklyResetDay > 6) {
+		return Policy{}, errInput
 	}
-	slices.Sort(p.ApproverPersonIDs)
+	for _, ids := range []*[]string{&p.ApproverPersonIDs, &p.DelegatorPersonIDs} {
+		*ids = slices.Clone(*ids)
+		seen := map[string]bool{}
+		for i, id := range *ids {
+			id = strings.ToLower(id)
+			if !uuid.MatchString(id) || seen[id] {
+				return Policy{}, errInput
+			}
+			seen[id], (*ids)[i] = true, id
+		}
+		slices.Sort(*ids)
+	}
 	seen := map[string]bool{}
 	for i, id := range p.AllowedProjects {
 		id = strings.ToLower(id)

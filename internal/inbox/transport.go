@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -237,7 +238,12 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 			if err := tx.QueryRow(ctx, `SELECT coalesce(assistant_policy_key,'message/'||id::text) FROM inbox_messages WHERE id=$1::uuid`, messageID).Scan(&policyKey); err != nil {
 				return err
 			}
-			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.send", Key: policyKey, Scopes: []string{"inbox.read"}, RequireBudget: true, Now: now})
+			// A retry can incur another vendor charge even after an error or
+			// timeout. Every new lease therefore needs its own positive hold.
+			if attempts > 0 {
+				policyKey += "/attempt/" + strconv.Itoa(attempts+1)
+			}
+			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.send", Key: policyKey, Scopes: []string{"inbox.read"}, Charge: true, MessageCost: true, Now: now})
 			if err != nil {
 				return err
 			}

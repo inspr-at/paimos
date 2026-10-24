@@ -397,7 +397,7 @@ func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 			project = *in.ProjectID
 		}
 		var err error
-		refusal, err = assistantDeliveryPolicyTx(ctx, tx, p, in.RecipientPrincipalID, project, id, "", func(c events.Change) error { policyChanges = append(policyChanges, c); return nil })
+		refusal, err = assistantDeliveryPolicyTx(ctx, tx, p, in.RecipientPrincipalID, project, id, "", in.Body, func(c events.Change) error { policyChanges = append(policyChanges, c); return nil })
 		if err != nil {
 			return Message{}, err
 		}

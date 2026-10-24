@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -572,7 +573,7 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		if policyKey != nil {
 			key = *policyKey
 		}
-		refusal, err := assistantDeliveryPolicyTx(ctx, tx, p, recipient, policyProject, id, key, appendEvent)
+		refusal, err := assistantDeliveryPolicyTx(ctx, tx, p, recipient, policyProject, id, key, in.Body, appendEvent)
 		if err != nil {
 			return err
 		}
@@ -709,7 +710,14 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 		order, comparison = "DESC", "($2=0 OR c.sent_event_id<$2)"
 	}
 	page := compatPage{Items: []CompatMessage{}, NextAfter: after, Preamble: untrustedMessagePreamble}
+	audit := &failureAudit{}
+	r = r.WithContext(context.WithValue(r.Context(), failureAuditKey{}, audit))
 	err = db.InTenant(r.Context(), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+		if !inspect {
+			if err := attachedmsg.Lock(r.Context(), tx); err != nil {
+				return err
+			}
+		}
 		if !inspect && sessionID == nil {
 			if err := m.base.recordAssistantPull(r.Context(), tx, p, authz.Scope{ProjectID: project}); err != nil {
 				return err
@@ -803,10 +811,24 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 		if inspect {
 			return nil
 		}
+		// Use canonical inbox rows so server-written routine bindings and
+		// per-message policy keys are identical on both supported pull routes.
+		items := make([]Message, 0, len(page.Items))
+		for _, v := range page.Items {
+			msg, err := scanMessage(tx.QueryRow(r.Context(), `SELECT `+messageCols+` FROM inbox_messages m WHERE id=$1::uuid`, v.ID))
+			if err != nil {
+				return err
+			}
+			items = append(items, msg)
+		}
+		items, decisions, err := m.base.assistantPickupPolicyTx(r.Context(), tx, p, items)
+		if err != nil {
+			return err
+		}
 		// A recipient pull hands these messages over; with a session it is also
 		// that generation listening at a turn boundary (AEON-280).
-		ids := make([]string, 0, len(page.Items))
-		for _, v := range page.Items {
+		ids := make([]string, 0, len(items))
+		for _, v := range items {
 			ids = append(ids, v.ID)
 		}
 		alive, err := handOver(r.Context(), tx, p, SeenHook, ids)
@@ -821,9 +843,14 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 		}
 		page.Items = kept
 		if sessionID != nil {
-			return MarkSessionSeen(r.Context(), tx, *sessionID, SeenHook)
+			if err := MarkSessionSeen(r.Context(), tx, *sessionID, SeenHook); err != nil {
+				return err
+			}
 		}
-		return nil
+		if err := assistants.AppendDecisionsTx(r.Context(), tx, p, decisions...); err != nil {
+			return err
+		}
+		return audit.flush()
 	})
 	if err != nil {
 		messagingFailure(w, err)

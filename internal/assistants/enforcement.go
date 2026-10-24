@@ -24,6 +24,7 @@ type Check struct {
 	TenantID, PrincipalID, ProjectID, Operation, Key string
 	Scopes                                           []string
 	Charge, RequireBudget, RequireAssistant          bool
+	MessageCost                                      bool // use the current policy's per-message amount
 	Ceiling                                          *Budget
 	Now                                              time.Time
 	Refusal                                          string // a server-selected denial from the surrounding person grant
@@ -133,12 +134,18 @@ func EvaluateTx(ctx context.Context, tx pgx.Tx, in Check) (Decision, error) {
 		return deny("assistant_policy_invalid")
 	}
 	if in.Charge || in.RequireBudget {
+		if in.MessageCost {
+			in.Ceiling = &Budget{Amount: a.Policy.MessageCost, Unit: a.Policy.WeeklyBudget.Unit}
+		}
 		if in.Now.IsZero() {
 			if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&in.Now); err != nil {
 				return d, err
 			}
 		}
 		limit, _ := micro(a.Policy.WeeklyBudget.Amount)
+		if limit <= 0 {
+			return deny("assistant_weekly_budget_exhausted")
+		}
 		start, end := Week(in.Now, a.Policy)
 		var used int64
 		// Count reservation timestamps against the current calendar too, so
@@ -159,6 +166,12 @@ func EvaluateTx(ctx context.Context, tx pgx.Tx, in Check) (Decision, error) {
 			}
 			if used > limit {
 				return deny("assistant_weekly_budget_exhausted")
+			}
+			if in.MessageCost {
+				amount, _ := micro(a.Policy.MessageCost)
+				if reserved < amount {
+					return deny("assistant_message_cost_exceeds_hold")
+				}
 			}
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return d, err
@@ -259,4 +272,28 @@ func ValidateCeiling(b *Budget) bool {
 	}
 	value, err := micro(b.Amount)
 	return err == nil && value > 0 && slices.Contains([]string{"USD", "EUR", "tokens", "credits"}, b.Unit)
+}
+
+// RoutineGrantRefusalTx checks owner consent separately from ordinary project
+// authority. Callers hold the tenant fence and still check live person/agent
+// permissions. Older bindings and a withdrawn delegator fail closed too.
+func RoutineGrantRefusalTx(ctx context.Context, tx pgx.Tx, tenantID, principalID, personID string) (string, error) {
+	var assistant bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='agent' AND (agent_class='assistant' OR messaging_only IS TRUE))`, tenantID, principalID).Scan(&assistant); err != nil {
+		return "", err
+	}
+	if !assistant {
+		return "", nil
+	}
+	a, err := getTx(ctx, tx, tenantID, principalID)
+	if errors.Is(err, ErrNotFound) {
+		return "assistant_policy_unavailable", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if personID != a.OwnerPersonID && !slices.Contains(a.Policy.DelegatorPersonIDs, personID) {
+		return "assistant_owner_consent_required", nil
+	}
+	return "", nil
 }

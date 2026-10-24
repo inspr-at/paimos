@@ -15,17 +15,24 @@ import (
 )
 
 // Callers hold the inbox access fence. Execution spend belongs to the receiving
-// assistant. Transport only checks admission; routines reserve separately.
-func assistantDeliveryPolicyTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, recipient, project, message, key string, collect func(events.Change) error) (string, error) {
+// assistant. Acceptance checks affordability; the final exposure reserves it.
+func assistantDeliveryPolicyTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, recipient, project, message, key, body string, collect func(events.Change) error) (string, error) {
 	if key == "" {
 		key = "message/" + message
 	}
 	checks := []assistants.Check{{TenantID: sender.TenantID, PrincipalID: sender.ID, ProjectID: project, Operation: "message.send", Key: "send/" + message, Scopes: []string{"inbox.send"}}}
+	var person bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='person')`, sender.TenantID, recipient).Scan(&person); err != nil {
+		return "", err
+	}
+	if person {
+		checks[0].Refusal = assistants.HumanInputRefusal("none", body)
+	}
 	var push bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_message_targets t JOIN assistant_adapters a ON a.tenant_id=t.tenant_id AND a.target_id=t.id WHERE t.tenant_id=$1::uuid AND t.principal_id=$2::uuid AND t.project_id=nullif($3,'')::uuid AND t.enabled AND t.role='primary' AND t.target_kind='https_webhook')`, sender.TenantID, recipient, project).Scan(&push); err != nil {
 		return "", err
 	}
-	checks = append(checks, assistants.Check{TenantID: sender.TenantID, PrincipalID: recipient, ProjectID: project, Operation: "adapter.accept", Key: key, Scopes: []string{"inbox.read"}, RequireBudget: push})
+	checks = append(checks, assistants.Check{TenantID: sender.TenantID, PrincipalID: recipient, ProjectID: project, Operation: "adapter.accept", Key: key, Scopes: []string{"inbox.read"}, RequireBudget: push, MessageCost: true})
 	for _, check := range checks {
 		d, err := assistants.EvaluateTx(ctx, tx, check)
 		if err != nil {
@@ -99,6 +106,11 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 			if len(raw) > 8192 || json.Unmarshal(raw, &owner) != nil || string(raw) != string(current) {
 				grantRefusal = "assistant_routine_grant_changed"
 			} else {
+				consent, err := assistants.RoutineGrantRefusalTx(ctx, tx, p.TenantID, p.ID, owner.GrantedBy)
+				if err != nil {
+					return nil, nil, err
+				}
+				grantRefusal = consent
 				permission := "nodes.write"
 				if owner.Destination.Kind == "knowledge" {
 					permission = "knowledge.write"
@@ -118,7 +130,7 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 				}
 			}
 		}
-		d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.pull", Key: key, Scopes: scopes, RequireBudget: run != "", Refusal: grantRefusal})
+		d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.pull", Key: key, Scopes: scopes, Charge: true, MessageCost: true, Refusal: grantRefusal})
 		if err != nil {
 			return nil, nil, err
 		}

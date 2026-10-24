@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
@@ -637,6 +638,13 @@ func (e *Executor) park(ctx context.Context, tx pgx.Tx, owner tenant.Principal, 
 		return nil, err
 	}
 	q, _, err := questions.New(nil).AskTx(ctx, tx, owner, r.project, questions.Input{RequestID: r.id, TicketID: r.work, Question: "How should this routine continue?", Context: "Routine run " + r.id + " stopped: " + reason + ". Its finite recovery budget and original lineage remain retained.", Options: []questions.Option{{ID: "park", Title: "Keep parked", Answer: "Keep this routine run parked."}, {ID: "revise", Title: "Revise scope or limits", Answer: "A person will revise the routine before another authorized run."}}, Recommend: "park", Why: "Further automatic attempts require a separate person-owned decision.", Meanwhile: "parked", MeanwhileText: "No automatic retry is queued.", BlockedNodeIDs: []string{r.work}, SuggestedOutcome: "once"})
+	var refusal *assistants.PolicyRefusal
+	if errors.As(err, &refusal) {
+		if _, err := tx.Exec(ctx, `UPDATE routine_runs SET state='held',updated_at=clock_timestamp() WHERE id=$1`, r.id); err != nil {
+			return nil, err
+		}
+		return map[string]any{"state": "held", "reason": refusal.Reason}, nil
+	}
 	if err != nil {
 		return nil, err
 	}

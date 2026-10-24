@@ -9,10 +9,11 @@ their inbox-only restriction. A policy grants no key, role or project authority.
 
 Policy is checked under the access-change fence at inbox acceptance, the final
 hosted push claim, sleeping-host pull pickup, outward action request/approval,
-and agent-owned routine admission/result writes. Ordinary internal inbox
-transport is free. Hosted sends check the receiving assistant's remaining
-allowance without reserving it; only routine work reserves its person-granted
-budget independently of the caller. Classified assistants use
+and agent-owned routine admission/result writes. Both principal-inbox and
+project-message listening apply the same per-message pickup policy. Hosted
+delivery attempts and first pull pickups reserve the receiving assistant's
+`message_cost`, independently of the sender. Ordinary principals incur no
+assistant charge. Classified assistants use
 the registered hosted adapter or durable inbox; the generic webhook wake path
 cannot execute their work. An action approval records consent only; it does
 not execute an effect or grant a reusable permission.
@@ -46,7 +47,19 @@ a known maximum, admission reserves all remaining weekly allowance. Another
 charge then fails before dispatch.
 
 Reservations are atomic under the tenant fence and bind an operation key.
-Retries and the adapter handoff of the same run reuse its reservation.
+Repeated pulls reuse the message reservation. A routine's initial assignment
+handoff reuses its run reservation when that hold covers `message_cost`, so an
+unknown-cost routine can still receive its assignment without a second hold.
+An insufficient run hold is refused as `assistant_message_cost_exceeds_hold`.
+Every further hosted delivery attempt reserves another message amount: an
+HTTP error or timeout can still incur provider cost. Holds commit at exposure
+and are conservatively settled at that amount, including uncertain failures.
+Failures before the claim or pickup transaction commits roll back the hold
+and its audit together. No provider-reported cost releases allowance.
+An omitted message cost defaults to 0.01 USD/EUR or 1 token/credit; policy
+editors retain the amount and delegation allowlist even without displaying
+controls for them. The policy owner can set any positive exact message amount.
+A weekly budget of zero admits no work, including a previously reserved item.
 Assistant-reported costs remain unverified telemetry and never release a hold,
 including a reported zero. Changing budget units while this week contains
 other-unit reservations fails closed. A changed reset weekday still counts
@@ -66,6 +79,11 @@ agent key cannot approve its own outward request.
 The person creates a project routine and grants its agent owner and fixed
 ticket-comment, new-ticket or proposed-Knowledge destination through the
 existing agent-owner endpoint. The grant may include `budget_ceiling`.
+For an assistant, the granting person must be its canonical owner or an active
+canonical person explicitly listed in `delegator_person_ids`. This consent is
+rechecked at grant, dispatch, pickup and result. Previously saved assignments
+without consent are held with `assistant_owner_consent_required` before inbox
+delivery or spending; withdrawing delegation also closes that assignment.
 Messaging-only principals cannot acquire routine or result-write authority
 through this flow. A person may link an already scoped regular agent into the
 assistant class only when every usable key is bound to that same canonical
@@ -94,6 +112,14 @@ successor session or other principal is substituted.
 
 ## Threat notes
 
+Actions, assistant messages addressed to people, Desk questions (including all
+answer options) and routine result titles/bodies use one human-input refusal
+classifier. Recognized requests for secrets, tokens or manual steps fail with
+a receipt before delivery or publication. Desk callers commit only the refusal
+evidence; no question or native interaction remains. This bounded recognizer
+is defense in depth, not a semantic guarantee for arbitrary paraphrases or
+communications outside PAIMOS.
+
 A compromised assistant key remains limited by live key/person/role grants,
 policy scopes, project RLS, budget holds and its person-granted result
 destination. It cannot widen policy, remove messaging-only restrictions,
@@ -101,6 +127,13 @@ release a hold by reporting cheap work, approve outward effects, accept its
 Knowledge proposal, or turn delegation into merge/deploy authority. Unknown
 cost and unavailable policy fail closed. Provider response bodies and
 credentials never enter policy receipts or events.
+
+A hostile routine author cannot bind another person's assistant without that
+owner's explicit delegation, spend its allowance through an old invalid grant,
+or publish recognized prohibited human requests as routine results. An inbox
+sender can consume only the receiving assistant's finite configured allowance
+in permitted projects. The sender cannot bypass the same pickup checks through
+project listening or trigger a hosted retry without another budget hold.
 
 A malicious lead cannot substitute another owner, tenant, instance, session,
 assistant or result destination, expand the person grant, or charge itself in
@@ -112,7 +145,13 @@ assistant identity must be explicitly person-linked for assistant execution.
 
 Coverage: `TestAssistantPolicyAdmissionMatrix` (including lock contention and
 injected policy weeks), `TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff`,
-`TestAssistantAdapterMessagesPreserveRunBudget`,
+`TestAssistantAdapterMessagesChargeBudget`,
+`TestAssistantProjectListenRechecksPickupPolicy`,
+`TestAssistantMessageBudgetCoversPushAndPull`,
+`TestAssistantRoutineAssignmentRequiresOwnerConsent`,
+`TestAssistantHumanAskRefusedOnInboxAndProjectMessages`,
+`TestAssistantHumanAskRefusedInDeskQuestion`,
+`TestAssistantHumanAskRefusedInRoutineResult`,
 `TestAssistantPullRefusalDoesNotStarveAllowedMessages`,
 `TestAssistantOutwardPolicyApproversAndReceipts`,
 `TestAssistantLeadDelegationPolicyAndResults`, and
