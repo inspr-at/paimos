@@ -77,6 +77,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .rr-actions { flex: none; display: flex; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--line); }
 .rr-actions .btn { gap: 8px; min-height: 44px; }
 @media (max-width: 520px) {
+  .rr-head, .rr-lists, .rr-actions { padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right)); }
   .rr-head { padding-top: max(16px, env(safe-area-inset-top)); }
   .rr-lists { grid-template-columns: minmax(0, 1fr); }
   .rr-actions { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
@@ -84,5 +85,5 @@ ul { list-style: none; margin: 0; padding: 0; }
 </style>
 <style>
 .floating.review-rounds-panel { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-.floating.review-rounds-panel.bottom { top: 0; bottom: 0; height: auto !important; max-height: 100dvh !important; border-radius: 0; }
+.floating.review-rounds-panel.pop.bottom { top: 0; bottom: 0; height: auto !important; max-height: 100dvh !important; padding: 0; border-radius: 0; }
 </style>
