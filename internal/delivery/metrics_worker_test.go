@@ -744,124 +744,130 @@ func TestDeliveryHistoryStopsAtLowRemaining(t *testing.T) {
 }
 
 func TestDeliveryHistoryIncrementalVolumeAndPendingRunsSurviveRestart(t *testing.T) {
-	// Risk: a busy-day refresh rereads all stored attempts, loses queued runs
-	// behind a watermark, or relies on process memory to retain its position.
-	day := time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
-	cutoff, now := day.Add(12*time.Hour), day.Add(13*time.Hour)
-	all := make([]githubRun, 0, 904)
-	for id := int64(1); id <= 904; id++ {
-		created := day.Add(time.Duration(id) * 30 * time.Second)
-		if id > 900 {
-			created = cutoff.Add(time.Duration(id-900) * time.Minute)
-		}
-		conclusion := "success"
-		all = append(all, githubRun{ID: id, Attempt: 2, Name: "CI", Path: defaultCIWorkflow, Event: "push", Branch: "main", Head: strings.Repeat("a", 40), Status: "completed", Conclusion: &conclusion, Created: created, Updated: created.Add(time.Minute)})
-	}
-	all[903].Created = cutoff.Add(-time.Minute)
-	all[903].Status = "in_progress"
-	calls, oldAttemptReads := 0, 0
-	read := func(endpoint string, out any) error {
-		calls++
-		u, _ := url.Parse(endpoint)
-		var body any
-		switch {
-		case strings.HasPrefix(u.Path, "/actions/workflows/"):
-			from, until := day, now
-			if parts := strings.Split(u.Query().Get("created"), ".."); len(parts) == 2 {
-				var err error
-				from, err = time.Parse(time.RFC3339, parts[0])
+	// The 186-run case matches the incident-day CI count; 900 is a stress case.
+	for _, storedRuns := range []int64{186, 900} {
+		t.Run(strconv.FormatInt(storedRuns, 10), func(t *testing.T) {
+			// Risk: a busy-day refresh rereads all stored attempts, loses queued runs
+			// behind a watermark, or relies on process memory to retain its position.
+			day := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
+			cutoff, now := day.Add(12*time.Hour), day.Add(13*time.Hour)
+			all := make([]githubRun, 0, storedRuns+4)
+			for id := int64(1); id <= storedRuns+4; id++ {
+				created := day.Add(time.Duration(id) * 30 * time.Second)
+				if id > storedRuns {
+					created = cutoff.Add(time.Duration(id-storedRuns) * time.Minute)
+				}
+				conclusion := "success"
+				all = append(all, githubRun{ID: id, Attempt: 2, Name: "CI", Path: defaultCIWorkflow, Event: "push", Branch: "main", Head: strings.Repeat("a", 40), Status: "completed", Conclusion: &conclusion, Created: created, Updated: created.Add(time.Minute)})
+			}
+			all[storedRuns+3].Created = cutoff.Add(-time.Minute)
+			all[storedRuns+3].Status = "in_progress"
+			calls, oldAttemptReads := 0, 0
+			read := func(endpoint string, out any) error {
+				calls++
+				u, _ := url.Parse(endpoint)
+				var body any
+				switch {
+				case strings.HasPrefix(u.Path, "/actions/workflows/"):
+					from, until := day, now
+					if parts := strings.Split(u.Query().Get("created"), ".."); len(parts) == 2 {
+						var err error
+						from, err = time.Parse(time.RFC3339, parts[0])
+						if err != nil {
+							t.Fatal(err)
+						}
+						until, err = time.Parse(time.RFC3339, parts[1])
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					var runs []githubRun
+					for i := len(all) - 1; i >= 0; i-- {
+						if !all[i].Created.Before(from) && !all[i].Created.After(until) {
+							runs = append(runs, all[i])
+						}
+					}
+					page, _ := strconv.Atoi(u.Query().Get("page"))
+					start := min((page-1)*100, len(runs))
+					end := min(start+100, len(runs))
+					body = githubRunsPage{Total: len(runs), Runs: runs[start:end]}
+				case strings.HasPrefix(u.Path, "/actions/runs/"):
+					var id int64
+					var attempt int
+					if strings.Contains(u.Path, "/attempts/") {
+						if _, err := fmt.Sscanf(u.Path, "/actions/runs/%d/attempts/%d", &id, &attempt); err != nil {
+							t.Fatal(err)
+						}
+						if id <= storedRuns {
+							oldAttemptReads++
+						}
+					} else {
+						if _, err := fmt.Sscanf(u.Path, "/actions/runs/%d", &id); err != nil {
+							t.Fatal(err)
+						}
+						attempt = 2
+					}
+					run := all[id-1]
+					run.Attempt = attempt
+					body = run
+				case u.Path == "":
+					body = map[string]string{"full_name": "example/delivery", "default_branch": "main"}
+				case u.Path == "/pulls":
+					body = []any{}
+				default:
+					t.Fatalf("unexpected endpoint %s", endpoint)
+				}
+				raw, err := json.Marshal(body)
 				if err != nil {
-					t.Fatal(err)
+					return err
 				}
-				until, err = time.Parse(time.RFC3339, parts[1])
-				if err != nil {
-					t.Fatal(err)
+				return json.Unmarshal(raw, out)
+			}
+			finish := func(cursor backfillCursor, clock time.Time, known bool) backfillCursor {
+				for step := 0; step < 100; step++ {
+					lookup := func(id int64) int {
+						if known && id <= storedRuns {
+							return 2
+						}
+						return 0
+					}
+					next, batch, err := backfillStep(read, "example/delivery", []string{defaultCIWorkflow}, cursor, clock, lookup)
+					if err != nil || batch.Calls > backfillCallBudget {
+						t.Fatalf("bounded step: calls=%d err=%v", batch.Calls, err)
+					}
+					raw, err := json.Marshal(next)
+					if err != nil {
+						t.Fatal(err)
+					}
+					// Every step is decoded as a restarted server would load it.
+					cursor = backfillCursor{}
+					if err := json.Unmarshal(raw, &cursor); err != nil {
+						t.Fatal(err)
+					}
+					if cursor.Phase == "done" {
+						return cursor
+					}
 				}
-			}
-			var runs []githubRun
-			for i := len(all) - 1; i >= 0; i-- {
-				if !all[i].Created.Before(from) && !all[i].Created.After(until) {
-					runs = append(runs, all[i])
-				}
-			}
-			page, _ := strconv.Atoi(u.Query().Get("page"))
-			start := min((page-1)*100, len(runs))
-			end := min(start+100, len(runs))
-			body = githubRunsPage{Total: len(runs), Runs: runs[start:end]}
-		case strings.HasPrefix(u.Path, "/actions/runs/"):
-			var id int64
-			var attempt int
-			if strings.Contains(u.Path, "/attempts/") {
-				if _, err := fmt.Sscanf(u.Path, "/actions/runs/%d/attempts/%d", &id, &attempt); err != nil {
-					t.Fatal(err)
-				}
-				if id <= 900 {
-					oldAttemptReads++
-				}
-			} else {
-				if _, err := fmt.Sscanf(u.Path, "/actions/runs/%d", &id); err != nil {
-					t.Fatal(err)
-				}
-				attempt = 2
-			}
-			run := all[id-1]
-			run.Attempt = attempt
-			body = run
-		case u.Path == "":
-			body = map[string]string{"full_name": "example/delivery", "default_branch": "main"}
-		case u.Path == "/pulls":
-			body = []any{}
-		default:
-			t.Fatalf("unexpected endpoint %s", endpoint)
-		}
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(raw, out)
-	}
-	finish := func(cursor backfillCursor, clock time.Time, known bool) backfillCursor {
-		for step := 0; step < 100; step++ {
-			lookup := func(id int64) int {
-				if known && id <= 900 {
-					return 2
-				}
-				return 0
-			}
-			next, batch, err := backfillStep(read, "example/delivery", []string{defaultCIWorkflow}, cursor, clock, lookup)
-			if err != nil || batch.Calls > backfillCallBudget {
-				t.Fatalf("bounded step: calls=%d err=%v", batch.Calls, err)
-			}
-			raw, err := json.Marshal(next)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Every step is decoded as a restarted server would load it.
-			cursor = backfillCursor{}
-			if err := json.Unmarshal(raw, &cursor); err != nil {
-				t.Fatal(err)
-			}
-			if cursor.Phase == "done" {
+				t.Fatal("fixture did not complete")
 				return cursor
 			}
-		}
-		t.Fatal("fixture did not complete")
-		return cursor
+			initial := finish(backfillCursor{Since: day, Phase: "runs", Day: day.Format("2006-01-02"), Page: 1, ReadUntil: &cutoff, Workflows: []string{defaultCIWorkflow}}, cutoff, false)
+			if len(initial.WaitingRuns) != 1 || initial.WaitingRuns[0] != storedRuns+4 || initial.ReadThrough == nil || !initial.ReadThrough.Equal(cutoff) {
+				t.Fatalf("pending run or watermark lost: %+v", initial)
+			}
+			all[storedRuns+3].Status = "completed"
+			calls, oldAttemptReads = 0, 0
+			finish(backfillCursor{Since: day, Phase: "runs", Day: day.Format("2006-01-02"), Page: 1}, now, false)
+			before := calls
+			calls, oldAttemptReads = 0, 0
+			final := finish(incrementalCursor(initial, cutoff, now), now, true)
+			if calls >= before/10 || oldAttemptReads != 0 || len(final.WaitingRuns) != 0 || final.ReadThrough == nil || !final.ReadThrough.Equal(now) {
+				t.Fatalf("incremental refresh: before=%d after=%d old_attempt_reads=%d cursor=%+v", before, calls, oldAttemptReads, final)
+			}
+			t.Logf("busy-day fixture (%d stored runs, 3 new runs, 1 late completion; two attempts each): requests per refresh %d -> %d", storedRuns, before, calls)
+
+		})
 	}
-	initial := finish(backfillCursor{Since: day, Phase: "runs", Day: day.Format("2006-01-02"), Page: 1, ReadUntil: &cutoff, Workflows: []string{defaultCIWorkflow}}, cutoff, false)
-	if len(initial.WaitingRuns) != 1 || initial.WaitingRuns[0] != 904 || initial.ReadThrough == nil || !initial.ReadThrough.Equal(cutoff) {
-		t.Fatalf("pending run or watermark lost: %+v", initial)
-	}
-	all[903].Status = "completed"
-	calls, oldAttemptReads = 0, 0
-	finish(backfillCursor{Since: day, Phase: "runs", Day: day.Format("2006-01-02"), Page: 1}, now, false)
-	before := calls
-	calls, oldAttemptReads = 0, 0
-	final := finish(incrementalCursor(initial, cutoff, now), now, true)
-	if calls >= before/10 || oldAttemptReads != 0 || len(final.WaitingRuns) != 0 || final.ReadThrough == nil || !final.ReadThrough.Equal(now) {
-		t.Fatalf("incremental refresh: before=%d after=%d old_attempt_reads=%d cursor=%+v", before, calls, oldAttemptReads, final)
-	}
-	t.Logf("busy-day fixture (900 stored runs, 3 new runs, 1 late completion; two attempts each): requests per refresh %d -> %d", before, calls)
 }
 
 func TestDeliveryHistoryPartialProgressAndSettingsRevisionSurviveRestart(t *testing.T) {
@@ -1080,5 +1086,16 @@ func TestDeliveryHistoryFailureLogKeepsOnlyClassifiedMetadata(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "private") || strings.Contains(output.String(), "Authorization") || strings.Contains(output.String(), "token") {
 		t.Fatal("private upstream data escaped into history diagnostics")
+	}
+	output.Reset()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	logMetricFailure(t.Context(), failure, metricError(failure, at))
+	for _, field := range []string{"status=403", "rate_limit_remaining=0", "duration_ms=1500", "timeout=false"} {
+		if !strings.Contains(output.String(), field) {
+			t.Fatalf("text diagnostic lost %s", field)
+		}
+	}
+	if strings.Contains(output.String(), "0x") || strings.Contains(output.String(), "private") {
+		t.Fatal("text diagnostic contains pointer addresses or private text")
 	}
 }

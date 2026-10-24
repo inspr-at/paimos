@@ -262,14 +262,29 @@ func logMetricFailure(ctx context.Context, failure error, diagnostic MetricReadE
 	var remaining *int
 	reset := diagnostic.ResetAt
 	if errors.As(failure, &upstream) {
-		endpoint, duration, remaining = upstream.endpoint, upstream.duration, upstream.remaining
+		if upstream.endpoint != "" {
+			endpoint = upstream.endpoint
+		}
+		duration, remaining = upstream.duration, upstream.remaining
 		if reset == nil && !upstream.reset.IsZero() {
 			reset = &upstream.reset
 		}
 	}
+	// Dereference optional values before handing them to slog: TextHandler
+	// otherwise prints pointer addresses where operators need status/counts.
+	var status, budget, resetAt any
+	if diagnostic.StatusCode != nil {
+		status = *diagnostic.StatusCode
+	}
+	if remaining != nil {
+		budget = *remaining
+	}
+	if reset != nil {
+		resetAt = reset.UTC()
+	}
 	slog.WarnContext(ctx, "delivery history read failed", "reason", diagnostic.Reason,
-		"endpoint", endpoint, "status", diagnostic.StatusCode, "rate_limit_remaining", remaining,
-		"rate_limit_reset", reset, "timeout", diagnostic.Reason == "timed_out", "duration_ms", duration.Milliseconds())
+		"endpoint", endpoint, "status", status, "rate_limit_remaining", budget,
+		"rate_limit_reset", resetAt, "timeout", diagnostic.Reason == "timed_out", "duration_ms", duration.Milliseconds())
 }
 
 func (m *Module) runMetrics(ctx context.Context) {

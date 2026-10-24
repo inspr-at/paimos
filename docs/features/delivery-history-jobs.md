@@ -95,6 +95,13 @@ Validated pages and their retry position commit together even if a later read
 fails. These fields survive a cold start without introducing a new table or
 changing the user-visible delivery-settings revision.
 
+The request-count regression covers 186 stored CI runs, matching the incident-day
+count, and a 900-run stress fixture. Both add three new runs and one late
+completion, with two attempts per run, and reload the cursor between every
+bounded step. The test prints repository requests before and after the
+incremental refresh; installation lookup, token creation and revocation add
+three requests per bounded step.
+
 ## Job and attempt ingestion (AEON-1658)
 
 Completed `workflow_run` deliveries now write exact run attempts into
