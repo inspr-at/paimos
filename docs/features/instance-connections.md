@@ -67,6 +67,13 @@ instances retain only this tab's last successful summary, explicitly dated;
 expired/revoked connections discard cached items. Consolidated badges include
 known sibling totals, and their tooltip shows each instance and stale/unknown
 coverage. Goals expands sibling rows only on click and remembers its row slots.
+Local items, including Coming, precede the instance groups. Goals shows a
+home-Desk link only when more than five sibling items wait; shorter lists
+already show every item. Row actions share the block's right edge. On phones,
+each sibling title has its own full-width text line with a clip-tip, followed by
+project and age. The confirmation account shows both name and email.
+When a sibling is unreachable, the local empty line says only “Nothing waits
+here”; the sibling section header carries its unavailable state and dated cache.
 
 Browser notices use the existing device opt-in. The initial read establishes a
 baseline; only items created after the previous successful source read can

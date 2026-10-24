@@ -283,6 +283,9 @@ test('phone status and project keys expose their full copy with text spacing', a
   await expect(page.locator('.tooltip')).toHaveText(projectKey)
   await project.dispatchEvent('pointerup', { pointerType: 'touch', pointerId: 7, button: 0, isPrimary: true })
   await page.keyboard.press('Escape')
+  // Right-aligned actions give the 390 px status enough room to fit. Keep
+  // proving the clipping fallback at the smallest supported phone width.
+  await page.setViewportSize({ width: 320, height: 950 })
   await page.addStyleTag({ content: '.instance-copy { line-height: 2 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }' })
   mock.set('down'); await page.clock.fastForward(30_000)
   const copy = row.locator('.instance-copy')

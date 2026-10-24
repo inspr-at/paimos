@@ -94,6 +94,7 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
 
 <style scoped>
 .instance-waiting { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--line); }
+.instance-waiting.goals { width: 100%; }
 .instance-line { display: flex; align-items: center; gap: 8px; height: 44px; }
 .instance-line > svg { flex: none; color: var(--ink-3); }
 .instance-copy { flex: 1; min-width: 0; color: var(--ink-2); font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums; }
@@ -103,7 +104,8 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
 .action-slot > * { grid-area: 1 / 1; }
 .action-size { visibility: hidden; padding: 0 4px; font-size: 13px; font-weight: 600; }
 .instance-action, .instance-dismiss { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-.instance-action { width: 100%; justify-content: flex-end; padding: 0; }
+.instance-action { width: 100%; }
+.goals .instance-action { justify-content: flex-end; padding: 0; }
 .instance-dismiss { width: 44px; flex: none; }
 .instance-action:focus-visible, .instance-dismiss:focus-visible, a:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
 .instance-desk { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--teal-ink); font-size: 13px; text-decoration: none; }
