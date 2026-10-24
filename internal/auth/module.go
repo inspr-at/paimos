@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/devicesessions"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -31,6 +32,8 @@ import (
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	DeviceSessions *devicesessions.Service
+	nativeLimits   nativeLimits
 	// AssistantNoticeTx uses the existing receipt-free System inbox notice path.
 	// Missing wiring fails provisioning closed.
 	AssistantNoticeTx func(context.Context, pgx.Tx, string, string, string, string) error
@@ -94,7 +97,7 @@ func New(cfg Config, pool *pgxpool.Pool) (*Module, error) {
 	if cfg.BootstrapTenantSlug == "" {
 		cfg.BootstrapTenantSlug = defaultTenantSlug
 	}
-	return &Module{cfg: cfg, pool: pool, inTenant: db.InTenant}, nil
+	return &Module{cfg: cfg, pool: pool, inTenant: db.InTenant, DeviceSessions: devicesessions.New(pool)}, nil
 }
 
 // Attach registers the module and its middleware on srv. The server calls Mount.
@@ -112,6 +115,8 @@ func Attach(srv *httpapi.Server, cfg Config) (*Module, error) {
 // always registered so the matched pattern stays the public declaration.
 // The handler returns 404 unless AEON_ENV=dev, and it never mints a session then.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/auth/native/start", m.handleNativeStart)
+	mux.HandleFunc("POST /api/auth/native/token", m.handleNativeToken)
 	mux.HandleFunc("GET /api/auth/login", m.handleLogin)
 	mux.HandleFunc("GET /api/auth/callback", m.handleCallback)
 	mux.HandleFunc("POST /api/auth/logout", m.handleLogout)

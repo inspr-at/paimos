@@ -48,6 +48,15 @@ func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	invite := strings.TrimSpace(r.URL.Query().Get("invite"))
+	if len(invite) > 128 || strings.ContainsAny(invite, " \t\r\n") {
+		invite = ""
+	}
+	m.beginLogin(w, r, slug, invite, nil)
+}
+
+// Both entry points use the same independent OIDC state, nonce and PKCE hop.
+func (m *Module) beginLogin(w http.ResponseWriter, r *http.Request, slug, invite string, native *nativeLogin) {
 	_, oc, err := m.oidcProvider(r.Context())
 	if err != nil {
 		httpapi.LogFailure(r, "oidc_provider", err)
@@ -67,11 +76,7 @@ func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifier := oauth2.GenerateVerifier()
-	invite := strings.TrimSpace(r.URL.Query().Get("invite"))
-	if len(invite) > 128 || strings.ContainsAny(invite, " \t\r\n") {
-		invite = ""
-	}
-	payload := oidcPayload{State: state, Nonce: nonce, Verifier: verifier, Tenant: slug, Invite: invite, Exp: time.Now().Add(oidcTTL).Unix()}
+	payload := oidcPayload{State: state, Nonce: nonce, Verifier: verifier, Tenant: slug, Invite: invite, Native: native, Exp: time.Now().Add(oidcTTL).Unix()}
 	if err := m.setOIDCCookie(w, payload); err != nil {
 		httpapi.LogFailure(r, "oidc_cookie", err)
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
@@ -117,7 +122,15 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("failed", "missing_code")
 		return
 	}
-	if payload.StepUp != nil {
+	if payload.Native != nil && (payload.StepUp != nil || len(r.URL.RawQuery) > 4096) {
+		fail("failed", "native_callback_refused")
+		return
+	}
+	if payload.Native != nil && !m.nativeAttempt(w, r, "callback", 60) {
+		m.clearOIDCCookie(w)
+		return
+	}
+	if payload.StepUp != nil || payload.Native != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 		r = r.WithContext(ctx)
@@ -190,6 +203,10 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		fail("unavailable", "principal_resolution")
+		return
+	}
+	if payload.Native != nil {
+		m.finishNativeLogin(w, r, payload, principal, identityID)
 		return
 	}
 	token, err := m.startSession(r.Context(), identityID, principal.TenantID, principal.ID)

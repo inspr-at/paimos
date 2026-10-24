@@ -4090,6 +4090,18 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestNativeCandidateArtifactAgentCeiling","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestNativeLoginConcurrentCallbackAndExchange","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestNativeLoginExchangeWaitsForMembershipRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestNativeLoginExpiryCleanupAndLimits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestNativeLoginHandoffAndExchange","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestNativeLoginInputBounds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestNativeLoginRejectsBindingsAndAuthorityLoss","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestNativeRoutesThroughProductionAuthentication","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestNewDefaults","tier":"GATED-FULL"}

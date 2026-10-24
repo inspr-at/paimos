@@ -28,12 +28,18 @@ var errBadCookie = errors.New("bad cookie")
 // oidcPayload is the short-lived login state: OAuth state, OIDC nonce and the PKCE verifier.
 type oidcPayload struct {
 	StepUp   *stepupLogin `json:"stepup,omitempty"`
+	Native   *nativeLogin `json:"native,omitempty"`
 	State    string       `json:"s"`
 	Nonce    string       `json:"n"`
 	Verifier string       `json:"v"`
 	Tenant   string       `json:"t"`
 	Invite   string       `json:"i,omitempty"`
 	Exp      int64        `json:"e"`
+}
+
+// The raw app state stays in the short-lived database row, never this cookie.
+type nativeLogin struct {
+	Tx string `json:"tx"`
 }
 
 func (m *Module) secureCookies() bool { return !m.cfg.Dev() }
