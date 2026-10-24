@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package routineactions
+
+import (
+	"encoding/json"
+	"net/http"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/inspr-at/paimos/internal/assistants"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+// Risk: a malicious lead expands a person grant, spends another actor's budget,
+// switches trust contexts, or receives a result intended for another session.
+// All work stays in the real app-role transactions; no provider is contacted.
+func TestAssistantLeadDelegationPolicyAndResults(t *testing.T) {
+	f := agentOwnedSetup(t)
+	f.m.WithAssistantPolicy("https://personal.example.invalid")
+	mux := f.handler.(*http.ServeMux)
+	assistants.New(f.d.App).Mount(mux)
+	inbox.New(f.d.App).Mount(mux)
+	r, assistant := f.agentRoutine()
+	policy := assistants.Policy{AllowedProjects: []string{f.project}, AllowedScopes: slices.Clone(assistant.Scopes), WeeklyBudget: assistants.Budget{Amount: "3", Unit: "USD"}, OutwardActionRule: "approval_required", NeverAskPersonForSecretsOrManualSteps: true}
+	policy.AllowedScopes = append(policy.AllowedScopes, "nodes.write")
+	link := map[string]any{"principal_id": assistant.ID, "display_name": "Governed researcher", "vendor": "grok", "owner_person_id": f.p.ID, "policy": policy}
+	// Classification itself requires an existing explicit person-bound key;
+	// it never widens a legacy messaging-only principal or creates authority.
+	f.call(f.p, "POST", "/api/assistants", link, 403)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id,person_id) VALUES($1,$2,'Inert research fixture','assistant-policy-research',repeat('0',64),$3,$4,$4)`, f.p.TenantID, assistant.ID, assistant.Scopes, f.p.ID)
+		return err
+	})
+	var linked assistants.Assistant
+	if err := json.Unmarshal(f.call(f.p, "POST", "/api/assistants", link, 201), &linked); err != nil || linked.MessagingOnly {
+		t.Fatalf("person link changed restriction: %v", err)
+	}
+	f.call(f.p, "PUT", "/api/recurrences/"+r.ID+"/agent-owner", map[string]any{"expected_revision": r.Revision, "owner_principal_id": assistant.ID, "destination": AgentDestination{Kind: "knowledge"}, "budget_ceiling": assistants.Budget{Amount: "1", Unit: "USD"}}, 200)
+	r = f.get(r.ID)
+	lead := tenant.Principal{TenantID: f.p.TenantID, Kind: tenant.Agent, Name: "Delegating lead", Scopes: slices.Clone(authz.CoordinatorKeyScopes), KeyCreatorID: f.p.ID, KeyPersonID: f.p.ID}
+	var session, unboundKey string
+	f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,agent_access_configured) VALUES($1,'agent','Delegating lead',true) RETURNING id::text`, f.p.TenantID).Scan(&lead.ID); err != nil {
+			return err
+		}
+		var role string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'delegating_coordinator','Delegating coordinator') RETURNING id::text`, f.p.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.p.TenantID, role, lead.Scopes); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, f.p.TenantID, lead.ID, role); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id,person_id) VALUES($1,$2,'Inert lead fixture','assistant-policy-lead',repeat('1',64),$3,$4,$4) RETURNING id::text`, f.p.TenantID, lead.ID, lead.Scopes, f.p.ID).Scan(&lead.KeyID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Unbound fixture','assistant-policy-unbound',repeat('2',64),$3,$4) RETURNING id::text`, f.p.TenantID, lead.ID, lead.Scopes, f.p.ID).Scan(&unboundKey); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,phase,heartbeat_at) VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','coordinator',decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'working',clock_timestamp()) RETURNING id::text`, f.p.TenantID, f.project, lead.ID, f.p.ID).Scan(&session)
+	})
+	lead.AuthKeyID = lead.KeyID
+	input := func(key string) map[string]any {
+		return map[string]any{"session_id": session, "instance": "https://personal.example.invalid", "scopes": slices.Clone(assistant.Scopes), "idempotency_key": key, "expected_revision": r.Revision}
+	}
+	path := "/api/recurrences/" + r.ID + "/delegate"
+	bad := input("outside-grant")
+	bad["scopes"] = append(slices.Clone(assistant.Scopes), "nodes.write")
+	if raw := f.call(lead, "POST", path, bad, 409); !strings.Contains(string(raw), "assistant_delegation_scope_exceeds_grant") {
+		t.Fatal("wrong scope refusal")
+	}
+	bad = input("cross-instance")
+	bad["instance"] = "https://business.example.invalid"
+	if raw := f.call(lead, "POST", path, bad, 409); !strings.Contains(string(raw), "assistant_instance_mismatch") {
+		t.Fatal("wrong instance refusal")
+	}
+	unbound := lead
+	unbound.KeyPersonID = ""
+	unbound.KeyID = unboundKey
+	unbound.AuthKeyID = unboundKey
+	f.call(unbound, "POST", path, input("unbound-key"), 403)
+	// A valid foreign key cannot resolve this tenant's routine or assistant.
+	foreign := tenant.Principal{TenantID: "20000000-0000-4000-8000-000000000001", Kind: tenant.Agent, Scopes: slices.Clone(lead.Scopes)}
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,'foreign-assistant-delegation','Foreign delegation')`, foreign.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Foreign owner') RETURNING id::text`, foreign.TenantID).Scan(&foreign.KeyPersonID); err != nil {
+		t.Fatal(err)
+	}
+	foreign.KeyCreatorID = foreign.KeyPersonID
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,agent_access_configured) VALUES($1,'agent','Foreign lead',true) RETURNING id::text`, foreign.TenantID).Scan(&foreign.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id,person_id) VALUES($1,$2,'Foreign inert fixture','assistant-policy-foreign',repeat('3',64),$3,$4,$4) RETURNING id::text`, foreign.TenantID, foreign.ID, foreign.Scopes, foreign.KeyPersonID).Scan(&foreign.KeyID); err != nil {
+		t.Fatal(err)
+	}
+	foreign.AuthKeyID = foreign.KeyID
+	f.call(foreign, "POST", path, input("cross-tenant"), 404)
+	// A coordinator cannot manufacture a person grant on an ordinary routine.
+	plain := f.input()
+	plain.Definition = &Definition{Scope: DefinitionScope{Kind: "project", ProjectID: f.project}, OwnerPrincipalID: f.p.ID}
+	noGrant := f.create(plain)
+	noGrantInput := input("missing-grant")
+	noGrantInput["expected_revision"] = noGrant.Revision
+	f.call(lead, "POST", "/api/recurrences/"+noGrant.ID+"/delegate", noGrantInput, 403)
+	var occurrences []Occurrence
+	for _, key := range []string{"one", "two", "three"} {
+		var out Occurrence
+		if err := json.Unmarshal(f.call(lead, "POST", path, input(key), 200), &out); err != nil || out.Run == nil {
+			t.Fatalf("delegation %s: %v", key, err)
+		}
+		occurrences = append(occurrences, out)
+	}
+	var replay Occurrence
+	if err := json.Unmarshal(f.call(lead, "POST", path, input("one"), 200), &replay); err != nil || replay.Run == nil || replay.Run.ID != occurrences[0].Run.ID {
+		t.Fatal("delegation retry duplicated work")
+	}
+	bad = input("one")
+	bad["instance"] = "https://business.example.invalid"
+	if raw := f.call(lead, "POST", path, bad, 409); !strings.Contains(string(raw), "delegation_idempotency_conflict") {
+		t.Fatal("changed delegation retry accepted")
+	}
+	if raw := f.call(lead, "POST", path, input("over-budget"), 409); !strings.Contains(string(raw), "assistant_weekly_budget_exhausted") {
+		t.Fatal("budget did not refuse before run creation")
+	}
+	if err := f.m.DispatchAgentRuns(t.Context(), f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := "/api/recurrences/" + r.ID + "/runs/" + occurrences[0].Run.ID + "/agent-result"
+	zero := int64(0)
+	resultInput := AgentResultInput{Status: "succeeded", Title: "Research findings", Body: "Bounded findings from the delegated task", CostMicroUSD: &zero}
+	var result AgentResult
+	if err := json.Unmarshal(f.call(assistant, "POST", resultPath, resultInput, 200), &result); err != nil || result.NodeID == "" || result.LeadMessageID == "" {
+		t.Fatalf("result/lead receipt absent: %v", err)
+	}
+	var again AgentResult
+	if err := json.Unmarshal(f.call(assistant, "POST", resultPath, resultInput, 200), &again); err != nil || !reflect.DeepEqual(again, result) {
+		t.Fatal("result retry changed its receipt")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var reservations, runs, messages int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, assistant.ID).Scan(&reservations); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM routine_runs WHERE recurrence_id=$1`, r.ID).Scan(&runs); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages m JOIN inbox_receipts r ON r.message_id=m.id WHERE m.id=$1 AND m.recipient_principal_id=$2 AND m.recipient_session_id=$3 AND r.state='queued'`, result.LeadMessageID, lead.ID, session).Scan(&messages); err != nil {
+			return err
+		}
+		if reservations != 3 || runs != 3 || messages != 1 {
+			t.Fatalf("charges=%d runs=%d lead receipts=%d", reservations, runs, messages)
+		}
+		return nil
+	})
+	// Agent-reported zero cost does not turn the booked allowance into free work.
+	f.call(lead, "POST", path, input("reported-free"), 409)
+	policy.AllowedScopes = []string{"nodes.read", Permission, "inbox.read"}
+	f.tx(func(tx pgx.Tx) error {
+		raw, _ := json.Marshal(policy)
+		_, err := tx.Exec(t.Context(), `UPDATE assistant_profiles SET policy=$2,revision=revision+1 WHERE principal_id=$1`, assistant.ID, raw)
+		return err
+	})
+	deniedPath := "/api/recurrences/" + r.ID + "/runs/" + occurrences[1].Run.ID + "/agent-result"
+	f.call(assistant, "POST", deniedPath, resultInput, 409)
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM assistant_policy_receipts WHERE principal_id=$1 AND operation='routine.result' AND NOT allowed AND reason='assistant_scope_denied: knowledge.write'`, assistant.ID).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			t.Fatalf("result scope denial receipts=%d", count)
+		}
+		return nil
+	})
+}

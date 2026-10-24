@@ -111,9 +111,6 @@ func EvaluateTx(ctx context.Context, tx pgx.Tx, in Check) (Decision, error) {
 	if a.Status != "active" {
 		return deny("assistant_disabled")
 	}
-	if in.Refusal != "" {
-		return deny(in.Refusal)
-	}
 	var ownerActive bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='person' AND status='active' AND linked_to IS NULL)`, in.TenantID, a.OwnerPersonID).Scan(&ownerActive); err != nil {
 		return d, err
@@ -128,6 +125,9 @@ func EvaluateTx(ctx context.Context, tx pgx.Tx, in Check) (Decision, error) {
 		if !slices.Contains(a.Policy.AllowedScopes, scope) {
 			return deny("assistant_scope_denied: " + scope)
 		}
+	}
+	if in.Refusal != "" {
+		return deny(in.Refusal)
 	}
 	if a.Policy.OutwardActionRule != "approval_required" || !a.Policy.NeverAskPersonForSecretsOrManualSteps {
 		return deny("assistant_policy_invalid")

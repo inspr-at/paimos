@@ -24,7 +24,7 @@ paths:
     post:
       operationId: createAssistant
       summary: Create or link a hosted assistant identity and policy
-      description: "Person owner only, requires live workspace agents.create and keys.manage. Creates an agent principal in the assistant class with the existing messaging-only restriction and no key or role grant. An optional principal_id links an existing messaging-only identity owned by the same person, preserving its principal ID, keys, scopes, expiry, inbox and status. The existing messaging assistant create, rotate and revoke lifecycle remains available. The owner must be the caller’s active canonical person in this tenant."
+      description: "Person owner only, requires live workspace agents.create and keys.manage. Creates an agent principal in the assistant class with the existing messaging-only restriction and no key or role grant. An optional principal_id links an existing messaging-only identity owned by the same person, or a regular agent whose usable keys are all explicitly bound to that canonical person. Linking preserves messaging-only restrictions, principal ID, keys, scopes, expiry, inbox and status; it grants no roles or scopes. The existing messaging assistant create, rotate and revoke lifecycle remains available. The owner must be the caller’s active canonical person in this tenant."
       requestBody:
         required: true
         content:

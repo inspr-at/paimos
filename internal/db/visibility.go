@@ -113,10 +113,16 @@ func uuidLike(s string) bool {
 func EnterPrincipal(ctx context.Context, tx pgx.Tx, tenantID, principalID string, creator, person any) error {
 	if person == nil {
 		_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, tenantID, principalID, creator)
-		return err
+		if err != nil {
+			return err
+		}
+		return narrowAssistantVisibility(ctx, tx, tenantID, principalID)
 	}
 	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, tenantID, principalID, creator, person)
-	return err
+	if err != nil {
+		return err
+	}
+	return narrowAssistantVisibility(ctx, tx, tenantID, principalID)
 }
 
 // ActingPersonID returns the server-resolved request ceiling, or the API key's

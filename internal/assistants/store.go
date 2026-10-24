@@ -224,16 +224,32 @@ func (m *Module) create(ctx context.Context, p tenant.Principal, in createInput)
 		}
 		if out.PrincipalID != "" {
 			old, err := getTx(ctx, tx, p.TenantID, out.PrincipalID)
+			if errors.Is(err, ErrNotFound) {
+				// An explicit person link may classify an already scoped agent.
+				// Every usable key must carry that same person grant. No key,
+				// messaging-only marker, role or permission is changed here.
+				var eligible bool
+				err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals a WHERE a.tenant_id=$1::uuid AND a.id=$2::uuid AND a.kind='agent' AND a.status='active' AND NOT coalesce(a.messaging_only,false)
+ AND NOT (a.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
+ AND EXISTS(SELECT 1 FROM agent_keys k JOIN principals o ON o.tenant_id=k.tenant_id AND o.id=k.person_id WHERE k.tenant_id=a.tenant_id AND k.principal_id=a.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now()) AND coalesce(o.linked_to,o.id)=$3::uuid AND o.kind='person' AND o.status='active')
+ AND NOT EXISTS(SELECT 1 FROM agent_keys k LEFT JOIN principals o ON o.tenant_id=k.tenant_id AND o.id=k.person_id WHERE k.tenant_id=a.tenant_id AND k.principal_id=a.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now()) AND (o.id IS NULL OR coalesce(o.linked_to,o.id)<>$3::uuid OR o.kind<>'person' OR o.status<>'active')))`, p.TenantID, out.PrincipalID, owner).Scan(&eligible)
+				if err == nil && eligible {
+					old = Assistant{Snapshot: Snapshot{OwnerPersonID: owner, Status: "active"}}
+				} else if err == nil {
+					err = authz.ErrForbidden
+				}
+			}
 			if err != nil {
 				return err
 			}
-			if old.OwnerPersonID != owner || !old.MessagingOnly {
+			if old.OwnerPersonID != owner {
 				return authz.ErrForbidden
 			}
 			if old.Revision != 0 {
 				return ErrConflict
 			}
 			out.Status = old.Status
+			out.MessagingOnly = old.MessagingOnly
 		} else {
 			if err := nameAvailableTx(ctx, tx, p.TenantID, out.DisplayName, ""); err != nil {
 				return err

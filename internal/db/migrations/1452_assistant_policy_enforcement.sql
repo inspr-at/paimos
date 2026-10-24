@@ -50,4 +50,6 @@ CREATE POLICY project_visibility ON assistant_policy_receipts AS RESTRICTIVE
  WITH CHECK (project_id IS NULL OR (SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]));
 
 ALTER TABLE inbox_messages ADD COLUMN assistant_policy_key text;
+ALTER TABLE inbox_messages ADD COLUMN assistant_policy_project_id uuid;
+ALTER TABLE inbox_message_deliveries ADD COLUMN assistant_policy_reason text;
 ALTER TABLE routine_runs ADD COLUMN agent_delegation jsonb;

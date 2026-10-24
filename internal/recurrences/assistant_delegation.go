@@ -23,6 +23,7 @@ type delegationContextKey struct{}
 type AgentDelegation struct {
 	SessionID       string   `json:"session_id"`
 	LeadPrincipalID string   `json:"lead_principal_id"`
+	LeadKeyID       string   `json:"lead_key_id"`
 	OwnerPersonID   string   `json:"owner_person_id"`
 	Instance        string   `json:"instance"`
 	Scopes          []string `json:"scopes"`
@@ -32,13 +33,17 @@ type AgentDelegation struct {
 
 func errInvalidAssistantGrant() error { return workorders.Fail(409, "invalid_assistant_grant") }
 
-func validateDelegatingLeadTx(ctx context.Context, tx pgx.Tx, tid, project, lead, session, owner string) error {
+func validateDelegatingLeadTx(ctx context.Context, tx pgx.Tx, tid, project, lead, session, owner, key string) error {
+	if err := authz.RequireQueueDispatcherTx(ctx, tx, tid, lead, key, project); err != nil {
+		return err
+	}
 	var valid bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.agent_principal_id
  JOIN principals o ON o.tenant_id=s.tenant_id AND o.id=s.owner_principal_id
  WHERE s.tenant_id=$1::uuid AND s.id=$2::uuid AND s.project_id=$3::uuid AND s.agent_principal_id=$4::uuid
  AND coalesce(o.linked_to,o.id)=$5::uuid AND o.kind='person' AND o.status='active' AND p.kind='agent' AND p.status='active'
- AND s.role='coordinator' AND s.phase IN ('working','yielded') AND s.stopped_at IS NULL)`, tid, session, project, lead, owner).Scan(&valid)
+ AND s.role='coordinator' AND s.phase IN ('working','yielded') AND s.stopped_at IS NULL
+ AND EXISTS(SELECT 1 FROM agent_keys k JOIN principals kp ON kp.tenant_id=k.tenant_id AND kp.id=k.person_id WHERE k.tenant_id=s.tenant_id AND k.id=$6::uuid AND k.principal_id=s.agent_principal_id AND coalesce(kp.linked_to,kp.id)=$5::uuid AND kp.kind='person' AND kp.status='active'))`, tid, session, project, lead, owner, key).Scan(&valid)
 	if err != nil {
 		return err
 	}
@@ -140,13 +145,13 @@ func (m *Module) delegateAssistant(w http.ResponseWriter, r *http.Request) {
 		if snapshot.OwnerPersonID != personID {
 			return authz.ErrForbidden
 		}
-		if err = validateDelegatingLeadTx(ctx, tx, p.TenantID, item.ProjectID, p.ID, in.SessionID, personID); err != nil {
+		if err = validateDelegatingLeadTx(ctx, tx, p.TenantID, item.ProjectID, p.ID, in.SessionID, personID, p.AuthKeyID); err != nil {
 			return err
 		}
 		if in.Revision != item.Revision {
 			return workorders.Fail(409, "recurrence revision changed")
 		}
-		d := AgentDelegation{SessionID: in.SessionID, LeadPrincipalID: p.ID, OwnerPersonID: personID, Instance: in.Instance, Scopes: in.Scopes, RequestDigest: digestJSON(in), BudgetKey: "delegation/" + in.SessionID + "/" + digest([]byte(in.Key))}
+		d := AgentDelegation{SessionID: in.SessionID, LeadPrincipalID: p.ID, LeadKeyID: p.AuthKeyID, OwnerPersonID: personID, Instance: in.Instance, Scopes: in.Scopes, RequestDigest: digestJSON(in), BudgetKey: "delegation/" + in.SessionID + "/" + digest([]byte(in.Key))}
 		key := "manual:delegation/" + in.SessionID + "/" + digest([]byte(in.Key))
 		var prior []byte
 		err = tx.QueryRow(ctx, `SELECT r.agent_delegation FROM routine_runs r WHERE r.recurrence_id=$1 AND r.occurrence_key=$2`, item.ID, key).Scan(&prior)

@@ -231,7 +231,9 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 			return err
 		}
 		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{}); err != nil {
-			return errForbidden
+			if reason, _ := authz.AssistantPolicyDenial(err); reason == "" {
+				return errForbidden
+			}
 		}
 		if err := authorizeLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, ""); err != nil {
 			return err
@@ -418,6 +420,9 @@ func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	}
 	appendChange := func(c events.Change) error { _, err := appendEvent(c); return err }
 	if refusal != "" {
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET expires_at=LEAST(coalesce(expires_at,clock_timestamp()),clock_timestamp()) WHERE id=$1::uuid`, id); err != nil {
+			return Message{}, err
+		}
 		if err := insertReceiptWith(ctx, tx, p, id, "failed", target, "", refusal, appendChange); err != nil {
 			return Message{}, err
 		}
@@ -476,7 +481,7 @@ func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Messa
 	// and compatible with target writers' NO KEY UPDATE locks.
 	rows, err := tx.Query(ctx, `SELECT id::text FROM inbox_delivery_targets
 		WHERE principal_id = $1::uuid AND kind = 'webhook' AND enabled
-		AND NOT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND messaging_only IS TRUE)
+		AND NOT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND (messaging_only IS TRUE OR agent_class='assistant'))
 		AND NOT EXISTS(SELECT 1 FROM inbox_message_targets WHERE principal_id=$1::uuid AND target_kind='pull' AND enabled)
 		AND NOT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOIN inbox_message_targets t
 		 ON t.tenant_id=d.tenant_id AND t.id=COALESCE(d.effective_target_id,d.target_id)

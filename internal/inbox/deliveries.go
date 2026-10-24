@@ -255,7 +255,9 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			if in.ResendOf != nil || (in.ReplyTo != nil && in.SenderSessionID == nil) {
 				return errNotFound
 			}
-			return errForbidden
+			if reason, _ := authz.AssistantPolicyDenial(err); reason == "" {
+				return errForbidden
+			}
 		}
 		senderProject, senderProjectKey := project, ""
 		if in.peer {
@@ -517,6 +519,7 @@ type MessageDelivery struct {
 
 func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id string, in compatSend, appendEvent func(events.Change) error) error {
 	var target, fallback *string
+	var policyReason *string
 	state, reason := "pending", ""
 	if in.ActionRequest {
 		state, reason = "held", "action_request"
@@ -542,6 +545,9 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		}
 	}
 	if !in.ActionRequest {
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET assistant_policy_project_id=$2::uuid WHERE id=$1::uuid`, id, project); err != nil {
+			return err
+		}
 		var recipient string
 		var policyKey *string
 		if err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,assistant_policy_key FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &policyKey); err != nil {
@@ -556,11 +562,12 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 			return err
 		}
 		if refusal != "" {
-			state, reason = "dead", refusal
+			state, reason = "dead", ReasonUnavailable
+			policyReason = &refusal
 		}
 	}
 	var d MessageDelivery
-	err := tx.QueryRow(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,target_id,fallback_target_id,state,reason) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6) RETURNING id::text,message_id::text,target_id::text,fallback_target_id::text,state,reason,attempts,COALESCE(effective_level,''),fallback_reason`, p.TenantID, id, target, fallback, state, reason).Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts, &d.EffectiveLevel, &d.FallbackReason)
+	err := tx.QueryRow(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,target_id,fallback_target_id,state,reason,assistant_policy_reason) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7) RETURNING id::text,message_id::text,target_id::text,fallback_target_id::text,state,reason,attempts,COALESCE(effective_level,''),fallback_reason`, p.TenantID, id, target, fallback, state, reason, policyReason).Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts, &d.EffectiveLevel, &d.FallbackReason)
 	if err != nil {
 		return err
 	}

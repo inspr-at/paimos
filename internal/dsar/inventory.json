@@ -1304,7 +1304,8 @@
         "cancelled_at": "metadata",
         "lane_status": "personal",
         "pickup_lease_until": "metadata",
-        "assistant_policy_key": "metadata"
+        "assistant_policy_key": "metadata",
+        "assistant_policy_project_id": "metadata"
       },
       "locator": {
         "person_column": "sender_principal_id",

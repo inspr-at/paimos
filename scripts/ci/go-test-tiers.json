@@ -3758,6 +3758,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestApprovals","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/approvals","name":"TestAssistantOutwardPolicyApproversAndReceipts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/approvals","name":"TestBriefingPendingApprovalsBeforeLimitRegression","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestDecisionRequiresPermissionBeingGranted","tier":"ESSENTIAL"}
@@ -3779,6 +3781,8 @@
     {"kind":"go","package":"internal/approvals","name":"TestRoutineHoldIsExactPersonOwnedAndRevocable","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestScopeWithinKey","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/assistants","name":"TestAssistantPolicyAdmissionMatrix","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/attachedmsg","name":"TestFrameLimitsAndEscaping","tier":"GATED-FULL"}
     ,
@@ -7954,6 +7958,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAgentScope","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestAttemptCapAndSettings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestCompatAckResolvesInboxIDAndProject","tier":"GATED-FULL"}
@@ -10431,6 +10437,8 @@
     {"kind":"go","package":"internal/routineactions","name":"TestAgentOwnedRoutineResearchBudgetAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestAgentRoutineDispatchFailuresYieldQueue","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestAssistantLeadDelegationPolicyAndResults","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionCatalogueClosedAndBounded","tier":"ESSENTIAL"}
     ,

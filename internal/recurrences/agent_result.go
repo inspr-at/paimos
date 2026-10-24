@@ -131,6 +131,14 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 			return workorders.Fail(409, "agent_owner_grant_changed")
 		}
 		if _, _, err = agentOwnerAuthority(ctx, tx, p.TenantID, item, c); err != nil {
+			if reason, _ := authz.AssistantPolicyDenial(err); reason != "" {
+				d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: item.ProjectID, Operation: "routine.result", Key: "routine-run/" + id, Scopes: agentScopes(c)})
+				if err != nil {
+					return err
+				}
+				policyErr = workorders.Fail(409, d.Reason)
+				return assistants.AppendDecisionsTx(ctx, tx, p, d)
+			}
 			return err
 		}
 		for _, permission := range []string{"nodes.read", Permission, agentOwnerPermission(c.Destination)} {
@@ -180,7 +188,7 @@ func (m *Module) completeAgentResult(w http.ResponseWriter, r *http.Request) {
 				return errInvalidAssistantGrant()
 			}
 			policyKey = delegation.BudgetKey
-			if err = validateDelegatingLeadTx(ctx, tx, p.TenantID, item.ProjectID, delegation.LeadPrincipalID, delegation.SessionID, delegation.OwnerPersonID); err != nil {
+			if err = validateDelegatingLeadTx(ctx, tx, p.TenantID, item.ProjectID, delegation.LeadPrincipalID, delegation.SessionID, delegation.OwnerPersonID, delegation.LeadKeyID); err != nil {
 				return err
 			}
 		}

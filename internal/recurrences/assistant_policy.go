@@ -39,7 +39,7 @@ func (m *Module) assistantBudgetTx(ctx context.Context, tx pgx.Tx, r AgentBudget
 			return AgentBudgetDecision{}, errInvalidAssistantGrant()
 		}
 		key, scopes = d.BudgetKey, d.Scopes
-		if err := validateDelegatingLeadTx(ctx, tx, r.TenantID, project, d.LeadPrincipalID, d.SessionID, d.OwnerPersonID); err != nil {
+		if err := validateDelegatingLeadTx(ctx, tx, r.TenantID, project, d.LeadPrincipalID, d.SessionID, d.OwnerPersonID, d.LeadKeyID); err != nil {
 			return AgentBudgetDecision{}, err
 		}
 	}

@@ -384,7 +384,9 @@ func failMessageAt(ctx context.Context, tx pgx.Tx, messageID, reason string, res
 	// reasons. The receipt, failure event and sender notice carry the precise
 	// pull lifecycle reason without changing older writers' schema contract.
 	deliveryReason := reason
-	if reason == ReasonPickupExpired {
+	if strings.HasPrefix(reason, "assistant_") {
+		deliveryReason = ReasonUnavailable
+	} else if reason == ReasonPickupExpired {
 		deliveryReason = ReasonDeadline
 	} else if reason == ReasonAssistantDisabled || reason == ReasonAssistantRevoked {
 		deliveryReason = ReasonUnavailable

@@ -196,8 +196,10 @@ func (m *Module) requestAction(ctx context.Context, p tenant.Principal, authoriz
 		if err = liveActionProject(ctx, tx, project); err != nil {
 			return err
 		}
-		if err = actionRequire(ctx, tx, p, "approvals.request", project); err != nil {
-			return err
+		if err = authz.RequireTx(ctx, tx, p, "approvals.request", authz.Scope{ProjectID: project}); err != nil {
+			if reason, _ := authz.AssistantPolicyDenial(err); reason == "" {
+				return fail(403, "action request requires approvals.request")
+			}
 		}
 		digest := actionDigest(p, project, in)
 		out, err = scanAction(tx.QueryRow(ctx, actionSelect+` WHERE a.agent_principal_id=$1 AND a.idempotency_key=$2`, p.ID, in.IdempotencyKey))

@@ -74,7 +74,7 @@ func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal
 	if len(policyKeys) > 0 {
 		policyKey = policyKeys[0]
 	}
-	if err := tx.QueryRow(ctx, `INSERT INTO inbox_messages(tenant_id,sender_principal_id,recipient_principal_id,body,idempotency_key,sender_label,assistant_policy_key) VALUES($1,$2,$3,$4,$5,'Routines',$6) RETURNING id::text`, sender.TenantID, sender.ID, owner, body, "routine-run/"+run, policyKey).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO inbox_messages(tenant_id,sender_principal_id,recipient_principal_id,body,idempotency_key,sender_label,assistant_policy_key,assistant_policy_project_id) VALUES($1,$2,$3,$4,$5,'Routines',$6,$7) RETURNING id::text`, sender.TenantID, sender.ID, owner, body, "routine-run/"+run, policyKey, project).Scan(&id); err != nil {
 		return "", nil, err
 	}
 	pending := []events.Change{}

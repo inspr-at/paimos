@@ -41,8 +41,8 @@ func TestAssistantPolicyAdmissionMatrix(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,agent_class) VALUES($1,'agent','Matrix assistant','assistant') RETURNING id::text`, p.TenantID).Scan(&assistant); err != nil {
 			return err
 		}
-		for i, id := range []*string{&project, &otherProject} {
-			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,'Policy project' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID, []string{"MATRIX", "OTHER"}[i]).Scan(id); err != nil {
+		for _, id := range []*string{&project, &otherProject} {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Policy project' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(id); err != nil {
 				return err
 			}
 		}

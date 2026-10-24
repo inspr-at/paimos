@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -115,6 +116,16 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 			return hold("routine_paused", false)
 		}
 		person, _, err := agentOwnerAuthority(ctx, tx, tid, item, c)
+		if reason, _ := authz.AssistantPolicyDenial(err); reason != "" {
+			d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: tid, PrincipalID: c.OwnerPrincipalID, ProjectID: item.ProjectID, Operation: "routine.run", Key: "routine-run/" + id, Scopes: agentScopes(c)})
+			if err != nil {
+				return err
+			}
+			if err = hold(d.Reason, false); err != nil {
+				return err
+			}
+			return assistants.AppendDecisionsTx(ctx, tx, person, d)
+		}
 		if permanentAgentDispatchError(err) {
 			return hold("agent_owner_authority_revoked", true)
 		}

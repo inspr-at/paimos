@@ -53,6 +53,12 @@ func WriteForbidden(w http.ResponseWriter, err error) {
 			body["reason"] = "Your access does not cover this project"
 		case "missing_role_permission":
 			body["reason"] = "Your role does not allow this action"
+		case "assistant_scope_denied":
+			body["reason"] = "The assistant policy does not allow this permission"
+		case "assistant_project_denied":
+			body["reason"] = "The assistant policy does not allow this project"
+		case "assistant_policy_unavailable":
+			body["reason"] = "The assistant policy is unavailable"
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")

@@ -122,7 +122,7 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 func recordAcceptanceReceiptWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID string, appendEvent func(events.Change) error) error {
 	var targetID *string
 	var state, reason string
-	err := tx.QueryRow(ctx, `SELECT target_id::text, state, reason FROM inbox_message_deliveries WHERE message_id = $1::uuid`, messageID).Scan(&targetID, &state, &reason)
+	err := tx.QueryRow(ctx, `SELECT target_id::text, state, coalesce(assistant_policy_reason,reason) FROM inbox_message_deliveries WHERE message_id = $1::uuid`, messageID).Scan(&targetID, &state, &reason)
 	if err != nil {
 		return err
 	}
@@ -138,6 +138,9 @@ func recordAcceptanceReceiptWith(ctx context.Context, tx pgx.Tx, p tenant.Princi
 	if state == "dead" {
 		if reason == "" {
 			reason = "unavailable"
+		}
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET expires_at=LEAST(coalesce(expires_at,clock_timestamp()),clock_timestamp()) WHERE id=$1::uuid`, messageID); err != nil {
+			return err
 		}
 		return insertReceiptWith(ctx, tx, p, messageID, "failed", target, "", reason, appendEvent)
 	}
