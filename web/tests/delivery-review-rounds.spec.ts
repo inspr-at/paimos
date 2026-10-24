@@ -2,12 +2,16 @@
 // Risks: absent/open outcomes turn into first-pass successes, a late answer
 // crosses a window/project boundary, or new values/tooltips move controls.
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
 import { fixtures, mockWork } from './work-fixtures'
 import { deliveryMetrics, mockDelivery } from './delivery-numbers-fixtures'
 import { controlStability } from './control-stability'
 import { reviewAnswer, type ReviewAnswerKind } from './delivery-review-rounds-fixtures'
 import { reviewRuleText } from '../src/lib/reviewRuleText'
 import type { WindowDays } from '../src/lib/deliveryNumbers'
+
+const evidence: { width: number; theme: string; language: string; controlsStable: boolean; horizontalOverflow: number }[] = []
+test.afterAll(async ({}, info) => { await writeFile(info.outputPath('review-rounds-checks.json'), JSON.stringify(evidence, null, 2) + '\n') })
 
 function barrier() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve }); return { promise, release } }
 async function rest(page: Page) { await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) }) }
@@ -63,6 +67,13 @@ for (const width of [1440, 1024, 390, 320]) {
       const labels = await page.getByTestId('delivery-tiles').locator('.t-label').allTextContents()
       expect(labels.slice(-2)).toEqual(['Escaped defects', 'Review rounds until ok'])
       await shot(page, info, `expert-${width}-${theme}-tile`)
+      if (width >= 1024) await shot(page, info, `expert-${width}-${theme}-key-numbers`, page.getByTestId('delivery-tiles'))
+      await tile(page).locator('.info').click()
+      await expect(page.locator('.dl-tip')).toContainText('Tickets that are still open are counted separately, never as one round.')
+      await expect(page.locator('.dl-tip')).not.toContainText('Arion')
+      await expect(tile(page).locator('.info')).toHaveAttribute('aria-describedby', /dl-definition-/)
+      await page.keyboard.press('Escape')
+      await expect(page.locator('.dl-tip')).toHaveCount(0)
       await chart(page).locator('.plot').focus()
       await page.keyboard.press('Home')
       await expect(chart(page).locator('.readout')).toHaveText('Week 42 · design 3.0 · gate 2.0 · 1 ticket')
@@ -111,7 +122,9 @@ for (const width of [1440, 1024, 390, 320]) {
       await expect(chart(page)).toHaveCount(0)
       await expect(panel(page)).toHaveCount(0)
       await shot(page, info, `simple-${width}-${theme}`, simple)
-      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+      const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+      expect(horizontalOverflow).toBeLessThanOrEqual(1)
+      evidence.push({ width, theme, language: 'en', controlsStable: true, horizontalOverflow })
       // Each theme starts with Expert and a fresh copy of the same known cohort.
       await page.locator('.dl-head').getByRole('radio', { name: 'Expert', exact: true }).click()
     }
@@ -187,6 +200,11 @@ for (const width of [1440, 390]) {
     await panel(page).locator('.rr-rules .rr-chip').first().focus()
     await expect(page.locator('.tooltip')).toHaveText(reviewRuleText('U2', 'de'))
     await shot(page, info, `german-${width}-panel`, panel(page))
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+    const germanControls = await controlStability(page, { close: panel(page).getByRole('button', { name: 'Schließen Esc' }), row: panel(page).locator('.rr-ticket-link').first() })
+    await germanControls.check(async () => { await panel(page).getByRole('button', { name: 'Schließen Esc' }).focus() })
+    germanControls.done()
+    const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+    expect(horizontalOverflow).toBeLessThanOrEqual(1)
+    evidence.push({ width, theme: 'light', language: 'de', controlsStable: true, horizontalOverflow })
   })
 }

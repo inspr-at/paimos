@@ -9,7 +9,7 @@ import type { TileModel } from '../../lib/deliveryNumbers'
 import type { DeliveryText } from '../../lib/deliveryNumbersText'
 
 // Ticket step tiles (AEON-1359) carry their step as the key instead of an Arion metric.
-const props = defineProps<{ tile: Omit<TileModel, 'def'> & { def: { key: string } }; state: 'loading' | 'error' | 'ready'; text: DeliveryText; infoOpen: boolean; hideDetail?: boolean }>()
+const props = defineProps<{ tile: Omit<TileModel, 'def'> & { def: { key: string } }; state: 'loading' | 'error' | 'ready'; text: DeliveryText; infoOpen: boolean; hideDetail?: boolean; definitionId?: string }>()
 const emit = defineEmits<{ info: [anchor: HTMLElement, pin: boolean]; 'info-leave': [] }>()
 const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
 </script>
@@ -20,7 +20,7 @@ const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
     <slot name="trigger" />
     <div class="t-top">
       <span :id="id('label')" v-clip-tip class="t-label">{{ tile.label }}</span>
-      <button type="button" class="info" :aria-label="`${text.infoFor} ${tile.label}`" :aria-expanded="infoOpen"
+      <button type="button" class="info" :aria-label="`${text.infoFor} ${tile.label}`" :aria-expanded="infoOpen" :aria-describedby="infoOpen ? definitionId : undefined"
         @click="emit('info', $event.currentTarget as HTMLElement, true)" @mouseenter="emit('info', $event.currentTarget as HTMLElement, false)"
         @mouseleave="emit('info-leave')" @focus="emit('info', $event.currentTarget as HTMLElement, false)" @blur="emit('info-leave')"><AppIcon name="info" :size="14" /></button>
     </div>

@@ -13,7 +13,7 @@ import { simpleText } from '../../lib/deliverySimpleText'
 import { reviewRoundView, reviewText, type ReviewRoundNumbers } from '../../lib/deliveryReviewRounds'
 import type { TicketTileModel } from '../../lib/deliveryTickets'
 
-const props = defineProps<{ data: ReviewRoundNumbers | null; state: 'loading' | 'error' | 'ready'; level: 'simple' | 'expert'; window: WindowDays; lang: DeliveryLanguage; routeKey: string; infoOpen?: boolean }>()
+const props = defineProps<{ data: ReviewRoundNumbers | null; state: 'loading' | 'error' | 'ready'; level: 'simple' | 'expert'; window: WindowDays; lang: DeliveryLanguage; routeKey: string; infoOpen?: boolean; definitionId?: string }>()
 const emit = defineEmits<{ retry: []; info: [tile: TicketTileModel, anchor: HTMLElement, pin: boolean]; 'info-leave': [] }>()
 const view = computed(() => reviewRoundView(props.data, props.window, props.lang, props.state))
 const t = computed(() => reviewText(props.lang))
@@ -39,7 +39,7 @@ watch([() => props.window, () => props.level, () => props.lang, () => props.rout
 
 <template>
   <SimpleTile v-if="level === 'simple'" :tile="view.simple" :state="state" :text="simpleText(lang)" minimal data-testid="review-rounds-simple" />
-  <ExpertTile v-else class="rr-tile" :tile="view.expert" :state="state" :text="deliveryText(lang)" :info-open="!!infoOpen" hide-detail data-testid="review-rounds-tile" @click="clipped"
+  <ExpertTile v-else class="rr-tile" :tile="view.expert" :state="state" :text="deliveryText(lang)" :info-open="!!infoOpen" :definition-id="definitionId" hide-detail data-testid="review-rounds-tile" @click="clipped"
     @info="(anchor, pin) => emit('info', view.expert, anchor, pin)" @info-leave="emit('info-leave')">
     <template #trigger><button type="button" class="rr-open" :aria-label="t.openPanel" aria-haspopup="dialog" :aria-expanded="!!open" :aria-disabled="state !== 'ready' || !data || undefined" @click="toggle($event.currentTarget as HTMLElement)" /></template>
     <template #value-companion><small v-if="state === 'ready' && data?.current.tickets" class="rr-gate">{{ view.gate }}</small></template>
