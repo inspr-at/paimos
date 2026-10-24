@@ -3,6 +3,8 @@
 // crosses a window/project boundary, or new values/tooltips move controls.
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { fixtures, mockWork } from './work-fixtures'
 import { deliveryMetrics, mockDelivery } from './delivery-numbers-fixtures'
 import { controlStability } from './control-stability'
@@ -11,6 +13,14 @@ import { reviewRuleText } from '../src/lib/reviewRuleText'
 import type { WindowDays } from '../src/lib/deliveryNumbers'
 
 const evidence: { width: number; theme: string; language: string; controlsStable: boolean; horizontalOverflow: number }[] = []
+// The approved remote browser lane also proves the affected source-mounted units
+// and the glyph guard, so new Delivery imports cannot strand those regressions.
+test.beforeAll(async ({}, info) => {
+  const run = promisify(execFile), options = { encoding: 'utf8' as const, timeout: 60_000, maxBuffer: 1024 * 1024 }
+  const units = await run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', 'tests/delivery-simple.unit.test.ts', 'tests/delivery-pref-owner.unit.test.ts', '--maxWorkers=1', '--no-fileParallelism', '--retry=0'], options)
+  const glyphs = await run(process.execPath, ['--test', 'tests/text-glyphs.test.ts'], options)
+  await info.attach('delivery-units-and-glyphs', { body: units.stdout + units.stderr + glyphs.stdout + glyphs.stderr, contentType: 'text/plain' })
+})
 test.afterAll(async ({}, info) => { await writeFile(info.outputPath('review-rounds-checks.json'), JSON.stringify(evidence, null, 2) + '\n') })
 
 function barrier() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve }); return { promise, release } }

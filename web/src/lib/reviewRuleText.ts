@@ -75,7 +75,7 @@ const DE: Record<string, string> = {
   "A6": "Felder haben verknüpfte Bezeichnungen; Fehler sind zugeordnet und werden angekündigt.",
   "A7": "Nicht direkt ausgelöste Statusänderungen werden behutsam angekündigt, ohne jeden Zählschritt vorzulesen.",
   "A8": "Farbe ist nie das einzige Signal; Zustände sind auch als Text, Symbol oder Form erkennbar.",
-  "A9": "Ziele sind mindestens 24 × 24 CSS-Pixel groß, primäre Berührungsziele auf Telefonen mindestens 44 Pixel.",
+  "A9": "Ziele sind mindestens 24 mal 24 CSS-Pixel groß, primäre Berührungsziele auf Telefonen mindestens 44 Pixel.",
   "A10": "Native Elemente und eine passende Überschriftenfolge bilden die Bedeutung und Bedienung ab.",
   "A11": "Nicht verfügbare Steuerelemente erklären ihren Grund in erreichbarem Begleittext.",
   "A12": "Reduzierte Bewegung wird respektiert; längere Animationen lassen sich anhalten.",

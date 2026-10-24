@@ -31,7 +31,10 @@ test('the v5 readings sit in their tiles with exact counts and the plan’s targ
   await page.goto('/p/AEON/delivery')
   const tiles = page.getByTestId('delivery-tiles')
   await expect(tiles.locator('[aria-busy="true"]')).toHaveCount(0)
-  await expect(tiles.getByRole('listitem')).toHaveCount(18)
+  // AEON-1718 adds one independent outcome tile after all eighteen Arion/v5 readings.
+  await expect(tiles.getByRole('listitem')).toHaveCount(19)
+  expect((await tiles.locator('.t-label').allTextContents()).slice(-2)).toEqual(['Escaped defects', 'Review rounds until ok'])
+  await expect(tiles.getByTestId('review-rounds-tile')).toHaveCount(1)
   for (const label of READINGS) await expect(tile(page, label)).toBeVisible()
   // Targets are v5's: no "3 on a reuse hit", release 61 now and 54 later.
   await expect(tile(page, 'PR CI run (wall)').locator('.t-target')).toHaveText('Target 10 min, then 7')
