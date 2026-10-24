@@ -64,6 +64,10 @@ func TestReviewRoundCLIAndImportIdempotency(t *testing.T) {
 	if err != nil || len(plan) != 4 || plan[0].Verdict != "changes" || plan[1].Verdict != "changes" || plan[2].Verdict != "ok" || len(plan[0].Rules) != 2 || len(plan[1].Rules) != 0 || plan[0].At != "2026-01-01T00:00:00Z" {
 		t.Fatalf("truthful plan: %+v %v", plan, err)
 	}
+	snakeHeader := strings.ReplaceAll(strings.ReplaceAll(input, "first look", "first_look"), "rounds until ok", "rounds_until_ok")
+	if snake, err := designRoundPlan(strings.NewReader(snakeHeader)); err != nil || len(snake) != len(plan) {
+		t.Fatalf("TSV machine header: %+v %v", snake, err)
+	}
 	if _, err := designRoundPlan(strings.NewReader(input + "RND-4\tfixture/repo\tbad\t2\t\n")); err == nil {
 		t.Fatal("accepted malformed later row")
 	}

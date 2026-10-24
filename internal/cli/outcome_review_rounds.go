@@ -142,6 +142,9 @@ func designRoundPlan(source io.Reader) ([]reviewRoundWire, error) {
 	r.Comma = '\t'
 	r.FieldsPerRecord = 5
 	header, err := r.Read()
+	for i := range header {
+		header[i] = strings.Join(strings.Fields(strings.ReplaceAll(strings.TrimPrefix(strings.ToLower(header[i]), "\ufeff"), "_", " ")), " ")
+	}
 	if err != nil || strings.Join(header, "\t") != "key\trepo\tfirst look\trounds until ok\tnote" {
 		return nil, usagef("review TSV requires columns: key, repo, first look, rounds until ok, note")
 	}
