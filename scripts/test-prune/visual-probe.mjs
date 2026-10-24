@@ -10,12 +10,34 @@ import { assertRenderer, assertVisualContainer, captureEnabled, cpuEvidence, pre
 const need = (condition, message) => { if (!condition) throw new Error(message) }
 const root = fileURLToPath(new URL('../../', import.meta.url))
 export const PROBE_REPEATS = 6
+export const PROBE_FRAMES = 8
 export const PROBE_SLOTS = [1, 2, 3, 4, 5, 6]
 export const PROBE_SETTINGS = [
   { id: 'baseline', args: [] },
   { id: 'skia-runtime-disabled', args: ['--disable-skia-runtime-opts', '--force-color-profile=srgb',
     '--disable-lcd-text', '--font-render-hinting=none', '--force-device-scale-factor=1'] },
 ]
+
+// Ordinary captures still require three consecutive identical frames. A probe
+// measures all eight frames instead: instability is data, not missing evidence.
+// Keep every frame so neither settling nor choosing a favourable frame can hide
+// a byte difference in the diagnostic identity result.
+export async function sampleRasterFrames(capture, { diagnosticProbe = false } = {}) {
+  const frames = [], samples = []
+  let previous, consecutive = 0, settled = false
+  for (let index = 0; index < PROBE_FRAMES; index++) {
+    const png = await capture()
+    need(Buffer.isBuffer(png) && png.length > 0 && png.length <= 4 * 1024 * 1024, 'Invalid or oversized raster frame')
+    frames.push(png)
+    samples.push(sha256(png))
+    consecutive = previous?.equals(png) ? consecutive + 1 : 1
+    settled ||= consecutive >= 3
+    if (!diagnosticProbe && settled) return { png, evidence: { samples, consecutive } }
+    previous = png
+  }
+  need(diagnosticProbe, `Visual viewport did not settle to three byte-identical samples within eight captures: ${samples.join(', ')}`)
+  return { png: frames.at(-1), frames, evidence: { samples, consecutive, settled, allByteIdentical: new Set(samples).size === 1 } }
+}
 
 export function probeCheckpoints(input, visual) {
   need(typeof input === 'string' && input.length > 0 && input.length <= 2048, 'Probe needs a bounded comma-separated checkpoint list')
@@ -49,7 +71,8 @@ export function summarizeProbe(records, checkpoints, setting, visual, { exitCode
     const viewport = visual.profiles[checkpoint.profile]
     const complete = samples.length === PROBE_REPEATS && indices.every((index, i) => index === i)
     const failures = []
-    for (const { quality, png } of samples) {
+    const frameDigests = []
+    for (const { quality, png, frames } of samples) {
       try {
         need(quality.diagnosticProbe.setting === setting.id && quality.captureMode === false && quality.baselineCompared === false &&
           quality.requirementsRun === true && quality.quality?.status === 'passed', 'Missing diagnostic-only quality evidence')
@@ -60,11 +83,25 @@ export function summarizeProbe(records, checkpoints, setting, visual, { exitCode
         need(image.width === viewport.width && image.height === viewport.height && quality.viewport?.width === viewport.width &&
           quality.viewport?.height === viewport.height, 'Wrong probe viewport')
         need(sha256(png) === quality.pngSHA256, 'Probe PNG digest mismatch')
+        const declared = quality.diagnosticProbe.frames
+        need(Array.isArray(frames) && frames.length === PROBE_FRAMES && Array.isArray(declared) && declared.length === PROBE_FRAMES,
+          'Probe needs all eight temporal frames per repeat')
+        const digests = frames.map((frame, index) => {
+          need(frame.index === index && declared[index].index === index && frame.file === `${id}-probe-${index}.png` &&
+            declared[index].file === frame.file, 'Missing, duplicate or unordered probe frame')
+          const image = decodePNG(frame.png), digest = sha256(frame.png)
+          need(image.width === viewport.width && image.height === viewport.height, 'Wrong probe frame viewport')
+          need(digest === declared[index].sha256, 'Probe frame digest mismatch')
+          return digest
+        })
+        need(digests.at(-1) === quality.pngSHA256, 'Probe representative must be the last temporal frame')
+        need(JSON.stringify(quality.captureSettling?.samples) === JSON.stringify(digests), 'Probe frame sampling evidence differs')
+        frameDigests.push({ repeatIndex: quality.diagnosticProbe.repeatIndex, digests })
       } catch (error) { failures.push(error.message) }
     }
     const digests = samples.map(record => sha256(record.png))
-    return { id, repeats: samples.length, complete, failures, digests,
-      byteIdentical: complete && failures.length === 0 && samples.every(record => record.png.equals(samples[0].png)) }
+    return { id, repeats: samples.length, complete, failures, digests, frameDigests,
+      byteIdentical: complete && failures.length === 0 && new Set(frameDigests.flatMap(repeat => repeat.digests)).size === 1 }
   })
   const sources = new Set(records.map(record => record.quality.captureSHA))
   const complete = exitCode === 0 && !error && sources.size === 1 && /^[a-f0-9]{40}$/.test([...sources][0] ?? '') &&
@@ -105,17 +142,21 @@ export async function runProbe(input, output, visual, { env = process.env, run =
     settings.push(summarizeProbe(records, checkpoints, setting, visual, { exitCode: result.status, error, cpu }))
   }
   const sources = new Set(settings.map(setting => setting.captureSHA))
-  const report = { version: 2, kind: 'raster-determinism-probe', authority: 'diagnostic only; cannot package, publish or activate references',
+  const report = { version: 3, kind: 'raster-determinism-probe', authority: 'diagnostic only; cannot package, publish or activate references',
     slot: Number(env.AEON_VISUAL_PROBE_SLOT), run: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT,
     runner: env.RUNNER_NAME ?? 'unidentified', cpu,
-    repeats: PROBE_REPEATS, containerDigest: visual.renderer.container.digest, threshold: 0, maxDiffPixels: 0,
+    repeats: PROBE_REPEATS, framesPerRepeat: PROBE_FRAMES, containerDigest: visual.renderer.container.digest, threshold: 0, maxDiffPixels: 0,
     checkpoints, complete: sources.size === 1 && settings.every(setting => setting.complete), settings }
   writeFileSync(join(output, 'probe-report.json'), JSON.stringify(report, null, 2) + '\n', { flag: 'wx' })
   const lines = ['# Raster determinism probe', '', `CPU: ${cpu.model}; flags: ${cpu.flags.join(' ')}; kernel boot: ${cpu.bootId}.`, '',
-    `Diagnostic only; ${PROBE_REPEATS} fresh fixture/browser repeats per setting on this runner. Cross-machine proof is in the matrix summary. No masks or tolerance.`, '',
-    '| Setting | Checkpoint | Complete repeats | All PNG bytes identical |', '| --- | --- | ---: | --- |']
+    `Complete: ${report.complete}. Diagnostic only; ${PROBE_REPEATS} fresh fixture/browser repeats per setting, ${PROBE_FRAMES} temporal frames per repeat. Cross-machine proof is in the matrix summary. No masks or tolerance.`, '',
+    '| Setting | Checkpoint | Complete repeats | All temporal PNG bytes identical |', '| --- | --- | ---: | --- |']
   for (const setting of settings) for (const row of setting.checkpoints)
-    lines.push(`| ${setting.setting} | ${row.id} | ${row.repeats}/${PROBE_REPEATS} | ${!setting.complete ? 'INCOMPLETE (see JSON/log)' : row.byteIdentical ? 'yes' : 'no'} |`)
+    lines.push(`| ${setting.setting} | ${row.id} | ${row.repeats}/${PROBE_REPEATS} | ${!row.complete || row.failures.length ? 'INCOMPLETE (see JSON/log)' : row.byteIdentical ? 'yes' : 'no'} |`)
+  for (const setting of settings) {
+    if (!setting.complete) lines.push('', `${setting.setting}: INCOMPLETE; exit code ${setting.exitCode}; ${setting.error ?? 'see checkpoint failures and log'}.`)
+    for (const row of setting.checkpoints) for (const failure of row.failures) lines.push(`- ${setting.setting}/${row.id}: ${failure}`)
+  }
   writeFileSync(join(output, 'probe-report.md'), lines.join('\n') + '\n', { flag: 'wx' })
   return report
 }
@@ -130,8 +171,10 @@ export function summarizeProbeMatrix(reports, checkpoints, visual, { captureSHA,
   check(JSON.stringify(slots) === JSON.stringify(PROBE_SLOTS), 'Missing, duplicate or unknown runner slot')
   check(new Set(reports.map(report => report.cpu?.bootId)).size === PROBE_SLOTS.length, 'Probe jobs must use six different kernel boot identities')
   for (const report of reports) {
-    check(report.version === 2 && report.kind === 'raster-determinism-probe' && report.complete === true &&
-      report.repeats === PROBE_REPEATS && report.threshold === 0 && report.maxDiffPixels === 0 &&
+    check(report.version === 3 && report.kind === 'raster-determinism-probe' && report.framesPerRepeat === PROBE_FRAMES,
+      `Unsupported runner report schema (need all temporal frames): ${report.slot}`)
+    check(report.complete === true, `Incomplete runner acquisition: ${report.slot}`)
+    check(report.repeats === PROBE_REPEATS && report.threshold === 0 && report.maxDiffPixels === 0 &&
       report.containerDigest === visual.renderer.container.digest && report.run === run && report.attempt === attempt &&
       typeof report.runner === 'string' && report.runner !== 'unidentified' &&
       JSON.stringify(report.checkpoints) === JSON.stringify(checkpoints), `Invalid, failed or stale runner report: ${report.slot}`)
@@ -149,15 +192,19 @@ export function summarizeProbeMatrix(reports, checkpoints, visual, { captureSHA,
       const jobs = reports.map(report => {
         const result = report.settings?.find(row => row.setting === setting.id)
         const row = result?.checkpoints?.find(row => row.id === id)
-        check(result?.complete === true && result.captureSHA === captureSHA && result.exitCode === 0 && !result.error &&
+        const complete = result?.complete === true && result.captureSHA === captureSHA && result.exitCode === 0 && !result.error &&
           JSON.stringify(result.args) === JSON.stringify(args) && result.checkpoints?.length === checkpoints.length &&
           new Set(result.checkpoints?.map(row => row.id)).size === checkpoints.length &&
           row?.complete === true && row.repeats === PROBE_REPEATS && row.failures?.length === 0 &&
-          row.digests?.length === PROBE_REPEATS && row.digests.every(digest => /^[a-f0-9]{64}$/.test(digest)), `Incomplete ${setting.id}/${id} on runner ${report.slot}`)
-        return { slot: report.slot, cpuModel: report.cpu?.model, digests: row?.digests ?? [] }
+          row.digests?.length === PROBE_REPEATS && row.digests.every(digest => /^[a-f0-9]{64}$/.test(digest)) &&
+          row.frameDigests?.length === PROBE_REPEATS && row.frameDigests.every((repeat, index) => repeat.repeatIndex === index &&
+            repeat.digests?.length === PROBE_FRAMES && repeat.digests.every(digest => /^[a-f0-9]{64}$/.test(digest)) &&
+            repeat.digests.at(-1) === row.digests[index])
+        check(complete, `Incomplete ${setting.id}/${id} on runner ${report.slot}`)
+        return { slot: report.slot, cpuModel: report.cpu?.model, digests: row?.digests ?? [], frameDigests: row?.frameDigests ?? [] }
       })
-      const digests = jobs.flatMap(job => job.digests)
-      return { id, jobs, allByteIdentical: digests.length === PROBE_SLOTS.length * PROBE_REPEATS && new Set(digests).size === 1 }
+      const digests = jobs.flatMap(job => job.frameDigests.flatMap(repeat => repeat.digests))
+      return { id, jobs, allByteIdentical: digests.length === PROBE_SLOTS.length * PROBE_REPEATS * PROBE_FRAMES && new Set(digests).size === 1 }
     })
     return { setting: setting.id, args, checkpoints: rows, allByteIdentical: rows.every(row => row.allByteIdentical) }
   })
@@ -167,8 +214,8 @@ export function summarizeProbeMatrix(reports, checkpoints, visual, { captureSHA,
     if (!complete) for (const row of setting.checkpoints) row.allByteIdentical = null
   }
   const cpuModels = [...new Set(reports.map(report => report.cpu?.model))]
-  return { version: 1, kind: 'cross-machine-raster-probe', complete, failures, captureSHA, run, attempt, cpuModels,
-    byteIdentityBasis: 'SHA-256 of each entire PNG file; zero tolerance, no masks',
+  return { version: 2, kind: 'cross-machine-raster-probe', complete, failures, captureSHA, run, attempt, cpuModels,
+    byteIdentityBasis: 'SHA-256 of every entire PNG file, including all eight temporal frames per repeat; zero tolerance, no masks',
     runners: reports.map(({ slot, runner, cpu }) => ({ slot, runner, cpu })), settings,
     hypothesis: !complete ? 'INCOMPLETE' : cpuModels.length < 2 ? 'Inconclusive: fewer than two CPU models were sampled; use a new run to seek CPU diversity.' :
       !settings[0].allByteIdentical && settings[1].allByteIdentical ?
@@ -188,14 +235,14 @@ export function writeProbeMatrix(directory, output, input, visual, expected) {
   mkdirSync(output, { recursive: false })
   writeFileSync(join(output, 'matrix-report.json'), JSON.stringify(report, null, 2) + '\n', { flag: 'wx' })
   const cell = value => String(value ?? '').replace(/[|\r\n]/g, ' ')
-  const lines = ['# Cross-machine raster probe', '', `Complete: ${report.complete}. ${report.hypothesis}`, '',
+  const lines = ['# Cross-machine raster probe', '', `Complete: ${report.complete}. ${report.hypothesis}`, '', report.byteIdentityBasis + '.', '',
     '| Slot | Runner | CPU model | AVX2 | AVX512 flags | Kernel boot identity |', '| --- | --- | --- | --- | --- | --- |',
     ...report.runners.map(row => `| ${row.slot} | ${cell(row.runner)} | ${cell(row.cpu?.model)} | ${row.cpu?.flags?.includes('avx2')} | ${cell(row.cpu?.flags?.filter(flag => flag.startsWith('avx512')).join(' '))} | ${cell(row.cpu?.bootId)} |`), '',
     '| Setting | ALL jobs byte-identical (every selected checkpoint) |', '| --- | --- |',
     ...report.settings.map(setting => `| ${setting.setting} | ${setting.allByteIdentical === null ? 'INCOMPLETE' : setting.allByteIdentical ? 'yes' : 'no'} |`), '',
-    '| Setting | Checkpoint | ALL six jobs / all repeats byte-identical |', '| --- | --- | --- |',
+    '| Setting | Checkpoint | ALL six jobs / all repeats / all temporal frames byte-identical |', '| --- | --- | --- |',
     ...report.settings.flatMap(setting => setting.checkpoints.map(row => `| ${setting.setting} | ${row.id} | ${row.allByteIdentical === null ? 'INCOMPLETE' : row.allByteIdentical ? 'yes' : 'no'} |`)), '',
-    ...report.failures.map(failure => `- ${failure}`), '', 'Diagnostic evidence only; the six selected checkpoints do not establish stability of all 60 pins. No reference or renderer was activated.']
+    ...report.failures.map(failure => `- ${failure}`), '', 'Diagnostic evidence only; the selected checkpoints do not establish stability of all 60 pins. No reference or renderer was activated.']
   writeFileSync(join(output, 'matrix-report.md'), lines.join('\n') + '\n', { flag: 'wx' })
   return report
 }

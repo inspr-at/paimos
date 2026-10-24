@@ -377,6 +377,46 @@ The new ESSENTIAL live-manifest regression fails against the unchanged manifest 
 
 Fix9 implementation is committed in `36a59116d` and `0b9f5c3d1`, with newest fetched main `cc0b57a8f` included through a clean merge. Focused visual tests pass **3/3**, ledger tests **2/2**, and remote `scripts/releaseworkflow` and `scripts/ci-runner-guard` pass. The corrected full remote static run passes **43 checks, zero optional skips**, including the full tier suite in **167.26 seconds**. Its only remaining result is `ci-static: apt-step-bounds exceeded timeout_seconds=60 after 60.02s (process group termination requested)`: **15 passes, zero assertion failures and one interrupted file** before termination. A preceding attempt on the same head recorded `exhausted.status: null !== 100` in that unchanged APT fixture; both results are retained rather than claimed green. Neither its installer, fixture nor deadlines change here. Under worker-common's known-environment list item 3, the final handoff is **95% / BLOCKED-REMOTE-CAPACITY**, pending hosted static completion. The visual browser entry point returns the expected **exit 5 / VISUAL = CI ONLY**; the coordinator owns the pinned-container run. Evidence is indexed in `web/test-results/fix9/evidence-index.json`. Outside the original write set: `scripts/ci/web-test-tiers.json` adds only the required ESSENTIAL regression through the canonical writer; `web/tests/test-prune-ledger.test.ts` preserves its exact blocking assertions while checking that live cuts remain closed. Non-blocking findings are untouched. No origin push, deployment, model CLI, review gate, capture/probe dispatch, publication, attachment or activation is performed.
 
+### Set-4 probe acquisition repair — AEON-1713
+
+Run **40012177517**, source **515cb7bd63c85d1567f439cd42e059c692478c09**, attempt **1**, sampled three CPU models on six different kernel boots: EPYC 7763 on slots 1–3, EPYC 9V45 on slot 4, and Xeon 8573C on slots 5–6. All six original `visual-raster-probe-515cb7bd63c85d1567f439cd42e059c692478c09-1-runner-N` artifacts and the matrix are preserved under `web/test-results/probe-40012177517/`. Its `evidence-index.json` records exact paths, report hashes, JSON/log line references and an independent verification of **424 original PNGs** against their quality-record digests, repeat indices, source SHA and CPU evidence. The committed fixture `web/tests/fixtures/raster-probe-40012177517.json` retains the six original report objects and all eight logged failure sequences; it does not fill missing historical samples.
+
+The reports are current and structurally valid v2 reports. Five fail the old matrix's generic “Invalid, failed or stale” check because `report.complete` is false, not because their source, run, attempt, CPU evidence or schema is stale. The real failure is **Projects temporal raster instability**: the ordinary capture settler throws after eight screenshots without three consecutive byte-identical frames, before saving the canonical PNG and passed quality record. All other selected checkpoints have six passed repeats under both settings. `settings[*].error` is null everywhere; there is no subprocess timeout or collection error. Slot 4 actually succeeds, with 36/36 tests under each setting; the five other jobs exit 1 after ordinary test failures.
+
+| Slot | Projects baseline / disabled-Skia repeats | JSON setting start lines, baseline / disabled | Settling errors in the original logs |
+| --- | --- | --- | --- |
+| 1 | 6/6 / 4/6 | `probe-report.json:133` / `:236` | `skia-runtime-disabled.log:350`, `:442`; summary `:464` = 2 failed, `:467` = 34 passed |
+| 2 | 5/6 / 5/6 | `probe-report.json:133` / `:235` | `baseline.log:78`; `skia-runtime-disabled.log:282`; both summaries `:440` = 1 failed, `:442` = 35 passed |
+| 3 | 6/6 / 4/6 | `probe-report.json:133` / `:236` | `skia-runtime-disabled.log:282`, `:374`; summary `:464` = 2 failed, `:467` = 34 passed |
+| 4 | 6/6 / 6/6 | `probe-report.json:150` / `:253` | none; both summaries `:416` = 36 passed |
+| 5 | 6/6 / 5/6 | `probe-report.json:149` / `:252` | `skia-runtime-disabled.log:418`; summary `:440` = 1 failed, `:442` = 35 passed |
+| 6 | 6/6 / 5/6 | `probe-report.json:149` / `:252` | `skia-runtime-disabled.log:418`; summary `:440` = 1 failed, `:442` = 35 passed |
+
+Each cited filename is inside the corresponding slot artifact above. For example, slot 1's disabled-Skia JSON has `exitCode: 1`, `error: null`, `complete: false`, Projects `repeats: 4`, and five other rows with `repeats: 6`, `complete: true`, `failures: []`. Its log errors start with `Visual viewport did not settle to three byte-identical samples within eight captures` and alternate between two entire-file digests. The per-setting Markdown used `setting.complete` for every cell, so those five successful six-repeat cells also displayed “INCOMPLETE.” The matrix correctly refused a stability claim with missing samples, but its generic failure label obscured the acquisition failure.
+
+The diagnostic path now retains **all eight temporal PNGs for every one of the six fresh repeats**, even when they differ. It uses the same readiness checks, fixture, CPU/renderer evidence and strict quality assertions; screenshot failures still fail acquisition. Ordinary candidate capture and comparison retain the existing three-consecutive-identical/eight-capture settling rule. Runner report v3 records every ordered frame file and digest, and the collector verifies bounded frame paths, PNG bytes, dimensions, repeat order and the final representative PNG. Matrix report v2 requires all six v3 reports and compares **every entire PNG across all frames, repeats and machines**, with zero tolerance and no masks. A temporal difference yields **complete acquisition / byte identity no**. Missing frames, bad digests, quality failures, failed subprocesses, old schemas or stale provenance still fail closed. Per-runner tables show each checkpoint's own evidence status and list setting failures explicitly. Diagnostic evidence remains barred from reference packaging or activation.
+
+The retained historical PNGs already disprove byte identity for **both** settings. Counts below are recorded fresh-repeat PNGs / distinct entire-file PNG digests across all six machines; they omit the eight failed repeats, whose temporal digest sequences remain in the logs.
+
+| Checkpoint | Baseline samples / distinct PNGs | Disabled-Skia samples / distinct PNGs |
+| --- | ---: | ---: |
+| `V-projects-390-light` | 35 / 4 | 29 / 2 |
+| `V-account-use-matrix-1440-dark` | 36 / 2 | 36 / 2 |
+| `V-account-use-matrix-1440-light` | 36 / 2 | 36 / 2 |
+| `V-agent-rules-390-dark` | 36 / 1 | 36 / 1 |
+| `V-decision-desk-1024-dark` | 36 / 4 | 36 / 3 |
+| `V-decision-desk-1440-dark` | 36 / 2 | 36 / 2 |
+
+Both settings vary within individual machines, so these data do not isolate CPU-specific Skia fast paths as the cause, and disabling Skia runtime options plus determinism flags does not establish stability. The Agent rules checkpoint agrees across the three sampled CPU models in both settings; one checkpoint cannot establish identity for the full 60. No renderer is selected or activated. The 60 pins, report-only mode, Tick receipt, container, browser arguments and 20 deferrals are unchanged.
+
+The affected browser-free regression file passes **4/4 with zero skips**, including frame transport/digest checks and the real-run fixture. The new ESSENTIAL case replays all eight logged equality patterns: ordinary settling rejects them, diagnostic acquisition retains all frames, and the six-machine matrix completes while reporting differing bytes. It also requires missing, corrupt, stale and failed evidence to remain rejected. Static checks and actual visual rendering are reserved to hosted CI. After publishing this reviewed head, LEAD re-dispatches exactly:
+
+```sh
+bash scripts/test-prune/lead-commands.sh probe work/aeon-1713-refset4 V-projects-390-light,V-account-use-matrix-1440-dark,V-account-use-matrix-1440-light,V-agent-rules-390-dark,V-decision-desk-1024-dark,V-decision-desk-1440-dark
+```
+
+The helper verifies that its published ref equals local HEAD before dispatch. This worker performs no push, deployment, workflow dispatch, reference publication, pin change, model CLI call or review gate.
+
 ## P07 runtime preparation — AEON-1679
 
 The first P07 round added runtime prerequisites and left browser registrations at **451 → 451** across 33 owners, against the planned ceiling of 27. That round removed or demoted no browser case, historical drift identity, launch record, tier or visual expectation. Cut A below records the subsequent unprotected reductions; the full P07 consolidation remains incomplete. P01's visual approval is still `pending`, its baseline authority is `pending-review`, and its attachment/digest pins are unset. `check.mjs` deliberately requires that authority before a protected cut; this package preserves that requirement. The original reader-drift negative control also remains until the retained browser journey can be proven. Session rows, composer/reader geometry, terminal side effects, exact-session controls, receipts, approval and recovery journeys all retain their original browser coverage.
