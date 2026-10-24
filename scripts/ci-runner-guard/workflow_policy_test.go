@@ -360,9 +360,9 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		"main-ref":       "github.ref == 'refs/heads/main'",
 		"attempt":        "needs.runner-route.outputs.run_attempt == github.run_attempt",
 	} {
-		add("ci-pool/"+name, "ci.yml", "runner selection is not proven", func(w map[string]any) {
+		add("ci-pool/"+name, "ci.yml", "must use literal runs-on: ubuntu-latest", func(w map[string]any) {
 			job := mapping(mapping(w["jobs"])["go-test"])
-			job["runs-on"] = strings.Replace(job["runs-on"].(string), old, "true", 1)
+			job["runs-on"] = strings.Replace(routedRunner, old, "true", 1)
 		})
 	}
 
@@ -488,7 +488,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 			}
 		})
 	}
-	add("collapsed-shards", "ci.yml", "routed shard count", func(w map[string]any) {
+	add("collapsed-shards", "ci.yml", "hosted shard count", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["go-test"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
 	add("write-permissions", "ci.yml", "read-only token permissions", func(w map[string]any) { w["permissions"] = map[string]any{"contents": "write"} })

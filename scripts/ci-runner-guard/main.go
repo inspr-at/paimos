@@ -21,6 +21,12 @@ const mainRoutedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_disp
 const routedRunner = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 const routedGoShards = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
+const visualCaptureRefusal = `set -euo pipefail
+if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$GITHUB_REF" != refs/heads/main ] || [ "$GITHUB_WORKFLOW_REF" != inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main ]; then
+  echo '::error::Fixed renderer capture requires visual-capture.yml dispatched on main.'
+  exit 1
+fi`
+
 const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
 // These exact mappings are the sole authority for workflow concurrency. Jobs
@@ -68,6 +74,7 @@ var hostedRunners = map[string]bool{
 	"macos-15": true, "macos-15-intel": true,
 }
 var secretContext = regexp.MustCompile(`(?i)\bsecrets\b`)
+var fixedCaptureRunner = regexp.MustCompile(`(?i)\bagm2\b`)
 
 // Artifact separators include underscores; x64 must be a token so harmless
 // names such as linux64 are not mistaken for an x86 architecture.
@@ -143,6 +150,17 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 	var problems []string
 	reject := func(reason string) { problems = append(problems, name+": "+reason) }
+	if name != "visual-capture.yml" && fixedCaptureRunner.MatchString(fmt.Sprint(workflow)) {
+		reject("agm2 is reserved to visual-capture.yml dispatched on main")
+	}
+	if name == "visual-capture.yml" {
+		if err := checkVisualCapture(workflow); err != nil {
+			reject(err.Error())
+		}
+	}
+	if name == "ci.yml" && !readOnlyPermissions(workflow["permissions"]) {
+		reject("CI requires explicit read-only token permissions")
+	}
 	if hasEvent(workflow["on"], "pull_request_target") {
 		reject("pull_request_target is forbidden")
 	}
@@ -167,6 +185,21 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 	}
 	for id, value := range mapping(workflow["jobs"]) {
 		job := mapping(value)
+		if name == "ci.yml" && job["uses"] == nil && job["runs-on"] != "ubuntu-latest" {
+			reject(fmt.Sprintf("CI job %q must use literal runs-on: ubuntu-latest", id))
+		}
+		if name == "ci.yml" && id == "go-test" {
+			permissions := job["permissions"]
+			if permissions == nil {
+				permissions = workflow["permissions"]
+			}
+			if !readOnlyPermissions(permissions) {
+				reject("CI Go tests require explicit read-only token permissions")
+			}
+			if job["environment"] != nil || containsSecret(job) || containsSecret(workflow["env"]) {
+				reject("CI Go tests must not receive environments or secrets")
+			}
+		}
 		jobName, _ := job["name"].(string)
 		if strings.EqualFold(strings.TrimSpace(id), "gate/cross-family") ||
 			strings.EqualFold(strings.TrimSpace(jobName), "gate/cross-family") {
@@ -219,6 +252,62 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		}
 	}
 	return problems
+}
+
+// OPS-444 is enforced by GitHub's org runner group, restricted to this exact
+// workflow at refs/heads/main. Repository tests are regression protection;
+// they cannot enforce admission against a fork's edited workflow.
+func checkVisualCapture(workflow map[string]any) error {
+	events := mapping(workflow["on"])
+	if len(events) != 1 || !hasEvent(events, "workflow_dispatch") {
+		return fmt.Errorf("fixed capture must trigger only on workflow_dispatch")
+	}
+	inputs := mapping(mapping(events["workflow_dispatch"])["inputs"])
+	setting := mapping(inputs["visual_renderer"])
+	if len(inputs) != 1 || setting["type"] != "choice" || setting["required"] != true ||
+		setting["default"] != "agm2-baseline" || !reflect.DeepEqual(setting["options"], []any{"agm2-baseline", "agm2-skia-runtime-disabled"}) {
+		return fmt.Errorf("fixed capture must accept only the two prepared renderer settings")
+	}
+	if workflow["name"] != "Visual capture" || !reflect.DeepEqual(mapping(workflow["permissions"]), map[string]any{"contents": "read"}) || containsSecret(workflow) {
+		return fmt.Errorf("fixed capture requires its dedicated identity, contents: read and no secrets")
+	}
+	jobs := mapping(workflow["jobs"])
+	job := mapping(jobs["visual-reference-capture"])
+	if len(jobs) != 1 || job == nil || !reflect.DeepEqual(job["runs-on"], []any{"self-hosted", "linux", "x64", "agm2"}) {
+		return fmt.Errorf("fixed capture requires exactly one job on the prepared agm2 labels")
+	}
+	if job["if"] != nil || job["continue-on-error"] != nil || job["environment"] != nil || job["permissions"] != nil ||
+		!reflect.DeepEqual(mapping(mapping(job["defaults"])["run"]), map[string]any{"shell": "bash"}) {
+		return fmt.Errorf("fixed capture must fail closed with inherited read-only permissions and no environment")
+	}
+	strategy := mapping(job["strategy"])
+	if strategy["fail-fast"] != false || strategy["max-parallel"] != 1 ||
+		!reflect.DeepEqual(mapping(strategy["matrix"]), map[string]any{"runner": []any{1, 2}}) {
+		return fmt.Errorf("fixed capture must retain two serial candidate jobs without fail-fast")
+	}
+	if minutes, ok := job["timeout-minutes"].(int); !ok || minutes <= 0 || minutes > 60 {
+		return fmt.Errorf("fixed capture needs a timeout of at most 60 minutes")
+	}
+	container := mapping(job["container"])
+	image, _ := container["image"].(string)
+	if !regexp.MustCompile(`^mcr\.microsoft\.com/playwright:[^@\s]+@sha256:[a-f0-9]{64}$`).MatchString(image) || container["credentials"] != nil {
+		return fmt.Errorf("fixed capture requires the digest-pinned Playwright container without credentials")
+	}
+	env := mapping(job["env"])
+	if env["AEON_VISUAL_RUNNER"] != "agm2" || env["AEON_VISUAL_CAPTURE"] != "1" || env["AEON_VISUAL_RENDERER_SETTING"] != "${{ inputs.visual_renderer }}" {
+		return fmt.Errorf("fixed capture must bind the prepared renderer and runner identity")
+	}
+	steps, _ := job["steps"].([]any)
+	if len(steps) < 2 || len(mapping(steps[0])) != 2 || mapping(steps[0])["name"] != "Refuse capture outside the trusted main workflow" ||
+		strings.TrimSpace(fmt.Sprint(mapping(steps[0])["run"])) != visualCaptureRefusal {
+		return fmt.Errorf("fixed capture must refuse a non-main ref before checkout")
+	}
+	checkout := mapping(steps[1])
+	if !strings.HasPrefix(fmt.Sprint(checkout["uses"]), "actions/checkout@") || checkout["if"] != nil ||
+		mapping(checkout["with"])["persist-credentials"] != false || mapping(checkout["with"])["ref"] != "${{ github.sha }}" {
+		return fmt.Errorf("fixed capture must check out the dispatched main SHA without persisted credentials")
+	}
+	return nil
 }
 
 func checkRunnerRoute(workflow map[string]any) error {
@@ -367,6 +456,9 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 	for id, value := range jobs {
 		job := mapping(value)
 		reject := func(reason string) { problems = append(problems, name+"/"+id+": "+reason) }
+		if name == "visual-capture.yml" && id == "visual-reference-capture" && checkVisualCapture(workflow) == nil {
+			continue
+		}
 		if uses, ok := job["uses"].(string); ok {
 			// The completion target is protectedJob and checked independently as
 			// hosted-only; only the verified release index may call it. No pool
@@ -603,6 +695,9 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		if job["if"] != condition || !hasNeed(job["needs"], "ci-plan") || !hasNeed(job["needs"], "tree-reuse") {
 			return fmt.Errorf("required CI job %q must use the reviewed PR classification gate", id)
 		}
+	}
+	if mapping(mapping(mapping(jobs["go-test"])["strategy"])["matrix"])["shard"] != routedGoShards {
+		return fmt.Errorf("hosted shard count must retain the guarded four-way layout and two/seven fallback")
 	}
 	if mapping(tiers["outputs"])["web_shards"] != "${{ steps.tiers.outputs.web_shards }}" {
 		return fmt.Errorf("ci-plan must publish the planned web shard list")

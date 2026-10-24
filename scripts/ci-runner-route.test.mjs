@@ -227,10 +227,10 @@ test("router outputs bind each attempt and refuse a missing or invalid attempt",
   }
 });
 
-test("CI expressions honor the router switch, fork boundary and attempt for runner and shard selection", () => {
+test("CI stays hosted while shard selection honors the router switch, fork boundary and attempt", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const shardJob = workflow.split("  go-test:\n")[1].split("\n  go-timing:")[0];
-  const runnerExpression = shardJob.match(/^    runs-on: (.+)$/m)[1];
+  const runnerSelection = shardJob.match(/^    runs-on: (.+)$/m)[1];
   const shardExpression = shardJob.match(/^        shard: (.+)$/m)[1];
   // Evaluate the checked-in expressions, not a separate implementation of the
   // workflow decision. These expressions use the common JS/Actions operators.
@@ -255,7 +255,7 @@ test("CI expressions honor the router switch, fork boundary and attempt for runn
         const admitted = validRef && (forged || allowed.includes(event)) && run_attempt === 1 &&
           (event !== "pull_request" || headRepository === repository);
         const label = JSON.stringify({ poolEvents, event, ref, headRepository, run_attempt, forged });
-        assert.deepEqual(evaluate(runnerExpression, github, outputs), admitted ? selected.runs_on : ["ubuntu-latest"], label);
+        assert.equal(runnerSelection, "ubuntu-latest", label);
         assert.deepEqual(evaluate(shardExpression, github, outputs), admitted ? [1, 2, 3, 4] :
           event === "pull_request" ? [1, 2] : [1, 2, 3, 4, 5, 6, 7], label);
         assert.deepEqual(evaluate(shardExpression, github, outputs, "full"), admitted ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7], label);
@@ -265,7 +265,7 @@ test("CI expressions honor the router switch, fork boundary and attempt for runn
     for (const changes of [{ online: false }, { busy: true }, { idle_runners: 3 }, { observed_at: new Date(now - 30000).toISOString() }]) {
       const selected = route(event, changes, { requiredIdle: 4, poolEvents: enabledEvents, headRepository: repository, ref });
       const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
-      assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
+      assert.equal(runnerSelection, "ubuntu-latest");
       assert.deepEqual(evaluate(shardExpression, github, outputs, "full"), [1, 2, 3, 4, 5, 6, 7]);
     }
   }
@@ -278,7 +278,7 @@ test("CI expressions honor the router switch, fork boundary and attempt for runn
       const selected = route(event, changes, { requiredIdle: 4, poolEvents: enabledEvents, headRepository: repository, ref });
       assert.equal(selected.reason, "unsupported-pool-event");
       const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
-      assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
+      assert.equal(runnerSelection, "ubuntu-latest");
       assert.deepEqual(evaluate(shardExpression, github, outputs), event === "pull_request" ? [1, 2] : [1, 2, 3, 4, 5, 6, 7]);
       assert.deepEqual(evaluate(shardExpression, github, outputs, "full"), [1, 2, 3, 4, 5, 6, 7]);
     }
