@@ -10350,6 +10350,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestAccountRetirementResponseSchemas","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestArchitectureGuideSources","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestCombinedHarnessSessionV15Fixture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestDeployTargetBytesMatchStable100","tier":"GATED-FULL"}

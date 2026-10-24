@@ -11,6 +11,8 @@ The next generation of Paimos: agents first, voice first, multi-tenant, hybrid h
 - Every row carries `tenant_id`; Postgres row-level security enforces isolation.
 - Stack: Go (standard library HTTP, `pgx`, `sqlc`-style typed SQL), Postgres 18 + pgvector, Vue 3 + TypeScript + Vite, one OpenAPI 3.1 contract authored in `api/areas/*.yaml` plus `api/openapi.base.yaml` (`api/openapi.yaml` is generated output rebuilt by `node api/generate.mjs --write`), server-sent events for live updates, OIDC through Zitadel for people, scoped API keys for agents.
 
+Read the [architecture guide](docs/architecture-guide.md) for the package map, canonical worked examples and legacy shapes not to copy.
+
 ## Layout
 
 ```
