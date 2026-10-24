@@ -335,7 +335,7 @@ func TestDeliverySevenDayJobBackfillIsIdempotentAndBounded(t *testing.T) {
 	if source.RetryAt == nil || !source.RetryAt.Equal(f.at.Add(2*time.Minute)) {
 		t.Fatalf("GitHub's rate limit was not persisted: %+v", source)
 	}
-	if source.LastReadError == nil || source.LastReadError.Reason != "github_unavailable" || source.LastReadError.Permission != nil {
+	if source.LastReadError == nil || source.LastReadError.Reason != "rate_limited" || source.LastReadError.Permission != nil {
 		t.Fatalf("rate limiting was mistaken for a missing permission: %+v", source.LastReadError)
 	}
 	calls := len(g.calls)
@@ -841,7 +841,13 @@ func TestDeliveryPreflightCatchupListsOnlyPreflight(t *testing.T) {
 	var step BackfillResult
 	backfill := "/api/projects/" + f.project + "/delivery/metrics/backfill"
 	for i := 0; i < 4 && step.Phase != "jobs" && step.Phase != "done"; i++ {
-		f.call(t, f.person, "POST", backfill, map[string]any{}, 200, &step)
+		path := backfill
+		if i == 0 {
+			// A manual/periodic check must finish the missing workflow before
+			// replacing the legacy cursor with an incremental refresh.
+			path = "/api/projects/" + f.project + "/delivery/metrics/check-again"
+		}
+		f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
 	}
 	sawPreflight, sawCI := false, false
 	for _, call := range g.calls {

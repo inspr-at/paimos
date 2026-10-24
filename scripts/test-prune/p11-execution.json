@@ -824,7 +824,7 @@
           ]
         }
       ],
-      "actualAfter": 6,
+      "actualAfter": 7,
       "round": "cutA",
       "scope": "Unprotected identical assertion copies and redundant screenshot tours; distinct interaction and authority cases remain."
     },
@@ -2649,7 +2649,7 @@
     "Hosted CI must prove the corrected six-spec boundaries after-run and full static; approved entry points refused with exit 3 at the bounded retry limit.",
     "Unique lower-layer conversions remain future work; their browser donors stay, including both mounted Delivery section-switch cases."
   ],
-  "actualAfter": 386,
+  "actualAfter": 387,
   "frozenBefore": 493,
   "afterOnInitialBase": 375,
   "latestMainCommit": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
@@ -2669,6 +2669,9 @@
     "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light",
     "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 dark",
     "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 light"
+  ],
+  "postPruneAdditionalCases": [
+    "browser:tests/delivery-numbers.spec.ts:AEON-1710: history failure pills stay on one line and expose the full reason"
   ],
   "measurements": {
     "scope": "Five changed specs, identical mbp2606 LEAD entry point and one worker per spec; not the full P11 package.",

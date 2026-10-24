@@ -559,7 +559,7 @@ func checksBackfillStep(get func(string, any) error, repository, _, _ string, cu
 				if !validMetricSuite(suite) || suite.Head != head.Head {
 					return cursor, batch, errRead
 				}
-				if suite.App.Slug != "github-actions" || suite.Created.Before(cursor.Since) || suite.Created.After(c.Until) {
+				if suite.App.Slug != "github-actions" || suite.Created.Before(historyReadSince(cursor)) || suite.Created.After(c.Until) {
 					continue
 				}
 				if reviewgate.ValidSHA(head.Tree) {
@@ -584,7 +584,7 @@ func checksBackfillStep(get func(string, any) error, repository, _, _ string, cu
 					} `json:"tree"`
 				} `json:"commit"`
 			}
-			query := url.Values{"sha": {ref}, "since": {cursor.Since.Format(time.RFC3339)}, "until": {c.Until.Format(time.RFC3339)}, "per_page": {"100"}, "page": {strconv.Itoa(c.Page)}}
+			query := url.Values{"sha": {ref}, "since": {historyReadSince(cursor).Format(time.RFC3339)}, "until": {c.Until.Format(time.RFC3339)}, "per_page": {"100"}, "page": {strconv.Itoa(c.Page)}}
 			if err := counted("/commits?"+query.Encode(), &commits); err != nil {
 				return cursor, batch, err
 			}
@@ -639,7 +639,7 @@ func checksBackfillStep(get func(string, any) error, repository, _, _ string, cu
 				if p.Updated.IsZero() {
 					return cursor, batch, errRead
 				}
-				if p.Updated.Before(cursor.Since) {
+				if p.Updated.Before(historyReadSince(cursor)) {
 					older = true
 					continue
 				}
@@ -660,6 +660,8 @@ func checksBackfillStep(get func(string, any) error, repository, _, _ string, cu
 			}
 		case "done":
 			cursor.Phase = "done"
+			through := c.Until
+			cursor.ReadThrough = &through
 			return cursor, batch, nil
 		default:
 			return cursor, batch, errRead

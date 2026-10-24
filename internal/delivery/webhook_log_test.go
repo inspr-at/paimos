@@ -313,8 +313,8 @@ func TestWebhookFailureGitHubMetadata(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 						t.Fatal(err)
 					}
-					if len(request.Permissions) != 5 {
-						t.Fatal("changed read authority")
+					if len(request.Permissions) != 2 {
+						t.Fatal("merge proof must request only pull requests and metadata")
 					}
 					for _, level := range request.Permissions {
 						if level != "read" {

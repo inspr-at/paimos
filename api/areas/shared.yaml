@@ -481,9 +481,11 @@ components:
       additionalProperties: false
       required: [reason, permission, at]
       properties:
-        reason: {type: string, enum: [actions_read_missing, not_installed, github_unavailable]}
+        reason: {type: string, enum: [actions_read_missing, not_installed, github_unavailable, rate_limited, timed_out, github_error, unreachable]}
         permission: {type: [string, 'null'], enum: [actions:read, null], description: 'The missing GitHub permission, when known.'}
         at: {type: string, format: date-time}
+        reset_at: {type: string, format: date-time, description: 'Earliest retry allowed by GitHub rate-limit headers, when known.'}
+        status_code: {type: integer, minimum: 100, maximum: 599, description: 'GitHub HTTP response status, when a response was received.'}
     DeliveryMetricSource:
       type: object
       additionalProperties: false

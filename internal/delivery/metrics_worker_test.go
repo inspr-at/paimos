@@ -2,6 +2,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,11 +12,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -53,8 +57,8 @@ func TestDeliveryHistoryActionsRefusalFromGitHub(t *testing.T) {
 		{"jobs", "/actions/runs/7/attempts/1/jobs", "Resource not accessible by integration", "actions_read_missing", 403, true},
 		{"other Actions refusal", "/actions/runs/7/jobs", "Other private response", "actions_read_missing", 403, true},
 		{"missing", "/actions/runs", "Not Found", "not_installed", 404, false},
-		{"non Actions refusal", "/pulls/7", "Resource not accessible by integration", "github_unavailable", 403, false},
-		{"outage", "/actions/runs", "Private server error", "github_unavailable", 503, false},
+		{"non Actions refusal", "/pulls/7", "Resource not accessible by integration", "github_error", 403, false},
+		{"outage", "/actions/runs", "Private server error", "github_error", 503, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reads, revoked atomic.Int64
@@ -199,8 +203,8 @@ func TestDeliveryHistoryPartialJobsRetainTransientAndPermissionPriority(t *testi
 		name, reason string
 		failures     []error
 	}{
-		{"transient then missing", "github_unavailable", []error{transient, missing}},
-		{"missing then transient", "github_unavailable", []error{missing, transient}},
+		{"transient then missing", "github_error", []error{transient, missing}},
+		{"missing then transient", "github_error", []error{missing, transient}},
 		{"transient then permission then missing", "actions_read_missing", []error{transient, permission, missing}},
 		{"missing then permission then transient", "actions_read_missing", []error{missing, permission, transient}},
 	} {
@@ -629,5 +633,529 @@ func TestDeliveryHistoryWorkerRechecksRevokedAuthority(t *testing.T) {
 	f.m.sweepMetrics(t.Context())
 	if len(g.calls) != 0 {
 		t.Fatal("revoked principal still read history")
+	}
+}
+
+func TestDeliveryHistoryRefreshDefersRevokedAuthority(t *testing.T) {
+	// Risk: finished sources whose linking authority has expired retry on every
+	// sweep, locking the tenant and logging forever without reaching GitHub.
+	for _, scenario := range []string{"inactive principal", "expired key", "revoked permission"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, g := newMetricsFixture(t)
+			f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+			through := f.at.Add(-metricRefreshInterval - time.Minute)
+			raw, err := json.Marshal(backfillCursor{Since: dayStart(through), Phase: "done", ReadThrough: &through})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_done_at=$3,backfill_pending=false WHERE project_id=$1`, f.project, raw, through); err != nil {
+					return err
+				}
+				switch scenario {
+				case "inactive principal":
+					_, err = tx.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, f.person.ID)
+				case "expired key":
+					var key string
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id,expires_at) VALUES($1,$2,'History fixture','history-fixture',decode(repeat('00',32),'hex'),$3,$4,$5) RETURNING id::text`, f.person.TenantID, f.agent.ID, f.agent.Scopes, f.person.ID, f.at.Add(-time.Hour)).Scan(&key); err != nil {
+						return err
+					}
+					_, err = tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_actor_id=$2,backfill_key_id=$3 WHERE project_id=$1`, f.project, f.agent.ID, key)
+				case "revoked permission":
+					_, err = tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+				}
+				return err
+			})
+			var output bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+			defer slog.SetDefault(previous)
+			for range 2 {
+				// A new process has no in-memory cursor that could hide a hot loop.
+				fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+				fresh.now = f.m.now
+				fresh.sweepMetrics(t.Context())
+			}
+			if attempts := bytes.Count(output.Bytes(), []byte("delivery history step incomplete")); attempts != 1 {
+				t.Errorf("refresh attempts = %d, want one", attempts)
+			}
+			if g.reads != 0 || len(g.calls) != 0 {
+				t.Fatal("revoked authority reached GitHub")
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				stored, err := loadMetricSourceTx(t.Context(), tx, f.project, false)
+				if err != nil {
+					return err
+				}
+				if stored.RetryAt == nil || !stored.RetryAt.Equal(f.at.Add(metricRefreshInterval)) || stored.Pending || stored.Cursor.Phase != "done" || !stored.Cursor.ReadThrough.Equal(through) || stored.LastReadError != nil {
+					t.Fatalf("revoked refresh lost its durable delay or changed history: %+v", stored)
+				}
+				return nil
+			})
+		})
+	}
+}
+
+func historyTestApp(t *testing.T, handle func(*http.Request) (*http.Response, error)) AppReader {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "fixture.pem")
+	if err := os.WriteFile(file, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		var body any
+		switch r.Method + " " + r.URL.Path {
+		case "GET /app/installations/456":
+			body = map[string]any{"id": 456, "app_id": 123, "permissions": map[string]string{"actions": "read", "checks": "read", "contents": "read", "pull_requests": "read", "metadata": "read"}}
+		case "POST /app/installations/456/access_tokens":
+			var in struct {
+				Permissions map[string]string `json:"permissions"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Fatal(err)
+			}
+			body = map[string]any{"token": "history-test-fixture", "permissions": in.Permissions, "repositories": []any{map[string]string{"full_name": "example/delivery"}}}
+		case "DELETE /installation/token":
+			return &http.Response{StatusCode: 204, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+		default:
+			return handle(r)
+		}
+		raw, _ := json.Marshal(body)
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+	})}
+	return AppReader{App: &crossreview.GitHubApp{Config: crossreview.AppConfig{ID: "123", InstallationID: "456", TenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Repository: "example/delivery", KeyFile: file}, Client: client}}
+}
+
+func TestDeliveryHistoryClassifiesFailuresAndHonoursReset(t *testing.T) {
+	// Risk: sanitized transport errors lose their real cause or a header deadline
+	// is capped to an hour, including a 403 incorrectly called a missing grant.
+	at := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	reset := at.Add(2 * time.Hour)
+	for _, tc := range []struct {
+		name, reason string
+		status       int
+		headers      http.Header
+		failure      error
+		reset        *time.Time
+	}{
+		{name: "primary", reason: "rate_limited", status: 403, headers: http.Header{"X-Ratelimit-Remaining": {"0"}, "X-Ratelimit-Reset": {strconv.FormatInt(reset.Unix(), 10)}}, reset: &reset},
+		{name: "retry seconds", reason: "rate_limited", status: 429, headers: http.Header{"Retry-After": {"7200"}}, reset: &reset},
+		{name: "retry date", reason: "rate_limited", status: 403, headers: http.Header{"Retry-After": {reset.Format(http.TimeFormat)}}, reset: &reset},
+		{name: "timeout", reason: "timed_out", failure: context.DeadlineExceeded},
+		{name: "network", reason: "unreachable", failure: &net.DNSError{Err: "fixture-only private transport text", Name: "private.invalid"}},
+		{name: "server", reason: "github_error", status: 503},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := historyTestApp(t, func(*http.Request) (*http.Response, error) {
+				if tc.failure != nil {
+					return nil, tc.failure
+				}
+				return &http.Response{StatusCode: tc.status, Header: tc.headers, Body: io.NopCloser(strings.NewReader(`{"message":"private fixture response"}`))}, nil
+			})
+			err := reader.MetricsRead(t.Context(), reader.App.Config.TenantID, func(get func(string, any) error, _ string) error { return get("/actions/runs", &map[string]any{}) })
+			diagnostic := metricError(err, at)
+			if err == nil || diagnostic.Reason != tc.reason || diagnostic.Permission != nil {
+				t.Fatalf("reason: %+v err=%v", diagnostic, err)
+			}
+			if tc.status != 0 && (diagnostic.StatusCode == nil || *diagnostic.StatusCode != tc.status) {
+				t.Fatal("status code lost")
+			}
+			if tc.reset != nil && (diagnostic.ResetAt == nil || !diagnostic.ResetAt.Equal(*tc.reset) || !metricRetry(err, diagnostic, &metricSourceRow{}).Equal(*tc.reset)) {
+				t.Fatalf("reset deadline lost: %+v", diagnostic)
+			}
+			if strings.Contains(err.Error(), "private") {
+				t.Fatal("upstream text escaped the boundary")
+			}
+		})
+	}
+	if got := metricError(crossreview.ErrTimedOut, at); got.Reason != "timed_out" {
+		t.Fatal("body-read timeout lost", got)
+	}
+}
+
+func TestDeliveryHistoryStopsAtLowRemaining(t *testing.T) {
+	// Risk: successful responses exhaust the shared installation budget before
+	// the reader notices a 429; revocation must still run when the read stops.
+	at := time.Now().UTC()
+	reset := at.Add(2 * time.Hour).Truncate(time.Second)
+	calls := 0
+	reader := historyTestApp(t, func(*http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: 200, Header: http.Header{"X-Ratelimit-Remaining": {"99"}, "X-Ratelimit-Reset": {strconv.FormatInt(reset.Unix(), 10)}}, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})
+	err := reader.MetricsRead(t.Context(), reader.App.Config.TenantID, func(get func(string, any) error, _ string) error {
+		if err := get("/actions/runs?page=1", &map[string]any{}); err != nil {
+			return err
+		}
+		return get("/actions/runs?page=2", &map[string]any{})
+	})
+	diagnostic := metricError(err, at)
+	if calls != 1 || diagnostic.Reason != "rate_limited" || diagnostic.ResetAt == nil || !diagnostic.ResetAt.Equal(reset) || !metricRetry(err, diagnostic, &metricSourceRow{}).Equal(reset) {
+		t.Fatalf("budget not retained: calls=%d diagnostic=%+v err=%v", calls, diagnostic, err)
+	}
+}
+
+func TestDeliveryHistoryIncrementalVolumeAndPendingRunsSurviveRestart(t *testing.T) {
+	// The 186-run case matches the incident-day CI count; 900 is a stress case.
+	for _, storedRuns := range []int64{186, 900} {
+		t.Run(strconv.FormatInt(storedRuns, 10), func(t *testing.T) {
+			// Risk: a busy-day refresh rereads all stored attempts, loses queued runs
+			// behind a watermark, or relies on process memory to retain its position.
+			day := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
+			cutoff, now := day.Add(12*time.Hour), day.Add(13*time.Hour)
+			all := make([]githubRun, 0, storedRuns+4)
+			for id := int64(1); id <= storedRuns+4; id++ {
+				created := day.Add(time.Duration(id) * 30 * time.Second)
+				if id > storedRuns {
+					created = cutoff.Add(time.Duration(id-storedRuns) * time.Minute)
+				}
+				conclusion := "success"
+				all = append(all, githubRun{ID: id, Attempt: 2, Name: "CI", Path: defaultCIWorkflow, Event: "push", Branch: "main", Head: strings.Repeat("a", 40), Status: "completed", Conclusion: &conclusion, Created: created, Updated: created.Add(time.Minute)})
+			}
+			all[storedRuns+3].Created = cutoff.Add(-time.Minute)
+			all[storedRuns+3].Status = "in_progress"
+			calls, oldAttemptReads := 0, 0
+			read := func(endpoint string, out any) error {
+				calls++
+				u, _ := url.Parse(endpoint)
+				var body any
+				switch {
+				case strings.HasPrefix(u.Path, "/actions/workflows/"):
+					from, until := day, now
+					if parts := strings.Split(u.Query().Get("created"), ".."); len(parts) == 2 {
+						var err error
+						from, err = time.Parse(time.RFC3339, parts[0])
+						if err != nil {
+							t.Fatal(err)
+						}
+						until, err = time.Parse(time.RFC3339, parts[1])
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					var runs []githubRun
+					for i := len(all) - 1; i >= 0; i-- {
+						if !all[i].Created.Before(from) && !all[i].Created.After(until) {
+							runs = append(runs, all[i])
+						}
+					}
+					page, _ := strconv.Atoi(u.Query().Get("page"))
+					start := min((page-1)*100, len(runs))
+					end := min(start+100, len(runs))
+					body = githubRunsPage{Total: len(runs), Runs: runs[start:end]}
+				case strings.HasPrefix(u.Path, "/actions/runs/"):
+					var id int64
+					var attempt int
+					if strings.Contains(u.Path, "/attempts/") {
+						if _, err := fmt.Sscanf(u.Path, "/actions/runs/%d/attempts/%d", &id, &attempt); err != nil {
+							t.Fatal(err)
+						}
+						if id <= storedRuns {
+							oldAttemptReads++
+						}
+					} else {
+						if _, err := fmt.Sscanf(u.Path, "/actions/runs/%d", &id); err != nil {
+							t.Fatal(err)
+						}
+						attempt = 2
+					}
+					run := all[id-1]
+					run.Attempt = attempt
+					body = run
+				case u.Path == "":
+					body = map[string]string{"full_name": "example/delivery", "default_branch": "main"}
+				case u.Path == "/pulls":
+					body = []any{}
+				default:
+					t.Fatalf("unexpected endpoint %s", endpoint)
+				}
+				raw, err := json.Marshal(body)
+				if err != nil {
+					return err
+				}
+				return json.Unmarshal(raw, out)
+			}
+			finish := func(cursor backfillCursor, clock time.Time, known bool) backfillCursor {
+				for step := 0; step < 100; step++ {
+					lookup := func(id int64) int {
+						if known && id <= storedRuns {
+							return 2
+						}
+						return 0
+					}
+					next, batch, err := backfillStep(read, "example/delivery", []string{defaultCIWorkflow}, cursor, clock, lookup)
+					if err != nil || batch.Calls > backfillCallBudget {
+						t.Fatalf("bounded step: calls=%d err=%v", batch.Calls, err)
+					}
+					raw, err := json.Marshal(next)
+					if err != nil {
+						t.Fatal(err)
+					}
+					// Every step is decoded as a restarted server would load it.
+					cursor = backfillCursor{}
+					if err := json.Unmarshal(raw, &cursor); err != nil {
+						t.Fatal(err)
+					}
+					if cursor.Phase == "done" {
+						return cursor
+					}
+				}
+				t.Fatal("fixture did not complete")
+				return cursor
+			}
+			initial := finish(backfillCursor{Since: day, Phase: "runs", Day: day.Format("2006-01-02"), Page: 1, ReadUntil: &cutoff, Workflows: []string{defaultCIWorkflow}}, cutoff, false)
+			if len(initial.WaitingRuns) != 1 || initial.WaitingRuns[0] != storedRuns+4 || initial.ReadThrough == nil || !initial.ReadThrough.Equal(cutoff) {
+				t.Fatalf("pending run or watermark lost: %+v", initial)
+			}
+			all[storedRuns+3].Status = "completed"
+			calls, oldAttemptReads = 0, 0
+			finish(backfillCursor{Since: day, Phase: "runs", Day: day.Format("2006-01-02"), Page: 1}, now, false)
+			before := calls
+			calls, oldAttemptReads = 0, 0
+			final := finish(incrementalCursor(initial, cutoff, now), now, true)
+			if calls >= before/10 || oldAttemptReads != 0 || len(final.WaitingRuns) != 0 || final.ReadThrough == nil || !final.ReadThrough.Equal(now) {
+				t.Fatalf("incremental refresh: before=%d after=%d old_attempt_reads=%d cursor=%+v", before, calls, oldAttemptReads, final)
+			}
+			t.Logf("busy-day fixture (%d stored runs, 3 new runs, 1 late completion; two attempts each): requests per refresh %d -> %d", storedRuns, before, calls)
+
+		})
+	}
+}
+
+func TestDeliveryHistoryPartialProgressAndSettingsRevisionSurviveRestart(t *testing.T) {
+	// Risk: a limit on page 2 discards page 1; a cold server rereads it; Check
+	// again ignores the reset; background state invalidates the settings editor.
+	f, g := newMetricsFixture(t)
+	f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+	settings := "/api/projects/" + f.project + "/delivery-settings"
+	f.call(t, f.person, "PUT", settings, map[string]any{"deadlines": map[string]int{"ci_green": 45}}, 200, nil)
+	var revision string
+	f.tx(t, func(tx pgx.Tx) error {
+		_, value, err := storedSettingsTx(t.Context(), tx, &f.project)
+		revision = value
+		return err
+	})
+	reset := f.at.Add(2 * time.Hour)
+	limited := true
+	g.respond = func(endpoint string) (any, error) {
+		u, _ := url.Parse(endpoint)
+		if strings.HasPrefix(u.Path, "/actions/workflows/") && u.Query().Get("page") == "2" && limited {
+			return nil, &webhookGitHubError{class: "secondary_limit", reset: reset, cause: &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true}}
+		}
+		if strings.HasPrefix(u.Path, "/actions/workflows/ci.yml/") && u.Query().Get("page") == "1" && limited {
+			runs := make([]githubRun, 100)
+			for i := range runs {
+				success := "success"
+				runs[i] = githubRun{ID: int64(i + 1), Attempt: 1, Name: "CI", Path: defaultCIWorkflow, Event: "push", Head: strings.Repeat("a", 40), Status: "completed", Conclusion: &success, Created: f.at.Add(-time.Hour), Updated: f.at.Add(-time.Minute)}
+			}
+			return githubRunsPage{Total: 101, Runs: runs}, nil
+		}
+		return emptyHistory(f.m.config.Repository)(endpoint)
+	}
+	path := "/api/projects/" + f.project + "/delivery/metrics"
+	f.call(t, f.person, "POST", path+"/backfill", map[string]any{"days": 1, "restart": true}, 502, nil)
+	f.tx(t, func(tx pgx.Tx) error {
+		source, err := loadMetricSourceTx(t.Context(), tx, f.project, false)
+		if err != nil {
+			return err
+		}
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_metric_runs WHERE repository=$1`, f.m.config.Repository).Scan(&count); err != nil {
+			return err
+		}
+		if count != 100 || source.Cursor == nil || source.Cursor.Page != 2 || source.LastReadError.Reason != "rate_limited" || !source.RetryAt.Equal(reset) {
+			t.Fatalf("progress lost: count=%d source=%+v", count, source)
+		}
+		_, after, err := storedSettingsTx(t.Context(), tx, &f.project)
+		if after != revision {
+			t.Fatal("reader changed the user settings revision")
+		}
+		return err
+	})
+	calls := len(g.calls)
+	f.call(t, f.person, "POST", path+"/check-again", nil, 200, nil)
+	if len(g.calls) != calls {
+		t.Fatal("Check again spent budget before reset")
+	}
+	f.at, limited = reset, false
+	fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+	fresh.now = f.m.now
+	fresh.sweepMetrics(t.Context())
+	if len(g.calls) == calls || !strings.Contains(g.calls[calls], "page=2") {
+		t.Fatalf("cold server did not resume its durable page: %v", g.calls[calls:])
+	}
+	if source := historySource(t, f); source.LastReadError != nil || source.Backfill != "done" {
+		t.Fatalf("resume failed: %+v", source)
+	}
+}
+
+func TestDeliveryMergeWebhookProofUsesOnlyRequiredInstallationGrants(t *testing.T) {
+	// Risk: completion asks GitHub to mint checks/statuses/contents grants it
+	// never uses; an installation with valid PR access returns 422 and all three
+	// closure, destroyed-group and push completion paths keep failing.
+	f := newFixture(t)
+	sha := strings.Repeat("b", 40)
+	reader := historyTestApp(t, func(r *http.Request) (*http.Response, error) {
+		var body any
+		switch r.URL.Path {
+		case "/repos/example/delivery/pulls/7":
+			body = map[string]any{"number": 7, "state": "closed", "merged": true, "merge_commit_sha": sha, "merged_at": f.at, "merged_by": map[string]string{"login": "fixture-bot"}, "head": map[string]string{"sha": strings.Repeat("a", 40), "ref": "work/fixture"}, "base": map[string]any{"sha": strings.Repeat("c", 40), "ref": "main", "repo": map[string]string{"full_name": "example/delivery"}}}
+		case "/repos/example/delivery/commits/" + sha + "/pulls":
+			body = []any{map[string]int{"number": 7}}
+		default:
+			t.Fatalf("unexpected merge proof read %s", r.URL.Path)
+		}
+		raw, _ := json.Marshal(body)
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+	})
+	reader.App.Config.TenantID = f.person.TenantID
+	base := reader.App.Client.Transport
+	minted := 0
+	reader.App.Client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/access_tokens") {
+			var body struct {
+				Permissions map[string]string `json:"permissions"`
+			}
+			raw, err := io.ReadAll(io.LimitReader(r.Body, 4097))
+			if err != nil || len(raw) > 4096 {
+				t.Fatal("invalid fixture mint")
+			}
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Permissions) != 2 || body.Permissions["pull_requests"] != "read" || body.Permissions["metadata"] != "read" {
+				return &http.Response{StatusCode: 422, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"message":"fixture installation has PR read only"}`))}, nil
+			}
+			minted++
+			r.Body = io.NopCloser(strings.NewReader(string(raw)))
+		}
+		return base.RoundTrip(r)
+	})
+	fact, pending, err := readMergedPull(t.Context(), reader, 7)
+	if err != nil || pending || fact == nil || fact.SHA != sha {
+		t.Fatalf("closure proof: %+v pending=%v err=%v", fact, pending, err)
+	}
+	facts, pending, err := f.m.completedGroup(t.Context(), reader, sha)
+	if err != nil || pending || len(facts) != 1 || facts[0].SHA != sha {
+		t.Fatalf("destroyed-group proof: %+v pending=%v err=%v", facts, pending, err)
+	}
+	facts, pending, err = readMergedGroup(t.Context(), reader, sha, false)
+	if err != nil || pending || len(facts) != 1 || facts[0].SHA != sha || minted != 3 {
+		t.Fatalf("push proof: %+v pending=%v err=%v mints=%d", facts, pending, err, minted)
+	}
+}
+
+func TestDeliveryHistorySchedulesIncrementalRefreshFromStoredWatermark(t *testing.T) {
+	// Risk: finished history never recovers missed webhooks, or a restarted
+	// reader repeats the whole selected window on every periodic refresh.
+	f, g := newMetricsFixture(t)
+	f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+	through := f.at.Add(-metricRefreshInterval - time.Minute)
+	cursor := backfillCursor{Since: dayStart(f.at.AddDate(0, 0, -30)), Phase: "done", ReadSource: historyActions,
+		ReadThrough: &through, ReadUntil: &through, Workflows: fullBackfillWorkflows(&metricSourceRow{CIWorkflow: defaultCIWorkflow, NightlyWorkflow: defaultNightlyWorkflow}), DefaultBranch: "main"}
+	raw, err := json.Marshal(cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_done_at=$3,backfill_pending=false WHERE project_id=$1`, f.project, raw, through)
+		return err
+	})
+	var nextID int64 = 1001
+	g.respond = func(endpoint string) (any, error) {
+		u, _ := url.Parse(endpoint)
+		if strings.HasPrefix(u.Path, "/actions/workflows/") {
+			bounds := strings.Split(u.Query().Get("created"), "..")
+			if len(bounds) != 2 || bounds[0] != through.UTC().Format(time.RFC3339) || bounds[1] != f.at.UTC().Format(time.RFC3339) {
+				t.Fatalf("scheduled refresh lost the stored interval: %s", endpoint)
+			}
+			if strings.Contains(u.Path, "/ci.yml/") {
+				body := githubRunBody(nextID, 1, defaultCIWorkflow, "push", "main", strings.Repeat("a", 40), f.at.Add(-5*time.Minute), time.Second, "success", 0)
+				nextID++
+				return map[string]any{"total_count": 1, "workflow_runs": []any{body}}, nil
+			}
+			return githubRunsPage{}, nil
+		}
+		if u.Path == "/pulls" {
+			return []any{}, nil
+		}
+		t.Fatalf("unexpected scheduled read: %s", endpoint)
+		return nil, errRead
+	}
+	sweep := func() {
+		fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+		fresh.now = f.m.now
+		fresh.sweepMetrics(t.Context())
+	}
+	sweep()
+	if len(g.calls) != 4 {
+		t.Fatalf("refresh requests: %v", g.calls)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		stored, err := loadMetricSourceTx(t.Context(), tx, f.project, false)
+		if err != nil {
+			return err
+		}
+		if stored.Pending || stored.Cursor.ReadThrough == nil || !stored.Cursor.ReadThrough.Equal(f.at) {
+			t.Fatalf("scheduled watermark not durable: %+v", stored)
+		}
+		return nil
+	})
+	through = f.at
+	f.at = f.at.Add(metricRefreshInterval - time.Microsecond)
+	sweep()
+	if len(g.calls) != 4 {
+		t.Fatal("restart read history before its refresh interval")
+	}
+	f.at = f.at.Add(time.Microsecond)
+	sweep()
+	if len(g.calls) != 8 {
+		t.Fatalf("refresh did not resume at its exact interval: %v", g.calls)
+	}
+}
+
+func TestDeliveryHistoryFailureLogKeepsOnlyClassifiedMetadata(t *testing.T) {
+	// Risk: history cannot be diagnosed from its logs, or raw upstream errors
+	// leak private request/response text instead of fixed, safe metadata.
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	defer slog.SetDefault(previous)
+	at := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	remaining := 0
+	failure := &webhookGitHubError{class: "secondary_limit", reset: at.Add(2 * time.Hour), remaining: &remaining,
+		endpoint: "/actions/runs/{run}/attempts/{attempt}/jobs", duration: 1500 * time.Millisecond,
+		cause: fmt.Errorf("private fixture response and request URL: %w", &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true})}
+	logMetricFailure(t.Context(), failure, metricError(failure, at))
+	var fields map[string]any
+	if err := json.Unmarshal(output.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]any{"reason": "rate_limited", "status": float64(403), "rate_limit_remaining": float64(0), "rate_limit_reset": failure.reset.Format(time.RFC3339), "timeout": false, "duration_ms": float64(1500), "endpoint": failure.endpoint} {
+		if fields[key] != want {
+			t.Fatalf("log %s = %v, want %v", key, fields[key], want)
+		}
+	}
+	if strings.Contains(output.String(), "private") || strings.Contains(output.String(), "Authorization") || strings.Contains(output.String(), "token") {
+		t.Fatal("private upstream data escaped into history diagnostics")
+	}
+	output.Reset()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	logMetricFailure(t.Context(), failure, metricError(failure, at))
+	for _, field := range []string{"status=403", "rate_limit_remaining=0", "duration_ms=1500", "timeout=false"} {
+		if !strings.Contains(output.String(), field) {
+			t.Fatalf("text diagnostic lost %s", field)
+		}
+	}
+	if strings.Contains(output.String(), "0x") || strings.Contains(output.String(), "private") {
+		t.Fatal("text diagnostic contains pointer addresses or private text")
 	}
 }

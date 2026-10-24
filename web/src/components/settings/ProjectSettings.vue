@@ -133,7 +133,7 @@ onBeforeUnmount(() => { focusRun++; overlay.value?.close(); disposeKeys.forEach(
 </template>
 
 <style scoped>
-.project-settings { position: relative; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 28px; align-items: start; container: project-settings / inline-size; }
+.project-settings { position: relative; margin-block-start: var(--section-gap); display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 28px; align-items: start; container: project-settings / inline-size; }
 .project-settings:focus { outline: none; }
 .nav-col { align-self: stretch; min-width: 0; position: relative; }
 .section-nav { position: sticky; top: 16px; display: grid; gap: 2px; }

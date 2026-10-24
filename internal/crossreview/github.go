@@ -59,6 +59,9 @@ var ErrUnavailable = errGitHub
 // request URL, response body or credential-bearing underlying error.
 var ErrTransient = fmt.Errorf("%w: transient transport failure", errGitHub)
 
+// ErrTimedOut retains a timeout after removing a credential-bearing URL/error.
+var ErrTimedOut = fmt.Errorf("%w: timed out", ErrTransient)
+
 func IsTransientGitHubError(err error) bool {
 	var response *GitHubHTTPError
 	var network net.Error
@@ -70,6 +73,10 @@ func IsTransientGitHubError(err error) bool {
 }
 
 func githubTransportError(err error) error {
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &network) && network.Timeout() {
+		return ErrTimedOut
+	}
 	if IsTransientGitHubError(err) {
 		return ErrTransient
 	}
@@ -365,6 +372,24 @@ func (g *GitHubApp) ReadHistoryInstallation(ctx context.Context, read func(get f
 			return get(path, out)
 		}, source)
 	})
+}
+
+// ReadMergeInstallation reads canonical PR merge proof. Neither the PR
+// document nor a commit's associated pulls needs checks/statuses/contents.
+// Requesting those unrelated grants can make token minting fail even though
+// the installation has the pull_requests:read authority this operation needs.
+func (g *GitHubApp) ReadMergeInstallation(ctx context.Context, read func(func(string, any) error) error) error {
+	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
+		return errGitHub
+	}
+	jwt, err := g.jwt()
+	if err != nil {
+		return err
+	}
+	return g.readScopedInstallation(ctx, jwt, map[string]string{"pull_requests": "read", "metadata": "read"},
+		func(get func(string, any) error, _ func(int64, string) (bool, string, error), _ func(int64) ([]byte, error)) error {
+			return read(get)
+		})
 }
 
 // ReadArtifactInstallation uses the same existing, repository-scoped read-only
