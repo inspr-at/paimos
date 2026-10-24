@@ -2537,6 +2537,54 @@
         "tenant_column": "tenant_id"
       },
       "table": "work_kinds"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "absolute_expires_at": "metadata",
+        "access_expires_at": "metadata",
+        "access_token_hash": "secret",
+        "created_at": "personal",
+        "device_label": "personal",
+        "id": "metadata",
+        "idle_expires_at": "metadata",
+        "last_used_at": "personal",
+        "person_id": "personal",
+        "refresh_token_hash": "secret",
+        "revoked_at": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "device_sessions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "callback_at": "personal",
+        "challenge_app": "secret",
+        "code_expires_at": "metadata",
+        "code_hash": "secret",
+        "created_at": "personal",
+        "expires_at": "metadata",
+        "id": "metadata",
+        "identity_id": "personal",
+        "issuing_origin": "metadata",
+        "person_id": "personal",
+        "redirect_uri": "metadata",
+        "state_app": "secret",
+        "state_hash": "secret",
+        "tenant_id": "metadata",
+        "tenant_slug": "metadata",
+        "used_at": "personal"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_login_transactions"
     }
   ],
   "version": 1

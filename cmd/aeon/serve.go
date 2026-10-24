@@ -200,6 +200,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		closeListener()
 		return err
 	}
+	startWorker(func() { authMod.DeviceSessions.Run(workerCtx) })
 	// The host-wide signer is owned by the bootstrap tenant for forced RLS.
 	// Reuse the existing host session-key file with a separate vault derivation.
 	// HTTP-only dev hosts publish 503 until an HTTPS issuer is configured.

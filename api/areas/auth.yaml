@@ -1,11 +1,61 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/auth
 paths:
+  /auth/native/start:
+    get:
+      operationId: authNativeStart
+      summary: Start native app sign-in with a separate PKCE handoff
+      description: "Requires the configured canonical HTTPS origin. Binds the tenant, app state, S256 challenge and fixed app redirect for ten minutes. The identity provider receives a separate state, nonce and PKCE challenge. No browser session is created by the native callback."
+      security: []
+      parameters:
+        - {name: tenant, in: query, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
+        - {name: code_challenge, in: query, required: true, schema: {type: string, minLength: 43, maxLength: 43}}
+        - {name: code_challenge_method, in: query, required: true, schema: {type: string, enum: [S256]}}
+        - {name: state, in: query, required: true, schema: {type: string, minLength: 22, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}}
+        - {name: redirect_uri, in: query, required: true, schema: {type: string, enum: ['paimos-app://auth/callback']}}
+      responses:
+        "302":
+          description: "Redirect to the identity provider with a signed login cookie containing only the native transaction reference."
+        "400":
+          description: "Invalid parameters or origin."
+        "429":
+          description: "Native sign-in attempt limit reached. Retry after one minute."
+        "500":
+          description: "Sign-in unavailable."
+  /auth/native/token:
+    post:
+      operationId: authNativeToken
+      summary: Exchange a single-use native login code for a device session
+      description: "Redeem at the same canonical HTTPS origin that started sign-in. Atomically checks the code, app state hash, S256 verifier, redirect, tenant and current active person membership. Codes expire after 60 seconds. Responses are never cached; no browser session cookie is issued. Device bearer admission and refresh are provided separately."
+      security: []
+      parameters:
+        - {name: tenant, in: query, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}, description: "Optional tenant assertion; must match the login transaction when supplied."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NativeTokenRequest"
+      responses:
+        "200":
+          description: "Single device-session family created."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NativeTokenResponse"
+        "400":
+          description: "Malformed or oversized request."
+        "401":
+          description: "Login code or its bindings refused, expired, already used, or membership removed."
+        "429":
+          description: "Exchange attempt limit reached. Retry after one minute."
+        "500":
+          description: "Exchange unavailable."
   /auth/callback:
     get:
       operationId: authCallback
-      summary: Finish sign-in and start a session
-      description: Resolve the tenant from signed state, then the OIDC issuer and subject to a person principal in that tenant; never choose a tenant by email alone.
+      summary: Finish browser or native sign-in
+      description: "Resolve the tenant from signed state, then the OIDC issuer and subject to a person principal in that tenant; never choose a tenant by email alone. A native transaction replaces browser session creation with a single-use app code, captures and clears app state atomically, and commits before redirecting to the fixed app callback."
       security: []
       parameters:
         - {name: code, in: query, schema: {type: string}}
@@ -13,12 +63,14 @@ paths:
         - {name: error, in: query, schema: {type: string}}
       responses:
         "302":
-          description: Session cookie set and redirect to the app on success; on failure redirect to /signin?error=denied|not_member|imported_account|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member, or imported_account when a verified email matches an unlinked imported person in the signed tenant; provider availability failures use unavailable; other failures use failed.
+          description: "Browser success sets a session cookie and redirects home. Native success redirects to paimos-app://auth/callback with a single-use code and the original app state, without issuing a browser session cookie. On failure redirect to /signin?error=denied|not_member|imported_account|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member, or imported_account when a verified email matches an unlinked imported person in the signed tenant; provider availability failures use unavailable; other failures use failed."
           headers:
             Location:
               schema: {type: string}
             Set-Cookie:
               schema: {type: string}
+        "429":
+          description: "Native callback attempt limit reached. Retry after one minute."
   /auth/dev-login:
     post:
       operationId: authDevLogin
@@ -83,3 +135,25 @@ paths:
         "204":
           description: Session deleted and cookie cleared
 components:
+  schemas:
+    NativeTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [code, code_verifier, state, redirect_uri]
+      properties:
+        code: {type: string, maxLength: 128}
+        code_verifier: {type: string, minLength: 43, maxLength: 128, pattern: '^[A-Za-z0-9._~-]+$'}
+        state: {type: string, minLength: 22, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}
+        redirect_uri: {type: string, enum: ['paimos-app://auth/callback']}
+        device_label: {type: string, maxLength: 120, description: "Optional device name; defaults to PAIMOS App."}
+    NativeTokenResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, refresh_token, expires_in, device_session_id, tenant_id, person_id]
+      properties:
+        access_token: {type: string, description: "Opaque device credential, distinct from agent keys; expires in 15 minutes."}
+        refresh_token: {type: string, description: "Opaque initial refresh credential; lifecycle support is provided separately."}
+        expires_in: {type: integer, const: 900}
+        device_session_id: {type: string, format: uuid, description: "Stable device-session family identifier."}
+        tenant_id: {type: string, format: uuid}
+        person_id: {type: string, format: uuid}
