@@ -29,7 +29,9 @@ func TestAssistantPolicyDirectAPICeilingAndRLS(t *testing.T) {
 		}
 	}
 	seed(func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='member' ON CONFLICT DO NOTHING`, owner.TenantID, key.PrincipalID); err != nil {
+		// Full access is a key ceiling, not a role grant. Give the generated
+		// role explicit content authority before testing the policy ceiling.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT b.tenant_id,b.role_id,p.permission FROM role_bindings b CROSS JOIN unnest($3::text[]) AS p(permission) WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='workspace' ON CONFLICT DO NOTHING`, owner.TenantID, key.PrincipalID, []string{"nodes.read", "nodes.write", "inbox.read"}); err != nil {
 			return err
 		}
 		for _, id := range []*string{&allowed, &hidden} {
