@@ -13,13 +13,13 @@ import { reviewCounts, reviewRowCounts, reviewText, type ReviewRoundNumbers } fr
 import { reviewRuleText } from '../../lib/reviewRuleText'
 import { ticketPath } from '../../lib/work'
 
-const props = defineProps<{ data: ReviewRoundNumbers; anchor: HTMLElement; routeKey: string; lang: DeliveryLanguage }>()
+const props = defineProps<{ data: ReviewRoundNumbers; anchor: HTMLElement; routeKey: string; lang: DeliveryLanguage; keyboard: boolean }>()
 const emit = defineEmits<{ close: [restore: boolean] }>()
 const t = computed(() => reviewText(props.lang))
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="640" :tallest="600" :label="t.label" cycle phone-sheet fill-phone :sheet-below="520" below-header class="review-rounds-panel" data-testid="review-rounds-panel" @close="restore => emit('close', restore)">
+  <FloatingPanel :anchor="anchor" :width="640" :tallest="600" :label="t.label" :focus-container="!keyboard" cycle phone-sheet fill-phone :sheet-below="520" below-header class="review-rounds-panel" data-testid="review-rounds-panel" @close="restore => emit('close', restore)">
     <header class="rr-head"><h3>{{ t.label }}</h3><p>{{ reviewCounts(data.current, lang) }}</p></header>
     <!-- The scrolling body owns its touch gestures; header swipes still use the shared sheet dismissal. -->
     <div class="rr-lists" @touchstart.stop @touchend.stop @touchcancel.stop>
@@ -43,7 +43,7 @@ const t = computed(() => reviewText(props.lang))
           <li v-for="rule in data.rules_cited_most" :key="rule.rule" class="rr-rule-row">
             <span class="rr-chip" tabindex="0" :data-tip="reviewRuleText(rule.rule, lang)">{{ rule.rule }}</span>
             <span class="rr-rule-count">{{ num(rule.count, lang) }}</span>
-            <span v-if="rule.count > rule.previous_count" class="rr-rising">{{ t.rising }}</span>
+            <span v-if="data.previous.tickets > 0 && rule.count !== rule.previous_count" class="rr-rule-trend">{{ rule.count > rule.previous_count ? t.rising : t.falling }}</span>
           </li>
         </ul>
         <p v-if="!data.rules_cited_most.length" class="rr-empty">{{ t.emptyRules }}</p>
@@ -71,8 +71,9 @@ ul { list-style: none; margin: 0; padding: 0; }
 .rr-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 4px 8px; }
 .rr-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 3ch; min-height: 24px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: var(--radius-row); background: transparent; color: var(--ink-2); font: 550 12px/1.5 var(--mono); white-space: nowrap; }
 .rr-rule-row { display: flex; align-items: center; gap: 8px; min-height: 44px; border-bottom: 1px solid var(--line); }
+.rr-rules .rr-chip { flex: none; width: calc(3ch + 14px); }
 .rr-rule-count { min-width: 5ch; font: 600 12.5px/1.5 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
-.rr-rising { font-size: 12px; color: var(--ink-2); }
+.rr-rule-trend { font-size: 12px; color: var(--ink-2); }
 .rr-empty { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .rr-actions { flex: none; display: flex; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--line); }
 .rr-actions .btn { gap: 8px; min-height: 44px; }

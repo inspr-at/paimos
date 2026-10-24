@@ -25,7 +25,8 @@ import { deliveryText } from '../src/lib/deliveryNumbersText'
 import { reviewAnswer } from './delivery-review-rounds-fixtures'
 import '../src/styles/tokens.css'
 import '../src/styles/base.css'
-const data = reviewAnswer(), model = reviewRoundView(data, 7, 'de', 'ready')
+const kind = new URLSearchParams(location.search).get('rules')
+const data = reviewAnswer('p-aeon', 7, kind === 'rule_trends' || kind === 'rules_first_window' ? kind : 'ready'), model = reviewRoundView(data, 7, 'de', 'ready')
 const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: { render: () => null } }] })
 createApp({ render: () => [
   h('div', { class: 'tiles', role: 'list' }, [h(ReviewRoundsTile, { data, state: 'ready', level: 'expert', window: 7, lang: 'de', routeKey: 'AEON' })]),

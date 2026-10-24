@@ -17,11 +17,11 @@ const props = defineProps<{ data: ReviewRoundNumbers | null; state: 'loading' | 
 const emit = defineEmits<{ retry: []; info: [tile: TicketTileModel, anchor: HTMLElement, pin: boolean]; 'info-leave': [] }>()
 const view = computed(() => reviewRoundView(props.data, props.window, props.lang, props.state))
 const t = computed(() => reviewText(props.lang))
-const open = ref<{ anchor: HTMLElement; data: ReviewRoundNumbers } | null>(null)
-function toggle(anchor: HTMLElement) {
+const open = ref<{ anchor: HTMLElement; data: ReviewRoundNumbers; keyboard: boolean } | null>(null)
+function toggle(anchor: HTMLElement, keyboard: boolean) {
   if (open.value) { close(true); return }
   if (props.state !== 'ready' || !props.data) return
-  open.value = { anchor, data: props.data }
+  open.value = { anchor, data: props.data, keyboard }
 }
 function close(restore: boolean) {
   const anchor = open.value?.anchor
@@ -32,7 +32,7 @@ function clipped(event: MouseEvent) {
   const target = event.target as Element
   if (target.closest('button, a[href]') || !target.closest('[data-clip-tip]')) return
   const anchor = (event.currentTarget as HTMLElement).querySelector<HTMLButtonElement>('.rr-open')
-  if (anchor) toggle(anchor)
+  if (anchor) toggle(anchor, event.detail === 0)
 }
 watch([() => props.window, () => props.level, () => props.lang, () => props.routeKey, () => props.state], () => close(false))
 </script>
@@ -41,12 +41,12 @@ watch([() => props.window, () => props.level, () => props.lang, () => props.rout
   <SimpleTile v-if="level === 'simple'" :tile="view.simple" :state="state" :text="simpleText(lang)" minimal data-testid="review-rounds-simple" />
   <ExpertTile v-else class="rr-tile" :tile="view.expert" :state="state" :text="deliveryText(lang)" :info-open="!!infoOpen" :definition-id="definitionId" hide-detail data-testid="review-rounds-tile" @click="clipped"
     @info="(anchor, pin) => emit('info', view.expert, anchor, pin)" @info-leave="emit('info-leave')">
-    <template #trigger><button type="button" class="rr-open" :aria-label="t.openPanel" aria-haspopup="dialog" :aria-expanded="!!open" :aria-disabled="state !== 'ready' || !data || undefined" @click="toggle($event.currentTarget as HTMLElement)" /></template>
+    <template #trigger><button type="button" class="rr-open" :aria-label="t.openPanel" aria-haspopup="dialog" :aria-expanded="!!open" :aria-disabled="state !== 'ready' || !data || undefined" @click="toggle($event.currentTarget as HTMLElement, $event.detail === 0)" /></template>
     <template #value-companion><small v-if="state === 'ready' && data?.current.tickets" class="rr-gate">{{ view.gate }}</small></template>
     <template #target><span v-clip-tip>{{ t.goal }}</span></template>
-    <template #foot><button type="button" class="rr-action" :aria-label="state === 'error' ? t.retry : t.openPanel" :data-tip="state === 'error' ? t.retry : t.openPanel" :aria-disabled="state === 'loading' || undefined" @click="state === 'error' ? emit('retry') : toggle($event.currentTarget as HTMLElement)"><AppIcon :name="state === 'error' ? 'refresh' : 'list'" :size="14" /></button></template>
+    <template #foot><button type="button" class="rr-action" :aria-label="state === 'error' ? t.retry : t.openPanel" :data-tip="state === 'error' ? t.retry : t.openPanel" :aria-disabled="state === 'loading' || undefined" @click="state === 'error' ? emit('retry') : toggle($event.currentTarget as HTMLElement, $event.detail === 0)"><AppIcon :name="state === 'error' ? 'refresh' : 'list'" :size="14" /></button></template>
   </ExpertTile>
-  <ReviewRoundsPanel v-if="open && level === 'expert'" :data="open.data" :anchor="open.anchor" :route-key="routeKey" :lang="lang" @close="close" />
+  <ReviewRoundsPanel v-if="open && level === 'expert'" :data="open.data" :anchor="open.anchor" :route-key="routeKey" :lang="lang" :keyboard="open.keyboard" @close="close" />
 </template>
 
 <style scoped>

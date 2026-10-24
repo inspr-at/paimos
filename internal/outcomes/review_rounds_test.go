@@ -193,6 +193,24 @@ func seedOutcomeReviewRun(t *testing.T, d *dbtest.DB, p tenant.Principal, projec
 // Risk: missing events and open rounds can look like a first-pass success;
 // a round before the window can be lost, or late ok observations counted twice.
 func TestReviewRoundsUntilOKMath(t *testing.T) {
+	t.Run("rule ties use family then numeric order before truncation", func(t *testing.T) {
+		// A string sort selects U10 before U4 and changes which tied rules
+		// survive the panel's limit. Preserve A-before-U and count priority.
+		counts := map[string]int{"U4": 2, "U5": 2, "U6": 2, "U7": 2, "U8": 2, "U9": 2, "U10": 2, "A4": 2, "A17": 2, "U21": 3}
+		previous := map[string]int{"U7": 5, "U21": 1}
+		want := []string{"U21", "A4", "A17", "U4", "U5", "U6", "U7", "U8", "U9", "U10"}
+		for _, limit := range []int{3, 10} {
+			rows := topReviewRules(counts, previous, limit)
+			if len(rows) != limit {
+				t.Fatalf("rule limit: got %d, want %d", len(rows), limit)
+			}
+			for i, row := range rows {
+				if row.Rule != want[i] || row.Count != counts[want[i]] || row.Previous != previous[want[i]] {
+					t.Fatalf("numeric rule order at %d: got %+v, want %s (limit %d)", i, row, want[i], limit)
+				}
+			}
+		}
+	})
 	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 	all := []reviewObservation{}
 	add := func(ticket, kind string, round int, verdict string, days int, rules ...string) {

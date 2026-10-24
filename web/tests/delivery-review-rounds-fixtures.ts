@@ -2,7 +2,7 @@
 import type { ReviewMeasure, ReviewRoundNumbers } from '../src/lib/deliveryReviewRounds'
 import type { WindowDays } from '../src/lib/deliveryNumbers'
 
-export type ReviewAnswerKind = 'ready' | 'no_data' | 'partial' | 'open_only'
+export type ReviewAnswerKind = 'ready' | 'no_data' | 'partial' | 'open_only' | 'rule_trends' | 'rules_first_window'
 const empty: ReviewMeasure = { design_mean: null, gate_mean: null, design_tickets: 0, gate_tickets: 0, tickets: 0, still_open: 0, weeks_total: 2, weeks_covered: 0 }
 
 // The known cohort: A design 1/changes, 2/changes, 3/ok and gate 1/changes,
@@ -24,6 +24,18 @@ export function reviewAnswer(project = 'p-aeon', window: WindowDays = 7, kind: R
   if (kind === 'partial') { out.status = 'partial'; out.since = '2026-10-20T00:00:00Z'; out.current.weeks_covered = 1; out.weekly[0]!.weeks_covered = 0 }
   if (kind === 'no_data') { out.status = 'no_data'; out.since = null; out.current = { ...empty }; out.previous = { ...empty }; out.weekly = []; out.most_rounds = []; out.rules_cited_most = [] }
   if (kind === 'open_only') { out.current = { ...current, design_mean: null, gate_mean: null, design_tickets: 0, gate_tickets: 0, tickets: 1, still_open: 1 }; out.previous = { ...empty }; out.most_rounds = [b]; out.weekly.forEach(w => { w.design_mean = null; w.gate_mean = null }) }
+  if (kind === 'rule_trends' || kind === 'rules_first_window') {
+    out.rules_cited_most = [
+      { rule: 'U4', count: 4, previous_count: 2 },
+      { rule: 'U7', count: 3, previous_count: 5 },
+      { rule: 'A17', count: 2, previous_count: 2 },
+      { rule: 'U10', count: 1, previous_count: 0 },
+    ]
+    if (kind === 'rules_first_window') {
+      out.previous = { ...empty }
+      out.rules_cited_most.forEach(rule => { rule.previous_count = 0 })
+    }
+  }
   return out
 }
 
@@ -38,7 +50,7 @@ export function longReviewAnswer(project = 'p-aeon', window: WindowDays = 7): Re
     design_rounds: i === 9 ? 2 : 3, gate_rounds: i === 9 ? null : 2, open: i === 9, latest_round: i === 9 ? 2 : 3, rules,
   }))
   data.rules_cited_most = Array.from({ length: 10 }, (_, i) => ({ rule: `U${i + 1}`, count: i < 3 ? 20 : 1, previous_count: 0 }))
-    .sort((a, b) => b.count - a.count || a.rule.localeCompare(b.rule))
+    .sort((a, b) => b.count - a.count || Number(a.rule.slice(1)) - Number(b.rule.slice(1)))
   data.weekly = data.weekly.map((week, i) => ({ ...week, ...(i === 0 ? { design_mean: null, gate_mean: null, design_tickets: 0, gate_tickets: 0, tickets: 9, still_open: 9 } : data.current), weeks_total: 1, weeks_covered: 1 }))
   return data
 }

@@ -38,7 +38,7 @@ const EN = {
   open: 'open · round {n}', openCount: '{n} still open',
   ticket: '{n} ticket', tickets: '{n} tickets',
   coverage: 'covers {k} of {n} weeks', coverageOne: 'covers {k} of {n} week', close: 'Close', retry: 'Retry',
-  openPanel: 'Show review round details', rising: 'rising', ruleMissing: 'Rule text is not available.',
+  openPanel: 'Show review round details', rising: 'rising', falling: 'falling', ruleMissing: 'Rule text is not available.',
   noDataReason: 'Numbers appear after the first recorded review round.',
 }
 const DE: typeof EN = {
@@ -50,7 +50,7 @@ const DE: typeof EN = {
   open: 'offen · Runde {n}', openCount: '{n} noch offen',
   ticket: '{n} Ticket', tickets: '{n} Tickets',
   coverage: 'deckt {k} von {n} Wochen ab', coverageOne: 'deckt {k} von {n} Woche ab', close: 'Schließen', retry: 'Erneut versuchen',
-  openPanel: 'Details zu Prüfrunden anzeigen', rising: 'steigend', ruleMissing: 'Regeltext nicht verfügbar.',
+  openPanel: 'Details zu Prüfrunden anzeigen', rising: 'steigend', falling: 'fallend', ruleMissing: 'Regeltext nicht verfügbar.',
   noDataReason: 'Zahlen erscheinen nach der ersten erfassten Prüfrunde.',
 }
 export const reviewText = (lang: DeliveryLanguage) => lang === 'de' ? DE : EN

@@ -15,7 +15,8 @@ import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } 
 // fits on neither side, the page first scrolls the trigger to 16 px below the header (a jump with reduced motion), and
 // the panel then opens below it (Delivery's worst items, AEON-1493).
 // `fieldsOwnEscape`: a text field inside handles its own Escape (a stepper cancels its draft); the next Escape closes.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; fullSheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; fieldsOwnEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; fillPhone?: boolean; sheetBelow?: number; belowHeader?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fullSheet: false, fieldEscape: false, fieldsOwnEscape: false, phoneSheet: false, fillPhone: false, sheetBelow: 720, belowHeader: false })
+// `focusContainer`: pointer-opened dialogs can take focus without highlighting their first action.
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; fullSheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; fieldsOwnEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; fillPhone?: boolean; sheetBelow?: number; belowHeader?: boolean; focusContainer?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fullSheet: false, fieldEscape: false, fieldsOwnEscape: false, phoneSheet: false, fillPhone: false, sheetBelow: 720, belowHeader: false, focusContainer: false })
 defineOptions({ inheritAttrs: false })
 const floatingID = `floating-${getCurrentInstance()!.uid}`
 const floatingOwner = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('[data-floating-id]') : null)?.dataset.floatingId
@@ -256,7 +257,8 @@ onMounted(async () => {
   resized = new ResizeObserver(() => place(true))
   for (const child of panel.value?.children ?? []) resized.observe(child)
   window.addEventListener('keydown', escape, true)
-  const first = panel.value?.querySelector<HTMLElement>('[data-autofocus]') ?? panel.value?.querySelector<HTMLElement>('input, button, [tabindex="0"]')
+  const first = props.focusContainer ? panel.value : panel.value?.querySelector<HTMLElement>('[data-autofocus]') ?? panel.value?.querySelector<HTMLElement>('input, button, [tabindex="0"]')
+  if (props.focusContainer && first) first.tabIndex = -1
   first?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
@@ -285,6 +287,7 @@ defineExpose({ place })
 <style scoped>
 .floating { position: fixed; z-index: 70; top: 0; left: 0; max-width: calc(100vw - 16px); overflow: auto; padding: 6px; overscroll-behavior: contain; }
 .floating:focus { outline: none; }
+.floating:focus-visible { outline: 2px solid var(--primary-line); outline-offset: -2px; }
 .floating.sheet { width: min(960px, max(480px, 64vw)); max-width: calc(100vw - 32px); overflow: hidden; }
 .floating.sheet.viewport { width: 100%; max-width: none; border-radius: 0; }
 @media (max-width: 600px) { .floating.sheet { width: 100%; max-width: none; border-radius: 0; } }

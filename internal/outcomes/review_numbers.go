@@ -294,7 +294,14 @@ func topReviewRules(counts, previous map[string]int, limit int) []reviewRuleCoun
 		if rows[i].Count != rows[j].Count {
 			return rows[i].Count > rows[j].Count
 		}
-		return rows[i].Rule < rows[j].Rule
+		// Validated lens IDs are one family letter followed by decimal digits.
+		// Preserve A-before-U while putting U9 before U10 for tied counts.
+		if rows[i].Rule[0] != rows[j].Rule[0] {
+			return rows[i].Rule[0] < rows[j].Rule[0]
+		}
+		a, _ := strconv.Atoi(rows[i].Rule[1:])
+		b, _ := strconv.Atoi(rows[j].Rule[1:])
+		return a < b
 	})
 	if len(rows) > limit {
 		rows = rows[:limit]

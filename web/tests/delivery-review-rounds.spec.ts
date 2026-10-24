@@ -56,6 +56,99 @@ async function settled(page: Page) {
   await rest(page)
 }
 
+// FIX3 risks: a first window invents a trend; differing chip lengths shift
+// counts; pointer opening highlights Close instead of focusing the dialog.
+test('review rule trends require a previous window and show count direction in both languages', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const state = await setup(page)
+  for (const lang of ['en', 'de'] as const) {
+    for (const kind of ['rules_first_window', 'rule_trends'] as const) {
+      state.kind = kind
+      await page.goto(lang === 'de' ? `/tests/delivery-review-rounds-harness.html?rules=${kind}` : '/p/AEON/delivery')
+      await expect(tile(page).locator('.t-main')).toHaveText(lang === 'de' ? '2,0' : '2.0')
+      await trigger(page).click()
+      const rows = panel(page).locator('.rr-rule-row')
+      await expect(rows.locator('.rr-chip')).toHaveText(['U4', 'U7', 'A17', 'U10'])
+      if (kind === 'rules_first_window') {
+        await expect(panel(page).locator('.rr-rules')).not.toContainText(/rising|falling|steigend|fallend/)
+      } else {
+        await expect(rows.nth(0)).toContainText(lang === 'de' ? 'steigend' : 'rising')
+        await expect(rows.nth(1)).toContainText(lang === 'de' ? 'fallend' : 'falling')
+        await expect(rows.nth(2)).not.toContainText(/rising|falling|steigend|fallend/)
+        // A newly cited rule rises from zero when other prior-window data exists.
+        await expect(rows.nth(3)).toContainText(lang === 'de' ? 'steigend' : 'rising')
+      }
+      await page.keyboard.press('Escape')
+    }
+  }
+})
+
+test('review rule counts align across single and double digit rule ids', async ({ page }, info) => {
+  const state = await setup(page)
+  state.kind = 'rule_trends'
+  const checks = []
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/p/AEON/delivery')
+    await settled(page)
+    await trigger(page).click()
+    const rows = panel(page).locator('.rr-rule-row')
+    await expect(rows.locator('.rr-chip')).toHaveText(['U4', 'U7', 'A17', 'U10'])
+    await expect(rows.locator('.rr-rule-count')).toHaveText(['4', '3', '2', '1'])
+    const dimensions = await rows.evaluateAll(elements => elements.map(row => {
+      const chip = row.querySelector<HTMLElement>('.rr-chip')!, count = row.querySelector<HTMLElement>('.rr-rule-count')!
+      return { chipWidth: chip.getBoundingClientRect().width, countX: count.getBoundingClientRect().x, clipped: chip.scrollWidth > chip.clientWidth, numeric: getComputedStyle(count).fontVariantNumeric }
+    }))
+    expect(dimensions).toHaveLength(4)
+    for (const sample of dimensions) {
+      expect(sample.chipWidth).toBeGreaterThan(0)
+      expect(Math.abs(sample.chipWidth - dimensions[0]!.chipWidth)).toBeLessThanOrEqual(.5)
+      expect(Math.abs(sample.countX - dimensions[0]!.countX)).toBeLessThanOrEqual(.5)
+      expect(sample.clipped).toBe(false)
+      expect(sample.numeric).toContain('tabular-nums')
+    }
+    checks.push({ width, dimensions })
+    await page.keyboard.press('Escape')
+  }
+  await info.attach('review-rule-columns', { body: JSON.stringify(checks), contentType: 'application/json' })
+})
+
+test('review panel focuses its container for pointer opening and Close for keyboard opening', async ({ page }, info) => {
+  await setup(page)
+  const checks = []
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/p/AEON/delivery')
+    await settled(page)
+    for (const opener of [trigger(page), tile(page).locator('.rr-action')]) {
+      await opener.click()
+      await expect(panel(page)).toBeFocused()
+      expect(await panel(page).evaluate(el => el.matches(':focus-visible'))).toBe(false)
+      expect(await panel(page).evaluate(el => getComputedStyle(el).outlineStyle)).toBe('none')
+      const close = panel(page).getByRole('button', { name: 'Close Esc' })
+      await expect(close).not.toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(panel(page).locator('.rr-ticket-link').first()).toBeFocused()
+      expect(await panel(page).locator('.rr-ticket-link').first().evaluate(el => el.matches(':focus-visible'))).toBe(true)
+      await page.keyboard.press('Shift+Tab')
+      await expect(close).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(panel(page).locator('.rr-ticket-link').first()).toBeFocused()
+      await page.keyboard.press('Escape')
+      await expect(opener).toBeFocused()
+      await opener.press('Enter')
+      await expect(close).toBeFocused()
+      expect(await close.evaluate(el => el.matches(':focus-visible'))).toBe(true)
+      expect(await close.evaluate(el => getComputedStyle(el).boxShadow)).not.toBe('none')
+      await page.keyboard.press('Escape')
+      await expect(panel(page)).toHaveCount(0)
+      await expect(opener).toBeFocused()
+      checks.push({ width, opener: await opener.getAttribute('class'), pointerContainer: true, keyboardClose: true, tabCycle: true, restored: true })
+    }
+  }
+  await info.attach('review-panel-focus', { body: JSON.stringify(checks), contentType: 'application/json' })
+})
+
 for (const width of [1440, 1024, 390, 320]) {
   test(`review rounds at ${width}: tile, weekly trend and neutral panel at rest in both themes`, async ({ page }, info) => {
     test.setTimeout(120_000)
