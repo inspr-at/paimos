@@ -20,7 +20,7 @@ async function setup(page: Page, readOnly = false) {
   const writes: { id: string; body: Record<string, unknown>; expected: string }[] = [], assignments: unknown[] = []
   const nodes = new Map(data.projects.map(p => [p.id, { id: p.id, key: p.key, title: p.title, body: p.description, state: p.state, fields: { classic: { key: p.classic, description: p.description }, preserved: 'keep me' }, updated_at: p.last, created_at: p.last, parent_id: null, kind_id: 'k-project', position: '0', deleted_at: null }]))
   const groups = [{ id: 'g-platform', name: 'Platform', project_ids: ['p-pharos'] }, { id: 'g-product', name: 'Product', project_ids: ['p-aeon'] }]
-  const control = { fail: false, contextFail: false, held: null as null | { entered: () => void; until: Promise<void> } }
+  const control = { fail: false, contextFail: false, historyReason: 'rate_limited' as 'rate_limited' | 'timed_out' | 'github_error' | 'unreachable', held: null as null | { entered: () => void; until: Promise<void> } }
   await page.route('**/api/nodes/p-*', async route => {
     const request = route.request(), id = new URL(request.url()).pathname.split('/').at(-1)!, node = nodes.get(id)
     if (!node) return route.fulfill({ status: 404, json: { error: 'Not found' } })
@@ -50,7 +50,7 @@ async function setup(page: Page, readOnly = false) {
   await page.route('**/api/projects/*/definitions/context', route => route.fulfill({ json: { project_id: new URL(route.request().url()).pathname.split('/')[3], definition: null, workspace_default: null, copied_from_checks: null, can_manage: !readOnly, pending_changes: [], admins: [] } }))
   await page.route('**/api/projects/*/delivery/metrics', route => route.fulfill({ json: {
     project_id: 'p-pharos', generated_at: '2026-09-23T12:00:00Z', metrics: [],
-    source: { repository: 'example/delivery', ci_workflow: '.github/workflows/ci.yml', nightly_workflow: '.github/workflows/nightly-full.yml', history_source: 'actions', app_connected: true, backfill: 'running', backfill_since: '2026-08-24T00:00:00Z', backfill_done_at: null, covered_since: null, last_read_error: { reason: 'rate_limited', permission: null, at: '2026-09-23T11:59:00Z', reset_at: '2026-09-23T12:14:00Z', status_code: 403 }, retry_at: '2026-09-23T12:14:00Z' },
+    source: { repository: 'example/delivery', ci_workflow: '.github/workflows/ci.yml', nightly_workflow: '.github/workflows/nightly-full.yml', history_source: 'actions', app_connected: true, backfill: 'running', backfill_since: '2026-08-24T00:00:00Z', backfill_done_at: null, covered_since: null, last_read_error: { reason: control.historyReason, permission: null, at: '2026-09-23T11:59:00Z', reset_at: '2026-09-23T12:14:00Z', status_code: control.historyReason === 'github_error' ? 503 : 403 }, retry_at: '2026-09-23T12:14:00Z' },
   } }))
   await page.route('**/api/projects/*/delivery-settings**', route => route.fulfill({ json: new URL(route.request().url()).searchParams.has('view') ? {} : { required_workflow: 'CI', required_checks: ['go test'], deadlines: { reviewed: 30, pushed: 60, ci_green: 20, in_queue: 60, queue_failed: 120 } }, headers: { ETag: '"1"' } }))
   await page.route('**/api/recurrences**', route => route.fulfill({ json: { items: [], next_cursor: null } }))
@@ -407,6 +407,20 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PRJ-26-1.'); await capture('general-prj26')
       await navigate(page, '/p/PHAROS/settings/definitions'); await expect(page.locator('#definitions .origin')).toContainText('No definition yet'); await capture('definitions-pharos')
       await navigate(page, '/p/PHAROS/settings/delivery'); await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', 'unavailable'); await expect(page.locator('#checks .frow').first()).toBeVisible(); await expect(page.locator('#repository .ds-h')).toContainText('GitHub’s rate limit'); await capture('delivery-pharos')
+      // AEON-1710: longer reasons use the existing scrolling notice; its actions
+      // stay in place at every evidence width, including the phone layout.
+      const repository = page.locator('#repository')
+      const historyStable = await controlStability(page, { change: repository.locator('[data-act=change]'), more: repository.locator('[data-act=repo-more]'), check: repository.locator('[data-act=check]') })
+      for (const [reason, words] of [['timed_out', 'did not answer in time'], ['github_error', 'HTTP 503'], ['unreachable', 'network connection'], ['rate_limited', 'GitHub’s rate limit']] as const) {
+        await historyStable.check(async () => {
+          world.control.historyReason = reason
+          await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+          await expect(repository.locator('.ds-h')).toContainText(words)
+        })
+      }
+      await historyStable.check(() => repository.locator('.ds-h').evaluate(element => { element.textContent = 'Wegen des GitHub-Anfragelimits dieser App pausiert das Lesen der Lieferhistorie bis 20:14. Die zuletzt gespeicherte Historie bleibt erhalten.' }))
+      historyStable.done()
+      await capture('delivery-long-de')
       await navigate(page, '/p/PHAROS/settings/agents'); await expect(page.getByText('This project has no context yet, so no account may work on it. Choose one.', { exact: true })).toBeVisible(); await capture('agents-pharos')
       world.control.contextFail = true
       await navigate(page, '/p/PHAROS/settings/access'); await navigate(page, '/p/PHAROS/settings/agents')
