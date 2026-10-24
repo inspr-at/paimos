@@ -239,6 +239,9 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 	if err == nil {
 		err = policyErr
 	}
+	if err != nil {
+		items = nil
+	}
 	if items == nil {
 		items = []Message{}
 	}

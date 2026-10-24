@@ -49,8 +49,8 @@ larger lists disclose truncation. People with current project routine-management
 permission can pause/resume using the captured revision. Failed writes keep the
 last confirmed state. Result links and Activity read the latest run of up to 20
 owned routines, rechecking the run's frozen owner before attributing it to an
-assistant. The bounded history window stays explicit. Production dispatch remains
-closed under D's policy/budget guard; this UI does not enable it.
+assistant. The bounded history window stays explicit. Production dispatch uses
+the server policy/budget guard; this UI grants no execution authority.
 Discovery runs on initial admission, when an assistant panel opens, and after
 batched assistant or recurrence events. The 20-second identity poll reuses those
 routine facts instead of repeating owner and run-history reads.
@@ -58,9 +58,11 @@ routine facts instead of repeating owner and run-history reads.
 Adapter/receipt metrics (AEON-1702) have no connected reader here. Outward action
 requests (AEON-1703) use the existing Decision Desk and its project-scoped person
 decision route. This section has no connected per-assistant decision-history
-reader; health and spend likewise remain unknown. Assistant-wide
-pause/resume, approvers and reset weekday likewise stay unavailable while their
-APIs are absent. No sample values appear in product code.
+reader; health and measured spend likewise remain unknown. Assistant-wide
+pause/resume remains unavailable. Approver and reset-weekday editing controls
+remain unavailable here; configured values survive edits to other policy fields.
+Policy evaluation events appear in row activity and the existing Policy/Activity
+tabs, including the refusal filter. No sample values appear in product code.
 EN/DE strings are kept in the assistant catalog and follow the shared app language.
 
 The section uses the Sessions card style, with its heading and the page layout

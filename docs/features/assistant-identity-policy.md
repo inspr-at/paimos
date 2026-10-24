@@ -11,8 +11,10 @@ until configured.
 `/api/assistants` lists bounded pages, creates identities or links existing
 messaging assistants. Each identity has a display name, vendor (`grok` or
 `unknown` for this first slice), person owner, principal status and policy.
-Linking accepts only an existing messaging-only identity with the same person
-owner. Owner transfer and reactivation are excluded from these routes.
+Linking accepts an existing messaging-only identity with the same person owner,
+or an already scoped regular agent whose usable keys are all explicitly bound
+to that canonical person. Linking preserves the messaging-only marker and all
+keys/roles/scopes. Owner transfer and reactivation are excluded from these routes.
 New identities retain the messaging-only restriction and receive no key or role.
 The existing `agents assistant create|rotate|revoke` credential lifecycle remains
 available unchanged. An assistant provisioned through that path immediately has
@@ -69,7 +71,6 @@ an independent bounded snapshot for read-only callers. Callers must reject
 inactive principals and retain existing authorization. Policy is independent of
 host reachability: assistants may sleep between runs and pull delivery when they
 wake. The principal's active/deactivated status is administrative, not a host
-online/offline signal. Adapters,
-outward-action approval enforcement, budget accounting,
-Routine ownership and lead delegation are separate AEON-754 slices; this change
-persists their policy inputs without claiming enforcement in those paths.
+online/offline signal. End-to-end enforcement, weekly reservations, configured
+person approvers and lead delegation are described in
+[assistant policy enforcement](assistant-policy-enforcement.md).

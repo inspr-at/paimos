@@ -188,8 +188,20 @@ func EvaluateTx(ctx context.Context, tx pgx.Tx, in Check) (Decision, error) {
 }
 
 func recordDecisionTx(ctx context.Context, tx pgx.Tx, in Check, d Decision) (Decision, error) {
+	project := in.ProjectID
+	if !d.Allowed && project != "" {
+		// A revoked project is invisible to this caller. Keep the refusal on
+		// the assistant without naming a hidden project in its FK or event.
+		var visible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes WHERE id=$1::uuid)`, project).Scan(&visible); err != nil {
+			return d, err
+		}
+		if !visible {
+			project = ""
+		}
+	}
 	var id string
-	err := tx.QueryRow(ctx, `INSERT INTO assistant_policy_receipts(tenant_id,principal_id,project_id,operation_key,operation,policy_revision,allowed,reason) VALUES($1::uuid,$2::uuid,nullif($3,'')::uuid,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING RETURNING id::text`, in.TenantID, in.PrincipalID, in.ProjectID, in.Key, in.Operation, d.PolicyRevision, d.Allowed, d.Reason).Scan(&id)
+	err := tx.QueryRow(ctx, `INSERT INTO assistant_policy_receipts(tenant_id,principal_id,project_id,operation_key,operation,policy_revision,allowed,reason) VALUES($1::uuid,$2::uuid,nullif($3,'')::uuid,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING RETURNING id::text`, in.TenantID, in.PrincipalID, project, in.Key, in.Operation, d.PolicyRevision, d.Allowed, d.Reason).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, nil
 	}
@@ -198,8 +210,8 @@ func recordDecisionTx(ctx context.Context, tx pgx.Tx, in Check, d Decision) (Dec
 	}
 	after := map[string]any{"id": id, "principal_id": in.PrincipalID, "operation": in.Operation, "operation_key": in.Key, "policy_revision": d.PolicyRevision, "allowed": d.Allowed, "reason": d.Reason}
 	change := events.Change{Type: "assistant.policy_evaluated", After: after}
-	if in.ProjectID != "" {
-		change.NodeID = &in.ProjectID
+	if project != "" {
+		change.NodeID = &project
 	}
 	d.Changes = []events.Change{change}
 	return d, nil

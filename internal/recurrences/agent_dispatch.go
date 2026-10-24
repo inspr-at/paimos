@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
@@ -235,6 +236,10 @@ func permanentAgentDispatchError(err error) bool {
 }
 
 func holdAgentDispatchTx(ctx context.Context, tx pgx.Tx, run, outbox, reason string, terminal bool) error {
+	var tid, project, owner, priorReason, priorState string
+	if err := tx.QueryRow(ctx, `SELECT r.tenant_id::text,r.output_project_id::text,r.owner_principal_id::text,coalesce(o.result->>'reason',''),r.state FROM routine_runs r JOIN routine_effect_outbox o ON o.run_id=r.id AND o.id=$2::uuid WHERE r.id=$1::uuid`, run, outbox).Scan(&tid, &project, &owner, &priorReason, &priorState); err != nil {
+		return err
+	}
 	next := "pending"
 	if terminal {
 		next = "cancelled"
@@ -243,6 +248,10 @@ func holdAgentDispatchTx(ctx context.Context, tx pgx.Tx, run, outbox, reason str
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET state=$2,result=jsonb_build_object('reason',$3::text),reconcile_after=clock_timestamp()+interval '1 minute',updated_at=clock_timestamp() WHERE id=$1`, outbox, next, reason)
+	if err != nil || priorState == "held" && priorReason == reason {
+		return err
+	}
+	_, err = events.Append(ctx, tx, tenant.Principal{ID: owner, TenantID: tid, Kind: tenant.Agent}, events.Change{NodeID: &project, Type: "recurrence.agent_dispatch_held", After: map[string]any{"run_id": run, "principal_id": owner, "reason": reason, "terminal": terminal}})
 	return err
 }
 

@@ -1295,6 +1295,53 @@ test('assistant admission waiting sort retries after hover and focus leave the s
   expect(errors).toEqual([])
 })
 
+test('assistant policy refusals remain visible in rows and the stable existing activity panel', async ({ page }, testInfo) => {
+  test.setTimeout(150_000)
+  const { work, errors } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
+  const now = Date.now(), { items } = assistantEvidence(now, me.id)
+  const amy = items.find(item => item.display_name === 'Amy')!
+  amy.display_name = 'Rechercheassistentin für bereichsübergreifende Wissenspflege'
+  const { events } = await mockAssistants(page, items, me.id)
+  events.push(
+    { id: 73, type: 'assistant.policy_evaluated', at: new Date(now).toISOString(), actor_principal_id: me.id, after: { principal_id: amy.principal_id, allowed: false, reason: 'assistant_weekly_budget_exhausted' } },
+    { id: 72, type: 'assistant.policy_evaluated', at: new Date(now - 60_000).toISOString(), actor_principal_id: me.id, after: { principal_id: amy.principal_id, allowed: true, reason: '' } },
+  )
+  await page.route('**/api/me/permissions*', route => {
+    const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    permissions.workspace.permissions.push('events.read')
+    return route.fulfill({ json: permissions })
+  })
+  const evidence: unknown[] = []
+  for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await openAgents(page)
+    const row = page.locator(`[data-assistant="${amy.principal_id}"]`)
+    await expect(row).toContainText('Action refused: weekly budget unavailable')
+    await row.locator('.assistant-open').click()
+    const panel = page.locator('.assistant-panel')
+    await expect(panel).toBeVisible()
+    const controls = { tabs: panel.getByRole('tablist'), activity: panel.getByRole('tab', { name: 'Activity', exact: true }), policy: panel.getByRole('tab', { name: 'Policy', exact: true }), close: panel.getByRole('button', { name: 'Close assistant details' }) }
+    const guard = await controlStability(page, controls)
+    await guard.check(async () => { await controls.policy.click(); await expect(panel.locator('.policy-audit')).toContainText('Action refused: weekly budget unavailable') })
+    await guard.check(async () => {
+      await panel.getByRole('button', { name: 'View refusals in Activity', exact: true }).click()
+      const activity = panel.locator('#assistant-pane-activity')
+      await expect(activity).toContainText('Action refused: weekly budget unavailable')
+      await expect(activity.getByText('Action admitted within policy', { exact: false })).toHaveCount(0)
+    })
+    guard.done()
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+    evidence.push({ width, theme, overflow, tabs: await controls.tabs.boundingBox(), close: await controls.close.boundingBox() })
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1706-policy-refusal-${width}-${theme}.png`), fullPage: true })
+    await controls.close.click()
+  }
+  await testInfo.attach('aeon-1706-policy-refusal-checks.json', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' })
+  expect(errors).toEqual([])
+})
+
 test('zero assistants show the permission-gated existing connect flow without sample rows', async ({ page }, testInfo) => {
   test.setTimeout(90_000)
   const { work } = await setup(page)

@@ -28,7 +28,7 @@ export const useAssistants = defineStore('assistants', () => {
   let flight: Promise<void> | undefined
   const facts = computed(() => Object.fromEntries(items.value.map(item => {
     const own = ownedRoutines.value.filter(row => row.owner === item.principal_id)
-    const policyActivity = events.value.filter(event => event.after?.principal_id === item.principal_id && ['assistant.policy_evaluated', 'assistant.delegated'].includes(event.type)).map(event => ({ at: event.at, text: policyChange(event) }))
+    const policyActivity = events.value.filter(event => event.after?.principal_id === item.principal_id && ['assistant.policy_evaluated', 'assistant.delegated'].includes(event.type)).map(event => ({ at: event.at, text: policyChange(event), policyOnly: true }))
     const latest = [...own.flatMap(row => row.lastActivity ?? []), ...policyActivity].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] ?? null
     // Reuse the Desk's bounded, permission-checked live projection. Names are
     // presentation only: ownership always comes from the asker's principal id.
@@ -176,6 +176,7 @@ export const useAssistants = defineStore('assistants', () => {
       'assistant.policy_evaluated', 'assistant.delegated',
       'recurrence.created', 'recurrence.updated', 'recurrence.deleted', 'recurrence.paused', 'recurrence.resumed',
       'recurrence.occurred', 'recurrence.skipped', 'recurrence.failed', 'recurrence.agent_result',
+      'recurrence.agent_dispatch_held',
       'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked',
     ], event => {
       if (pendingGeneration !== generation) {

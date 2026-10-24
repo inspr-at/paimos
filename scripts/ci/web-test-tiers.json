@@ -6816,6 +6816,8 @@
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"assistant admission waiting sort retries after hover and focus leave the section","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"assistant policy refusals remain visible in rows and the stable existing activity panel","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"assistants use the existing Agents dock with stable tabs, locked policy and audited revision saves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"closing a session panel goes back instead of adding history, like the ticket panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -16919,6 +16921,8 @@
     {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant identity polls reuse discovered routines instead of repeating the owner and history sweep","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant partial approval links expose explanations to the shared tooltip","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant policy refusals reach row activity without claiming execution or dropping configured approvers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"discards a pending attach list after a person change even when its transport ignores abort","tier":"ESSENTIAL"}
     ,

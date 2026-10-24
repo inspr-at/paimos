@@ -71,6 +71,19 @@ func TestAssistantLeadDelegationPolicyAndResults(t *testing.T) {
 		return map[string]any{"session_id": session, "instance": "https://personal.example.invalid", "scopes": slices.Clone(assistant.Scopes), "idempotency_key": key, "expected_revision": r.Revision}
 	}
 	path := "/api/recurrences/" + r.ID + "/delegate"
+	var otherOwner string
+	f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other session owner') RETURNING id::text`, f.p.TenantID).Scan(&otherOwner); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, session, otherOwner)
+		return err
+	})
+	f.call(lead, "POST", path, input("different-owner"), 403)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, session, f.p.ID)
+		return err
+	})
 	bad := input("outside-grant")
 	bad["scopes"] = append(slices.Clone(assistant.Scopes), "nodes.write")
 	if raw := f.call(lead, "POST", path, bad, 409); !strings.Contains(string(raw), "assistant_delegation_scope_exceeds_grant") {
@@ -177,6 +190,37 @@ func TestAssistantLeadDelegationPolicyAndResults(t *testing.T) {
 		}
 		if count != 1 {
 			t.Fatalf("result scope denial receipts=%d", count)
+		}
+		return nil
+	})
+	// A granted task queued while the lead key was valid must not dispatch
+	// after that exact key is revoked; another usable lead key is no substitute.
+	policy.AllowedScopes = append(slices.Clone(assistant.Scopes), "nodes.write")
+	policy.WeeklyBudget.Amount = "5"
+	f.tx(func(tx pgx.Tx) error {
+		raw, _ := json.Marshal(policy)
+		_, err := tx.Exec(t.Context(), `UPDATE assistant_profiles SET policy=$2,revision=revision+1 WHERE principal_id=$1`, assistant.ID, raw)
+		return err
+	})
+	var revoked Occurrence
+	if err := json.Unmarshal(f.call(lead, "POST", path, input("lead-revoked-after-acceptance"), 200), &revoked); err != nil || revoked.Run == nil {
+		t.Fatal("missing revoke fixture run")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1`, lead.KeyID)
+		return err
+	})
+	if err := f.m.DispatchAgentRuns(t.Context(), f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var state, reason string
+		var messages, events int
+		if err := tx.QueryRow(t.Context(), `SELECT o.state,o.result->>'reason',(SELECT count(*) FROM inbox_messages WHERE idempotency_key='routine-run/'||o.run_id::text),(SELECT count(*) FROM events WHERE type='recurrence.agent_dispatch_held' AND after->>'run_id'=o.run_id::text) FROM routine_effect_outbox o WHERE run_id=$1 AND effect_key='agent-dispatch'`, revoked.Run.ID).Scan(&state, &reason, &messages, &events); err != nil {
+			return err
+		}
+		if state != "cancelled" || reason != "agent_dispatch_refused" || messages != 0 || events != 1 {
+			t.Fatalf("revoked lead state=%s reason=%s messages=%d events=%d", state, reason, messages, events)
 		}
 		return nil
 	})

@@ -2,8 +2,10 @@
 package assistants
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +145,91 @@ func TestAssistantPolicyAdmissionMatrix(t *testing.T) {
 	})
 	if !errors.Is(err, authz.ErrForbidden) {
 		t.Fatalf("cross-tenant: %v", err)
+	}
+	// Establish real lock contention before releasing the first admission.
+	// Both callers would fit alone; the second must observe the committed hold.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	type admission struct {
+		decision Decision
+		err      error
+	}
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	waiting := make(chan uint32, 1)
+	done := make(chan admission, 2)
+	var releaseOnce sync.Once
+	releaseHolder := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHolder()
+	admit := func(key string, hold bool) {
+		var decision Decision
+		err := db.InTenant(dbtest.Seed(ctx), d.App, p.TenantID, func(tx pgx.Tx) error {
+			if !hold {
+				waiting <- tx.Conn().PgConn().PID()
+			}
+			if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+				return err
+			}
+			var err error
+			decision, err = EvaluateTx(ctx, tx, Check{TenantID: p.TenantID, PrincipalID: assistant, Operation: "concurrent", Key: key, Scopes: []string{"inbox.read"}, Charge: true, Ceiling: &Budget{"2", "USD"}, Now: now.AddDate(0, 0, 14)})
+			if err != nil {
+				return err
+			}
+			if hold {
+				close(ready)
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return AppendDecisionsTx(ctx, tx, p, decision)
+		})
+		done <- admission{decision, err}
+	}
+	go admit("concurrent-first", true)
+	select {
+	case <-ready:
+	case out := <-done:
+		t.Fatalf("holder failed: %v", out.err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	go admit("concurrent-second", false)
+	var waiter uint32
+	select {
+	case waiter = <-waiting:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	for {
+		var blocked bool
+		if err := d.Admin.QueryRow(ctx, `SELECT cardinality(pg_blocking_pids($1))>0`, waiter).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+	}
+	releaseHolder()
+	var allowedAdmissions, refusedAdmissions int
+	for range 2 {
+		select {
+		case out := <-done:
+			if out.err != nil {
+				t.Fatal(out.err)
+			}
+			if out.decision.Allowed {
+				allowedAdmissions++
+			} else if out.decision.Reason == "assistant_weekly_budget_exhausted" {
+				refusedAdmissions++
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if allowedAdmissions != 1 || refusedAdmissions != 1 {
+		t.Fatalf("contended admissions: allowed=%d refused=%d", allowedAdmissions, refusedAdmissions)
 	}
 	// The reset weekday follows the policy, with no comparison to real-clock rows.
 	day := int(now.Weekday())

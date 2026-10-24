@@ -64,6 +64,27 @@ it('assistant approval status lines use singular and plural forms in both langua
   }
 })
 
+it('assistant policy refusals reach row activity without claiming execution or dropping configured approvers', async () => {
+  // Risk: denied work looks active, or saving an unrelated field erases the
+  // server's approver/reset policy because the controls are not exposed yet.
+  const store = useAssistants()
+  await store.load()
+  const amy = store.items.find(item => item.display_name === 'Amy')!
+  const now = Date.now()
+  const event = { id: 71, type: 'assistant.policy_evaluated', at: new Date(now).toISOString(), actor_principal_id: 'lead', after: { principal_id: amy.principal_id, allowed: false, reason: 'assistant_weekly_budget_exhausted' } }
+  store.events = [event]
+  expect(store.facts[amy.principal_id]?.lastActivity).toMatchObject({ text: assistantCopy().policyBudgetDenied, policyOnly: true })
+  expect(assistantStatus(amy, store.facts[amy.principal_id]!, now)).not.toBe('working')
+  expect(policyChange({ ...event, after: { ...event.after, reason: 'assistant_project_denied' } })).toBe(assistantCopy().policyProjectDenied)
+  expect(policyChange({ ...event, after: { ...event.after, reason: 'assistant_scope_denied: nodes.write' } })).toBe(assistantCopy().policyScopeDenied)
+  const { cloneAssistantPolicy } = await import('../src/lib/assistants')
+  const original = { ...amy.policy, approver_person_ids: ['owner'], weekly_reset_day: 0 }
+  const draft = cloneAssistantPolicy(original)
+  expect(draft).toEqual(original)
+  draft.approver_person_ids!.push('another')
+  expect(original.approver_person_ids).toEqual(['owner'])
+})
+
 it('assistant partial approval links expose explanations to the shared tooltip', async () => {
   // Risk: native titles leave keyboard users without the partial-list warning.
   for (const partial of [true, false]) {

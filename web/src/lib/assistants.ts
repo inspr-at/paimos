@@ -29,7 +29,7 @@ export const cloneAssistantPolicy = (policy: AssistantPolicy): AssistantPolicy =
 })
 export interface AssistantEvent {
   id: number; type: string; at: string; actor_principal_id: string
-  before?: AssistantSnapshot; after?: AssistantSnapshot & { allowed?: boolean; reason?: string; operation?: string }
+  before?: Partial<AssistantSnapshot>; after?: Partial<AssistantSnapshot> & { allowed?: boolean; reason?: string; operation?: string }
 }
 export type AssistantStatus = 'waiting' | 'down' | 'working' | 'idle' | 'paused' | 'setup' | 'unavailable'
 export interface AssistantRoutine {
@@ -47,7 +47,7 @@ export interface AssistantFacts {
   approvalsTruncated?: boolean; approvalsError?: string; approvalsCanDecide?: boolean
   routinesTruncated?: boolean; routinesError?: string; activityIncomplete?: boolean
   activity: null | { at: string; text: string; kind: 'messages' | 'runs' | 'approvals'; href?: string; refused?: boolean }[]
-  lastActivity: null | { at: string; text: string }
+  lastActivity: null | { at: string; text: string; policyOnly?: boolean }
   paused: null | { by: string; at: string }
 }
 export const unavailableAssistantFacts = (): AssistantFacts => ({ adapter: null, spend: null, approvals: null, routines: null, activity: null, lastActivity: null, paused: null })
@@ -61,7 +61,7 @@ export function assistantStatus(item: Assistant, facts: AssistantFacts, now: num
   if (facts.adapter?.state === 'down') return 'down'
   if (facts.adapter?.state === 'setup') return 'setup'
   const at = Date.parse(facts.lastActivity?.at ?? '')
-  if (Number.isFinite(at) && now >= at && now - at < 15 * 60_000) return 'working'
+  if (!facts.lastActivity?.policyOnly && Number.isFinite(at) && now >= at && now - at < 15 * 60_000) return 'working'
   return facts.adapter === null ? 'unavailable' : 'idle'
 }
 export const ASSISTANT_STATUS_ICON: Record<AssistantStatus, IconName> = { waiting: 'hand', down: 'alert', working: 'pulse', idle: 'circle-dot', paused: 'pause', setup: 'link', unavailable: 'ring-dashed' }

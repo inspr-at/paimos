@@ -318,7 +318,13 @@ func canDecideAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, approva
 			return err
 		}
 	}
-	return assistants.CheckApproverTx(ctx, tx, p, a.AgentPrincipalID)
+	if err := assistants.CheckApproverTx(ctx, tx, p, a.AgentPrincipalID); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return fail(403, "person is outside the assistant approver policy")
+		}
+		return err
+	}
+	return nil
 }
 
 // actionDecisionFence is called before the approval request's row lock. A

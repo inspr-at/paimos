@@ -47,8 +47,13 @@ const statusLine = computed(() => {
   return ''
 })
 const history = computed(() => store.events.filter(event => (event.after?.principal_id ?? event.before?.principal_id) === props.item.principal_id).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id - a.id))
+function historyText(event: typeof store.events[number]) {
+  const name = event.actor_principal_id === session.identity?.principal.id ? session.identity.principal.name : event.actor_principal_id.slice(0, 8)
+  const format = ['assistant.policy_evaluated', 'assistant.delegated'].includes(event.type) ? words.recorded : words.changed
+  return format(name, time(event.at), policyChange(event))
+}
 const activities = computed(() => [
-  ...history.value.map(event => ({ key: `policy:${event.id}`, at: event.at, kind: 'policy', text: words.changed(event.actor_principal_id === session.identity?.principal.id ? session.identity.principal.name : event.actor_principal_id.slice(0, 8), time(event.at), policyChange(event)), href: undefined as string | undefined, refused: event.type === 'assistant.policy_evaluated' && event.after?.allowed === false })),
+  ...history.value.map(event => ({ key: `policy:${event.id}`, at: event.at, kind: 'policy', text: historyText(event), href: undefined as string | undefined, refused: event.type === 'assistant.policy_evaluated' && event.after?.allowed === false })),
   ...(props.facts.activity ?? []).map((event, index) => ({ ...event, key: `activity:${index}` })),
 ].filter(event => (activityFilter.value === 'all' || event.kind === activityFilter.value) && (!refusalsOnly.value || event.refused)).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)))
 const displayPolicy = computed(() => editing.value && draft.value ? draft.value : props.item.policy)
@@ -168,8 +173,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <section class="assistant-block"><h3>{{ words.budget }}</h3><div v-if="editing" class="policy-budget-fields"><label>{{ words.perWeek }}<input v-model="draft!.weekly_budget.amount" class="field" inputmode="decimal" maxlength="19" :disabled="pending" :aria-invalid="!budgetValid" /></label><label>{{ words.currency }}<select v-model="draft!.weekly_budget.unit" class="field" :disabled="pending"><option>USD</option><option>EUR</option><option value="tokens">tokens</option><option value="credits">credits</option></select></label></div><p v-else>{{ assistantMoney(displayPolicy.weekly_budget.amount, displayPolicy.weekly_budget.unit) }} {{ words.week }}</p><p>{{ words.resetUnavailable }}</p><p v-if="editing && !budgetValid" class="assistant-error">{{ words.invalidBudget }}</p></section>
         <section class="assistant-block locked-rule" data-locked-rule="outward"><h3><AppIcon name="lock" :size="14" />{{ words.outward }}</h3><strong>{{ words.outwardRule }}</strong><p>{{ words.outwardHelp }}</p></section>
         <section class="assistant-block"><h3>{{ words.approvers }}</h3><p>{{ words.approversUnavailable }}</p></section>
-        <section class="assistant-block locked-rule" data-locked-rule="secrets"><h3><AppIcon name="lock" :size="14" />{{ words.locked }}</h3><strong>{{ words.secretsRule }}</strong><button type="button" class="text-link" @click="activityFilter = 'approvals'; refusalsOnly = true; tab = 'activity'">{{ words.refusals }}</button></section>
-        <section class="assistant-block policy-audit"><h3>{{ words.tabs.activity }}</h3><p v-for="event in history.slice(0, 5)" :key="event.id">{{ words.changed(event.actor_principal_id === session.identity?.principal.id ? session.identity.principal.name : event.actor_principal_id.slice(0, 8), time(event.at), policyChange(event)) }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }}</p><p v-if="store.historyTruncated">{{ words.truncated }}</p><p class="history-range">{{ words.historyRange }}</p></section>
+        <section class="assistant-block locked-rule" data-locked-rule="secrets"><h3><AppIcon name="lock" :size="14" />{{ words.locked }}</h3><strong>{{ words.secretsRule }}</strong><button type="button" class="text-link" @click="activityFilter = 'all'; refusalsOnly = true; tab = 'activity'">{{ words.refusals }}</button></section>
+        <section class="assistant-block policy-audit"><h3>{{ words.tabs.activity }}</h3><p v-for="event in history.slice(0, 5)" :key="event.id">{{ historyText(event) }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }}</p><p v-if="store.historyTruncated">{{ words.truncated }}</p><p class="history-range">{{ words.historyRange }}</p></section>
       </div>
       <div v-show="tab === 'activity'" id="assistant-pane-activity" role="tabpanel" aria-labelledby="assistant-tab-activity" class="assistant-activity">
         <div class="activity-filters"><label for="assistant-activity-filter">{{ words.tabs.activity }}</label><select id="assistant-activity-filter" v-model="activityFilter" class="field" @change="refusalsOnly = false"><option v-for="(label, key) in words.filters" :key="key" :value="key">{{ label }}</option></select></div>
