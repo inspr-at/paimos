@@ -30,7 +30,7 @@
     "behavior": "Filter the mock to the tenant-wide view=current reader, await the initial complete load, then observe the online-triggered loadAll action through its after callback before asserting status or sending the next event."
   },
   "linux_validation": {
-    "runner": "Approved LEAD remote-spec.sh; agm2-ci Linux; managed headless Chromium; serial one-worker chunks.",
+    "runner": "Approved LEAD remote-spec.sh; approved Linux test host; managed headless Chromium; serial one-worker chunks.",
     "requested_flags_refusal": {
       "flags": "--repeat-each=30",
       "exit_code": 2,
@@ -102,7 +102,7 @@
   },
   "static_validation": {
     "status": "passed on one remote rerun",
-    "command": "ci-static-remote.sh (runs node scripts/ci-static.mjs --merge-main on mbp2606)",
+    "command": "ci-static-remote.sh (runs node scripts/ci-static.mjs --merge-main on the approved macOS test host)",
     "source_commit": "65545a990a32eabdb7d09fc501b0383612cceae7",
     "first_run": {
       "exit_code": 1,
