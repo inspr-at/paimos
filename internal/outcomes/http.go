@@ -37,6 +37,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/outcomes", m.list)
 	mux.HandleFunc("GET /api/outcomes/measurement", m.measurement)
 	mux.HandleFunc("POST /api/outcomes", m.record)
+	mux.HandleFunc("POST /api/outcomes/review-rounds", m.recordReviewRound)
+	mux.HandleFunc("GET /api/projects/{projectId}/delivery/review-rounds", m.reviewRoundNumbers)
 	mux.HandleFunc("GET /api/nodes/{nodeId}/escalation", m.escalationState)
 }
 
