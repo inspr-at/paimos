@@ -40,7 +40,15 @@ func TestNativeLoginPurgeOnNextMinute(t *testing.T) {
 	ticks := make(chan time.Time)
 	done := make(chan struct{})
 	go func() { s.runPurge(ctx, ticks); close(done) }()
-	t.Cleanup(func() { cancel(); barrier.Release(); dbtest.Await(t, guard, done) })
+	t.Cleanup(func() {
+		cancel()
+		barrier.Release()
+		// testing cancels t.Context before running cleanup hooks. Joining the
+		// worker needs its own hang guard, independent of that cancellation.
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		dbtest.Await(t, cleanup, done)
+	})
 	barrier.Wait(t, guard)
 	var retained int
 	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM native_login_transactions WHERE state_app IS NOT NULL`).Scan(&retained); err != nil || retained != 2 {
