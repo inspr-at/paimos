@@ -397,9 +397,9 @@
       "limitation": "The macOS fallback transfers PNG/Markdown artifacts but not native JSON/blob reports or trace ZIPs. Its final stdout proves the suite passed and includes the throttled case, but is not used for the 132 unchanged Linux execution count."
     },
     "static_check": {
-      "status": "non-green on two executions; final isolated retry pending now that browser runs ended",
+      "status": "passed on final isolated remote run after the browser runs ended",
       "command": "ci-static-remote.sh",
-      "source_commit": "91fb0fa6937cfbfa1e49d78febc1f1f416081601",
+      "source_commit": "5a5f5678de9f783102e16320251dc7707ecb54dc",
       "initial_refusal": {
         "exit_code": 3,
         "message": "remote busy ([approved macOS test host] host guard OPS-300); retry later or rely on PR CI",
@@ -433,6 +433,20 @@
           }
         ],
         "scope_note": "No source in either timed-out check or the code it measures was changed by this branch. Budget limits and assertions are unchanged."
+      },
+      "final_execution": {
+        "source_commit": "5a5f5678de9f783102e16320251dc7707ecb54dc",
+        "exit_code": 0,
+        "passed_checks": 46,
+        "optional_skips": 0,
+        "duration_seconds": 180.92,
+        "previously_timed_out_checks": {
+          "test-tiers_seconds": 171.31,
+          "releaseworkflow-tests_seconds": 128.91,
+          "apt-step-bounds_seconds": 50.99
+        },
+        "summary": "Static pre-filter: 180.92s; 46 passed, 0 optional skipped. Hosted CI remains the proof.",
+        "limits_or_assertions_changed": false
       }
     },
     "scope": {
@@ -490,8 +504,8 @@
     },
     "unchanged_anonymous_case_linux_passes": 132,
     "go_and_unit_scope": "No Go, web unit-test, application or runner source changed in this fix round. All seven Go and four web-unit shards on the original PR run passed; the two remote static executions also passed web typecheck, lint, shard tests, audit tests and their configured web-unit checks.",
-    "conclusion": "The original exact test source passes 132 Linux executions of the anonymous case (1 targeted + 1 affected-suite + 30 CI-sequence + 100 extended CI-sequence); 30 instrumented Linux executions also pass. The original CI artifact establishes a click stall after a successful match, but retains neither a Page snapshot nor a browser trace. No product or test defect has been established, and no failing regression against 91fb0fa6 can responsibly be claimed. Follow the brief stop condition instead of changing assertions, clocks or locators on a guess.",
-    "remaining": "The blocking CI timeout remains open. Needed evidence is a retained trace or sampled browser stack from an actual recurrence; passing quiet repetitions alone do not establish its cause. Static validation is also non-green because unchanged checks exceeded their hard file budgets on the remote host.",
+    "conclusion": "The original exact test source passes 132 Linux executions of the anonymous case (1 targeted + 1 affected-suite + 30 CI-sequence + 100 extended CI-sequence). A further 30 instrumented Linux runs and 30 Linux runs with CPU throttling at rate 4 also pass. The original CI artifact establishes a click stall after a successful match, but retains neither a Page snapshot nor a browser trace. No product or test defect has been established, and no failing regression against 91fb0fa6 can responsibly be claimed. Follow the brief stop condition instead of changing assertions, clocks or locators on a guess.",
+    "remaining": "The blocking original CI click timeout remains open. Needed evidence is a retained trace or sampled browser stack from an actual recurrence; passing repetitions alone do not establish its cause. The final remote static check passed all 46 checks without changing limits or assertions.",
     "external_fallback_runner_issue": {
       "owner": "Coordinator / OPS; external harness left unchanged",
       "file": "remote-spec-mbp.sh",
@@ -518,6 +532,28 @@
       "proposed_repair": "Pass the validated specs and grep as separately shell-quoted remote arguments and expand them as an argv array, as the Linux wrapper already does. Add a harness test proving a multiword grep remains one argument.",
       "modified": false,
       "relation_to_original_ci_failure": "This explains the unexpectedly broad fallback run, not the original GitHub CI click timeout."
-    }
+    },
+    "cpu_throttled_linux_repetitions": {
+      "status": "passed",
+      "source_commit": "6b182e1e46b291d00c0ac55d8c31871e4da52aca",
+      "run": "spec-6b182e1e46-9145",
+      "cpu_throttle_rate": 4,
+      "repeat_each": 30,
+      "selection": "without.permission.to.know",
+      "selection_note": "Single-token regex selects the same full title without allowing the fallback heredoc to split spaces.",
+      "delivery_includes_diagnostics": false,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "native_blob_reports": 30,
+      "native_repeat_indices": "0 through 29",
+      "per_chunk_workers": 1,
+      "suite_exit_code": 0,
+      "exit_code": 0,
+      "cleanup_complete": true,
+      "summary": "30 passed (3.0m)"
+    },
+    "completed_at_utc": "2026-10-24T12:04:03Z"
   }
 }
