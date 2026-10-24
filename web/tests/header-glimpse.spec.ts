@@ -53,13 +53,14 @@ async function holdTimeoutsWhile(page: Page, key: string, field?: string) {
 type VisualViewportHold = {
   holding: boolean; framesHeld: number; rootsDropped: number; visualResizes: number
   beginHold: () => Promise<void>; dropRoot: () => void
-  waitForTask: () => Promise<void>; deliverTasks: () => number
+  waitForTask: (delay: number) => Promise<void>; deliverTasks: (delay: number) => number
 }
 async function installVisualViewportHold(page: Page) {
   await page.addInitScript(() => {
     let resolveHeldFrame: (() => void) | undefined
     let resolveHeldTask: (() => void) | undefined
-    const tasks = new Map<number, () => void>()
+    let awaitedTaskDelay: number | undefined
+    const tasks = new Map<number, { delay?: number; deliver: () => void }>()
     const rootDeliveries = new Map<ResizeObserver, () => void>()
     const state = {
       holding: false, framesHeld: 0, rootsDropped: 0, visualResizes: 0,
@@ -75,13 +76,14 @@ async function installVisualViewportHold(page: Page) {
         if (!rootDeliveries.size) throw new Error('No root viewport observer was installed')
         for (const deliver of rootDeliveries.values()) deliver()
       },
-      waitForTask() {
-        return tasks.size ? Promise.resolve() : new Promise<void>(resolve => { resolveHeldTask = resolve })
+      waitForTask(delay: number) {
+        if ([...tasks.values()].some(task => task.delay === delay)) return Promise.resolve()
+        awaitedTaskDelay = delay
+        return new Promise<void>(resolve => { resolveHeldTask = resolve })
       },
-      deliverTasks() {
-        const pending = [...tasks.values()]
-        tasks.clear()
-        for (const deliver of pending) deliver()
+      deliverTasks(delay: number) {
+        const pending = [...tasks.entries()].filter(([, task]) => task.delay === delay)
+        for (const [id, task] of pending) { tasks.delete(id); task.deliver() }
         return pending.length
       },
     }
@@ -104,9 +106,8 @@ async function installVisualViewportHold(page: Page) {
         if (typeof handler !== 'function') return schedule(handler, delay, ...args)
         const id = schedule(() => {
           if (!state.holding) { handler(...args); return }
-          tasks.set(id, () => handler(...args))
-          resolveHeldTask?.()
-          resolveHeldTask = undefined
+          tasks.set(id, { delay, deliver: () => handler(...args) })
+          if (delay === awaitedTaskDelay) { resolveHeldTask?.(); resolveHeldTask = undefined }
         }, delay)
         return id
       }) as typeof window.setTimeout
@@ -196,12 +197,14 @@ async function expectVisualViewportClear(page: Page) {
 async function expectTaskViewportClear(page: Page) {
   await page.evaluate(() => (window as unknown as { __aeonVisualViewportHold: VisualViewportHold }).__aeonVisualViewportHold.beginHold())
   await resizeSeen(page, { width: 390, height: 844 })
-  await page.evaluate(() => (window as unknown as { __aeonVisualViewportHold: VisualViewportHold }).__aeonVisualViewportHold.waitForTask())
+  // Other components also arm timers. Wait for the watchdog's 250ms cadence,
+  // rather than mistaking an unrelated timer for the viewport recovery task.
+  await page.evaluate(() => (window as unknown as { __aeonVisualViewportHold: VisualViewportHold }).__aeonVisualViewportHold.waitForTask(250))
   await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
   const result = await page.evaluate(async () => {
     const state = (window as unknown as { __aeonVisualViewportHold: VisualViewportHold }).__aeonVisualViewportHold
     state.dropRoot()
-    const tasksDelivered = state.deliverTasks()
+    const tasksDelivered = state.deliverTasks(250)
     await Promise.resolve()
     return {
       layout: document.documentElement.getBoundingClientRect().width,
