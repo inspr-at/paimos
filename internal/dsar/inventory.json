@@ -271,7 +271,7 @@
       "columns": {
         "tenant_id": "metadata",
         "principal_id": "personal",
-        "operation_key": "metadata",
+        "operation_key": "review",
         "week_start": "personal",
         "unit": "metadata",
         "amount_micro": "personal",
@@ -291,7 +291,7 @@
         "id": "metadata",
         "principal_id": "personal",
         "project_id": "metadata",
-        "operation_key": "metadata",
+        "operation_key": "review",
         "operation": "metadata",
         "policy_revision": "metadata",
         "allowed": "metadata",
@@ -1304,7 +1304,7 @@
         "cancelled_at": "metadata",
         "lane_status": "personal",
         "pickup_lease_until": "metadata",
-        "assistant_policy_key": "metadata",
+        "assistant_policy_key": "review",
         "assistant_policy_project_id": "metadata"
       },
       "locator": {
