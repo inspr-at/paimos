@@ -32,6 +32,7 @@ type Check struct {
 
 type Decision struct {
 	Applicable     bool            `json:"-"`
+	Charged        bool            `json:"-"` // this transaction created the hold
 	Allowed        bool            `json:"allowed"`
 	Reason         string          `json:"reason"`
 	PrincipalID    string          `json:"principal_id"`
@@ -194,6 +195,7 @@ func EvaluateTx(ctx context.Context, tx pgx.Tx, in Check) (Decision, error) {
 				if err != nil {
 					return d, err
 				}
+				d.Charged = true
 			}
 		}
 	}
@@ -272,6 +274,23 @@ func ValidateCeiling(b *Budget) bool {
 	}
 	value, err := micro(b.Amount)
 	return err == nil && value > 0 && slices.Contains([]string{"USD", "EUR", "tokens", "credits"}, b.Unit)
+}
+
+// ReleaseUnexposedMessageTx is only for a trusted hosted dispatcher that still
+// owns the exact delivery lease and knows no request was sent. It must never be
+// called for a reused routine hold or a provider response/timeout. Callers hold
+// the tenant fence and append the returned audit after all resource writes.
+func ReleaseUnexposedMessageTx(ctx context.Context, tx pgx.Tx, tenantID, principalID, key string) ([]events.Change, error) {
+	var amount int64
+	var unit string
+	err := tx.QueryRow(ctx, `DELETE FROM assistant_budget_reservations WHERE tenant_id=$1::uuid AND principal_id=$2::uuid AND operation_key=$3 RETURNING amount_micro,unit`, tenantID, principalID, key).Scan(&amount, &unit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []events.Change{{Type: "assistant.message_hold_released", After: map[string]any{"principal_id": principalID, "operation_key": key, "amount_micro": amount, "unit": unit, "reason": "not_exposed"}}}, nil
 }
 
 // RoutineGrantRefusalTx checks owner consent separately from ordinary project

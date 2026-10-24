@@ -54,6 +54,9 @@ An insufficient run hold is refused as `assistant_message_cost_exceeds_hold`.
 Every further hosted delivery attempt reserves another message amount: an
 HTTP error or timeout can still incur provider cost. Holds commit at exposure
 and are conservatively settled at that amount, including uncertain failures.
+Known target/payload failures before any provider request release only the
+fresh push hold for that exact lease, with a budget-release audit event. Pull
+holds and reused routine holds cannot be released by this failure path.
 Failures before the claim or pickup transaction commits roll back the hold
 and its audit together. No provider-reported cost releases allowance.
 An omitted message cost defaults to 0.01 USD/EUR or 1 token/credit; policy

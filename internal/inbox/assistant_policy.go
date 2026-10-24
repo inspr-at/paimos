@@ -130,6 +130,9 @@ func (m *module) assistantPickupPolicyTx(ctx context.Context, tx pgx.Tx, p tenan
 				}
 			}
 		}
+		if run == "" {
+			key += "/pull"
+		}
 		d, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "adapter.pull", Key: key, Scopes: scopes, Charge: true, MessageCost: true, Refusal: grantRefusal})
 		if err != nil {
 			return nil, nil, err
@@ -153,6 +156,20 @@ func assistantReceiptErrorTx(ctx context.Context, tx pgx.Tx, id string) error {
 	}
 	if strings.HasPrefix(reason, "assistant_") {
 		return &httpError{409, "assistant_policy_denied", reason + "; message receipt: " + id}
+	}
+	return nil
+}
+
+// A deadline can elapse while a page is being prepared. If handOver drops an
+// item after a new hold, abort this unexposed page so its holds and audit roll
+// back together. The next poll omits the expired item and admits the survivors.
+func assistantPickupUnchanged(items []Message, alive map[string]bool, decisions []assistants.Decision) error {
+	if len(alive) != len(items) {
+		for _, d := range decisions {
+			if d.Charged {
+				return &httpError{409, "pickup_changed", "message availability changed; retry pickup"}
+			}
+		}
 	}
 	return nil
 }

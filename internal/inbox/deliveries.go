@@ -835,6 +835,9 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 		if err != nil {
 			return err
 		}
+		if err := assistantPickupUnchanged(items, alive, decisions); err != nil {
+			return err
+		}
 		kept := page.Items[:0]
 		for _, v := range page.Items {
 			if alive[v.ID] {

@@ -2,12 +2,14 @@
 package inbox
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/db"
@@ -181,6 +183,28 @@ func TestAssistantProjectListenRechecksPickupPolicy(t *testing.T) {
 	}
 }
 
+// B1: a valid key and unchanged project grant cannot outlive the assistant's
+// owner. The project route must keep the same refusal and sender notice.
+func TestAssistantProjectListenRejectsInactiveOwner(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	policy := assistants.DefaultPolicy()
+	policy.AllowedProjects, policy.WeeklyBudget.Amount = []string{project}, "1"
+	putMessageAssistantPolicy(t, w, policy)
+	msg := mustCompatSend(t, m, w.sender, project, compatInput(w.agent.ID, "inactive-owner"))
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, w.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	if page := assistantProjectPage(t, m, w.agent, project); len(page.Items) != 0 || page.NextAfter != msg.SentEventID {
+		t.Fatalf("ownerless pickup: %+v", page)
+	}
+	if state, reason := receiptState(t, w, msg.ID); state != "failed" || reason != "assistant_owner_unavailable" {
+		t.Fatalf("owner refusal receipt=%s %s", state, reason)
+	}
+	if notices := noticesFor(t, w, msg.ID); len(notices) != 1 || notices[""].recipient != w.sender.ID {
+		t.Fatalf("owner refusal notices=%+v", notices)
+	}
+}
+
 // B2: both transport modes must consume a finite allowance, and repeated
 // pickup must not charge an already admitted message again.
 func TestAssistantMessageBudgetCoversPushAndPull(t *testing.T) {
@@ -280,6 +304,81 @@ func TestAssistantHumanAskRefusedOnInboxAndProjectMessages(t *testing.T) {
 				t.Errorf("prohibited ask reached person: items=%+v err=%v", page, err)
 			}
 		})
+	}
+}
+
+// B2: a failed claim rolls its hold back; known local refusal releases a fresh
+// hold; a provider error retains spend and a retry needs another hold. Database
+// time drives the injected retry clock, without sleeping or calendar fixtures.
+func TestAssistantMessageBudgetFailureSettlement(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	target := targetInput{Address: "grok_bot:worker", Adapter: "grok_bot_routine", Kind: "https_webhook", Ref: "https://8.8.8.8/policy-fixture", Secret: "synthetic-adapter-fixture", Role: "primary", MaximumLevel: "simple"}
+	stored, err := m.storeTarget(t.Context(), w.admin, project, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := assistants.DefaultPolicy()
+	policy.AllowedProjects, policy.WeeklyBudget.Amount, policy.MessageCost = []string{project}, "0.50", "0.25"
+	putMessageAssistantPolicy(t, w, policy)
+	first := mustCompatSend(t, m, w.sender, project, compatInput(target.Address, "failed-claim"))
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_message_targets SET sealed_target=decode('00','hex') WHERE id=$1`, stored.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.claim(t.Context(), w.agent, project, claimInput{To: target.Address, Adapter: target.Adapter}); err == nil || err.Error() != "target decryption failed" {
+		t.Fatalf("wrong pre-exposure failure: %v", err)
+	}
+	if got := countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, w.agent.ID); got != 0 {
+		t.Fatalf("aborted claim retained %d holds", got)
+	}
+	if state, reason := receiptState(t, w, first.ID); state != "queued" || reason != "" {
+		t.Fatalf("aborted claim receipt=%s %s", state, reason)
+	}
+	// A decryptable but invalid private address fails after claim, before any
+	// socket. Only that fresh push hold may be released by the trusted server.
+	nonce := make([]byte, m.aead.NonceSize())
+	sealed := m.aead.Seal(nonce, nonce, []byte(`{"ref":"https://127.0.0.1/fixture","secret":"synthetic"}`), []byte(w.agent.TenantID+"/"+project+"/"+stored.ID))
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_message_targets SET sealed_target=$2 WHERE id=$1`, stored.ID, sealed); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	d := &RoutineDispatcher{m: m, client: &http.Client{Transport: routineRoundTrip(func(*http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: 500, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})}}
+	if worked, err := d.DispatchOne(t.Context(), w.agent.TenantID); !worked || err == nil || err.Error() != "routine target unavailable" {
+		t.Fatalf("local refusal worked=%v err=%v", worked, err)
+	}
+	if calls != 0 || countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, w.agent.ID) != 0 {
+		t.Fatal("local refusal spent allowance or contacted provider")
+	}
+	if got := countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM events WHERE type='assistant.message_hold_released' AND after->>'principal_id'=$1`, w.agent.ID); got != 1 {
+		t.Fatalf("release audit=%d", got)
+	}
+	if _, err := m.storeTarget(t.Context(), w.admin, project, target); err != nil {
+		t.Fatal(err)
+	}
+	message := mustCompatSend(t, m, w.sender, project, compatInput(target.Address, "uncertain-provider"))
+	var now time.Time
+	if err := w.db.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	now, _ = assistants.Week(now, policy)
+	now = now.Add(time.Hour) // every retry remains inside this policy week
+	m.databaseClock = func(context.Context, pgx.Tx) (time.Time, error) { return now, nil }
+	for attempt := 0; attempt < 2; attempt++ {
+		if worked, err := d.DispatchOne(t.Context(), w.agent.TenantID); !worked || err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+			t.Fatalf("provider failure worked=%v err=%v", worked, err)
+		}
+		now = now.Add(time.Minute)
+	}
+	if _, err := d.DispatchOne(t.Context(), w.agent.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1 AND amount_micro=250000`, w.agent.ID) != 2 {
+		t.Fatalf("provider retry bypassed configured cost: calls=%d", calls)
+	}
+	if state, reason := receiptState(t, w, message.ID); state != "failed" || reason != "assistant_weekly_budget_exhausted" {
+		t.Fatalf("retry budget receipt=%s %s", state, reason)
 	}
 }
 

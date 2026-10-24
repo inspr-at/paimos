@@ -19,6 +19,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/assistants"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -491,6 +493,9 @@ func (d *RoutineDispatcher) dispatchOne(ctx context.Context, tenantID string) (b
 
 func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Principal, work *DeliveryWork, reason string, terminal bool) {
 	_ = db.InTenant(ctx, d.m.base.pool, actor.TenantID, func(tx pgx.Tx) error {
+		if err := attachedmsg.Lock(ctx, tx); err != nil {
+			return err
+		}
 		// Message row first, then the delivery (AEON-280 lock order).
 		if work.Message != nil {
 			if _, err := tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE id=$1::uuid FOR UPDATE`, work.Message.ID); err != nil {
@@ -515,6 +520,13 @@ func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Princi
 		if err := recordAssistantHealth(ctx, tx, work.ID, reason, now); err != nil {
 			return err
 		}
+		var budgetChanges []events.Change
+		if work.budgetReleaseKey != "" && (reason == "target_invalid" || reason == "payload_invalid") {
+			budgetChanges, err = assistants.ReleaseUnexposedMessageTx(ctx, tx, actor.TenantID, actor.ID, work.budgetReleaseKey)
+			if err != nil {
+				return err
+			}
+		}
 		if state == "pending" {
 			if _, err := tx.Exec(ctx, `SELECT pg_notify('aeon_routine_deliveries', json_build_object('tenant_id',$1::text)::text)`, actor.TenantID); err != nil {
 				return err
@@ -533,7 +545,14 @@ func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Princi
 				}
 			}
 		}
-		_, err = events.Append(ctx, tx, actor, events.Change{Type: "inbox.delivery_attempt_failed", After: map[string]any{"delivery_id": work.ID, "reason": reason, "state": state}})
-		return err
+		if _, err = events.Append(ctx, tx, actor, events.Change{Type: "inbox.delivery_attempt_failed", After: map[string]any{"delivery_id": work.ID, "reason": reason, "state": state}}); err != nil {
+			return err
+		}
+		for _, change := range budgetChanges {
+			if _, err = events.Append(ctx, tx, actor, change); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }

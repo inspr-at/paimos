@@ -3782,6 +3782,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestScopeWithinKey","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/assistants","name":"TestAssistantMessagePolicyDefaultsAndBounds","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/assistants","name":"TestAssistantPolicyAdmissionMatrix","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/attachedmsg","name":"TestFrameLimitsAndEscaping","tier":"GATED-FULL"}
@@ -7988,7 +7990,11 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantMessageBudgetCoversPushAndPull","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantMessageBudgetFailureSettlement","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantProjectListenRechecksPickupPolicy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantProjectListenRejectsInactiveOwner","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantPullRefusalDoesNotStarveAllowedMessages","tier":"ESSENTIAL"}
     ,
@@ -10481,6 +10487,8 @@
     {"kind":"go","package":"internal/routineactions","name":"TestAssistantLeadDelegationPolicyAndResults","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestAssistantRoutineAssignmentRequiresOwnerConsent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestAssistantRoutineDelegatorConsentIsLive","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionCatalogueClosedAndBounded","tier":"ESSENTIAL"}
     ,
