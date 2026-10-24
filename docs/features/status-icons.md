@@ -20,6 +20,10 @@ Every status in the app is drawn by one component, `web/src/components/work/Stat
   are excluded; all measured CPU work including GC and other page work remains included. AEON-1666 restores
   this guarantee after AEON-1683 retired the elapsed-time check.
 
+Linux verification for AEON-1666: 30/30 repetitions passed at 0.104–0.312 ms CPU/frame, with 67–109 actual drawn
+frames per measured cycle. Deliberately expensive JavaScript-driven icons failed the same 1 ms assertion at
+11.689 ms/frame. The full six-case status-icon spec and all 46 remote static checks passed without skips.
+
 ## For views that build on it
 
 `web/src/lib/statusMotion.ts` holds the small API; `web/src/styles/status-icons.css` holds the shape and motion
