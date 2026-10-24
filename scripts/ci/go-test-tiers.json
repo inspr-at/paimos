@@ -6114,6 +6114,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestPortalMigrationDoesNotResurrectDeletedStarterKinds","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestPrincipalVisibilityMissingIdentityStaysEmpty","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestProjectAccessMigrationsRunUnderForcedRLS","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestProjectVisibilityFailsClosed","tier":"GATED-FULL"}

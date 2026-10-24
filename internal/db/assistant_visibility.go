@@ -20,6 +20,11 @@ func narrowAssistantVisibility(ctx context.Context, tx pgx.Tx, tid, id string) e
 	}
 	var assistant, profiles bool
 	if err := tx.QueryRow(ctx, `SELECT kind='agent' AND (coalesce(messaging_only,false) OR coalesce(to_jsonb(principals)->>'agent_class','')='assistant'),to_regclass('assistant_profiles') IS NOT NULL FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, tid, id).Scan(&assistant, &profiles); err != nil {
+		// Principal entry already gives missing or foreign identities no project
+		// or node visibility. Preserve that empty result, including for list reads.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
 		return err
 	}
 	if !assistant {
