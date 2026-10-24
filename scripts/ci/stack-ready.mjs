@@ -73,6 +73,7 @@ export function uiStackTarget(env = process.env, cwd = process.cwd()) {
 export const mockOnlyCiJobs = [
   ['ci.yml', 'web-shard'],
   ['ci.yml', 'visual-reference-capture'],
+  ['visual-capture.yml', 'visual-reference-capture'],
   ['ci.yml', 'visual-comparison'],
   ['nightly-full.yml', 'visual-comparison'],
   ['nightly-full.yml', 'nightly-web-shard'],

@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const need = (condition, message) => { if (!condition) throw new Error(message) }
-export function checkContainerPin(workflow, visual, previous, nightly) {
+export function checkContainerPin(workflow, visual, previous, nightly, fixedCapture) {
   const container = visual.renderer.container
   need(visual.renderer.version === 2 && /^sha256:[a-f0-9]{64}$/.test(container?.digest ?? ''), 'Visual renderer must pin a container digest')
   for (const name of ['visual-reference-capture', 'visual-comparison']) {
@@ -18,6 +18,12 @@ export function checkContainerPin(workflow, visual, previous, nightly) {
     const job = nightly.split('\n  visual-comparison:')[1]?.split(/\n  [a-z][a-z0-9-]*:/)[0]
     need(job?.includes(`image: ${container.image}@${container.digest}`) &&
       job.includes(`AEON_VISUAL_CONTAINER_DIGEST: ${container.digest}`), 'Nightly visual container pin differs from manifest')
+  }
+  if (fixedCapture !== undefined) {
+    const job = fixedCapture.split('\n  visual-reference-capture:')[1]?.split(/\n  [a-z][a-z0-9-]*:/)[0]
+    need(job?.includes(`image: ${container.image}@${container.digest}`) &&
+      job.includes(`AEON_VISUAL_CONTAINER_DIGEST: ${container.digest}`), 'Fixed capture container pin differs from manifest')
+    need(!/playwright install|bounded-apt/.test(job), 'Fixed capture must use its bundled browser and libraries')
   }
   const before = previous?.renderer?.container?.digest
   const rasterChanged = previous?.renderer && ['rasterSetting', 'machine', 'browser', 'deviceScaleFactor'].some(key =>
@@ -38,7 +44,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const base = process.env.AEON_VISUAL_BASE_SHA || execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { encoding: 'utf8', timeout: 10_000 }).trim()
     need(/^[a-f0-9]{40}$/.test(base) && !/^0+$/.test(base), 'Missing visual container update base SHA')
     const previous = JSON.parse(execFileSync('git', ['show', `${base}:${path}`], { encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024 }))
-    checkContainerPin(readFileSync('.github/workflows/ci.yml', 'utf8'), visual, previous, readFileSync('.github/workflows/nightly-full.yml', 'utf8'))
+    checkContainerPin(readFileSync('.github/workflows/ci.yml', 'utf8'), visual, previous,
+      readFileSync('.github/workflows/nightly-full.yml', 'utf8'), readFileSync('.github/workflows/visual-capture.yml', 'utf8'))
     console.log(`Visual container pin matches manifest; digest changes require regenerated baselines (base ${base}).`)
   } catch (error) { console.error(error.message); process.exitCode = 1 }
 }

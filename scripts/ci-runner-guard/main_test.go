@@ -2,11 +2,16 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +40,264 @@ func TestRepositoryWorkflows(t *testing.T) {
 	if len(problems) != 0 {
 		t.Fatal(strings.Join(problems, "\n"))
 	}
+}
+
+// Risk: a public-repository event or an edited route could reach the fixed
+// renderer. GitHub's workflow-restricted org runner group owns admission;
+// these controls keep our checked-in side of that boundary fail closed.
+func TestVisualCaptureRunnerBoundary(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/visual-capture.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems, err := checkWorkflow("visual-capture.yml", body); err != nil || len(problems) != 0 {
+		t.Fatalf("dedicated manual capture rejected: %v %v", problems, err)
+	}
+	mutations := map[string]struct {
+		want string
+		edit func(map[string]any)
+	}{
+		"missing manual trigger": {"only on workflow_dispatch", func(w map[string]any) { w["on"] = nil }},
+		"scalar trigger":         {"only on workflow_dispatch", func(w map[string]any) { w["on"] = "workflow_dispatch" }},
+		"writable token":         {"contents: read and no secrets", func(w map[string]any) { w["permissions"] = map[string]any{"contents": "write"} }},
+		"inherited secret":       {"contents: read and no secrets", func(w map[string]any) { w["env"] = map[string]any{"KEY": "${{ secrets.APP_KEY }}"} }},
+		"hosted setting": {"only the two prepared", func(w map[string]any) {
+			mapping(mapping(mapping(mapping(w["on"])["workflow_dispatch"])["inputs"])["visual_renderer"])["options"] = []any{"baseline"}
+		}},
+		"wrong runner": {"prepared agm2 labels", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["visual-reference-capture"])["runs-on"] = "ubuntu-latest"
+		}},
+		"extra job": {"exactly one job", func(w map[string]any) {
+			mapping(w["jobs"])["extra"] = map[string]any{"runs-on": []any{"self-hosted", "linux", "x64", "agm2"}}
+		}},
+		"job environment": {"no environment", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["visual-reference-capture"])["environment"] = "production"
+		}},
+		"job token override": {"inherited read-only", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["visual-reference-capture"])["permissions"] = map[string]any{"actions": "write"}
+		}},
+		"missing refusal": {"refuse a non-main ref", func(w map[string]any) {
+			job := mapping(mapping(w["jobs"])["visual-reference-capture"])
+			job["steps"] = job["steps"].([]any)[1:]
+		}},
+		"skipped refusal": {"refuse a non-main ref", func(w map[string]any) {
+			mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["steps"].([]any)[0])["if"] = "false"
+		}},
+		"weakened ref check": {"refuse a non-main ref", func(w map[string]any) {
+			step := mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["steps"].([]any)[0])
+			step["run"] = strings.Replace(step["run"].(string), `"$GITHUB_REF" != refs/heads/main`, "false", 1)
+		}},
+		"persisted credentials": {"without persisted credentials", func(w map[string]any) {
+			mapping(mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["steps"].([]any)[1])["with"])["persist-credentials"] = true
+		}},
+		"arbitrary checkout": {"dispatched main SHA", func(w map[string]any) {
+			mapping(mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["steps"].([]any)[1])["with"])["ref"] = "work/unreviewed"
+		}},
+		"mutable image": {"digest-pinned Playwright", func(w map[string]any) {
+			mapping(mapping(mapping(w["jobs"])["visual-reference-capture"])["container"])["image"] = "mcr.microsoft.com/playwright:latest"
+		}},
+	}
+	for _, event := range []string{"pull_request", "pull_request_target", "push", "merge_group", "schedule", "workflow_run", "workflow_call", "repository_dispatch"} {
+		mutations["added event/"+event] = struct {
+			want string
+			edit func(map[string]any)
+		}{"only on workflow_dispatch", func(w map[string]any) { mapping(w["on"])[event] = nil }}
+	}
+	for name, mutation := range mutations {
+		t.Run(name, func(t *testing.T) {
+			var workflow map[string]any
+			if err := yaml.Unmarshal(body, &workflow); err != nil {
+				t.Fatal(err)
+			}
+			mutation.edit(workflow)
+			if got := strings.Join(checkWorkflowPolicy("visual-capture.yml", workflow), "\n"); !strings.Contains(got, mutation.want) {
+				t.Fatalf("unsafe capture accepted or wrong rejection: %q, want %q", got, mutation.want)
+			}
+		})
+	}
+	for _, name := range []string{"ci.yml", "nightly-full.yml", "another.yml", "visual-capture.yaml"} {
+		t.Run("runner reserved/"+name, func(t *testing.T) {
+			problems, err := checkWorkflow(name, body)
+			if err != nil || !strings.Contains(strings.Join(problems, "\n"), "agm2 is reserved to visual-capture.yml") {
+				t.Fatalf("another workflow admitted the fixed renderer: %v %v", problems, err)
+			}
+		})
+	}
+	ci := readPolicyWorkflows(t)["ci.yml"]
+	// Risk: hosted-only execution could accidentally remove the four-way
+	// partition or accept it without the reviewed event/ref/attempt guards.
+	for _, sample := range []struct {
+		name, selection string
+		allowed         bool
+	}{
+		{"guarded four-way", routedGoShards, true},
+		{"four-way removed", `${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`, false},
+		{"stale attempt", strings.Replace(routedGoShards, "outputs.run_attempt == github.run_attempt && ", "", 1), false},
+		{"non-main ref", strings.Replace(routedGoShards, "github.ref == 'refs/heads/main'", "true", 1), false},
+		{"fork", strings.Replace(routedGoShards, " && github.event.pull_request.head.repo.full_name == github.repository", "", 1), false},
+		{"wrong runner class", strings.Replace(routedGoShards, "outputs.runner_class == 'mbp2606' && ", "", 1), false},
+	} {
+		t.Run("hosted Go partition/"+sample.name, func(t *testing.T) {
+			var changed map[string]any
+			if err := yaml.Unmarshal(ci, &changed); err != nil {
+				t.Fatal(err)
+			}
+			job := mapping(mapping(changed["jobs"])["go-test"])
+			if job["runs-on"] != "ubuntu-latest" {
+				t.Fatal("Go partition coverage requires literal hosted execution")
+			}
+			mapping(mapping(job["strategy"])["matrix"])["shard"] = sample.selection
+			err := checkCITriggersAndRequiredChecks(changed)
+			if sample.allowed {
+				if err != nil {
+					t.Fatalf("guarded hosted partition rejected: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "hosted shard count must retain the guarded four-way layout") {
+				t.Fatalf("unsafe partition accepted or wrong rejection: %v", err)
+			}
+		})
+	}
+	for _, selection := range []string{"self-hosted", "[self-hosted, linux, x64]", routedRunner, "${{ matrix.runner }}"} {
+		t.Run("CI remains hosted/"+selection, func(t *testing.T) {
+			changed := strings.Replace(string(ci), "runs-on: ubuntu-latest", "runs-on: "+selection, 1)
+			problems, err := checkWorkflow("ci.yml", []byte(changed))
+			if err != nil || !strings.Contains(strings.Join(problems, "\n"), "must use literal runs-on: ubuntu-latest") {
+				t.Fatalf("CI self-hosted route admitted: %v %v", problems, err)
+			}
+		})
+	}
+	for _, mutation := range []struct {
+		name, want string
+		edit       func(map[string]any)
+	}{
+		{"root write token", "read-only token permissions", func(w map[string]any) { w["permissions"] = map[string]any{"contents": "write"} }},
+		{"Go write token", "read-only token permissions", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["go-test"])["permissions"] = map[string]any{"contents": "write"}
+		}},
+		{"Go environment", "must not receive environments or secrets", func(w map[string]any) { mapping(mapping(w["jobs"])["go-test"])["environment"] = "production" }},
+		{"Go secret", "must not receive environments or secrets", func(w map[string]any) {
+			mapping(mapping(w["jobs"])["go-test"])["env"] = map[string]any{"KEY": "${{ secrets.APP_KEY }}"}
+		}},
+	} {
+		t.Run("hosted Go preserves authority/"+mutation.name, func(t *testing.T) {
+			var changed map[string]any
+			if err := yaml.Unmarshal(ci, &changed); err != nil {
+				t.Fatal(err)
+			}
+			mutation.edit(changed)
+			if got := strings.Join(checkWorkflowPolicy("ci.yml", changed), "\n"); !strings.Contains(got, mutation.want) {
+				t.Fatalf("hosted Go authority weakened: %q, want %q", got, mutation.want)
+			}
+		})
+	}
+	var workflow map[string]any
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	run := mapping(mapping(mapping(workflow["jobs"])["visual-reference-capture"])["steps"].([]any)[0])["run"].(string)
+	for _, sample := range []struct {
+		event, ref, workflowRef string
+		allowed                 bool
+	}{
+		{"workflow_dispatch", "refs/heads/main", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", true},
+		{"workflow_dispatch", "refs/heads/work/candidate", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"workflow_dispatch", "refs/tags/main", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"merge_group", "refs/heads/gh-readonly-queue/main/pr-42", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"pull_request", "refs/pull/42/merge", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"push", "refs/heads/main", "inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+		{"workflow_dispatch", "refs/heads/main", "fork/paimos/.github/workflows/visual-capture.yml@refs/heads/main", false},
+	} {
+		t.Run("actual refusal/"+sample.event+"/"+sample.ref, func(t *testing.T) {
+			cmd := exec.Command("bash", "-c", run)
+			cmd.Env = scenarioEnviron(map[string]string{"GITHUB_EVENT_NAME": sample.event, "GITHUB_REF": sample.ref, "GITHUB_WORKFLOW_REF": sample.workflowRef})
+			out, err := cmd.CombinedOutput()
+			if sample.allowed {
+				if err != nil {
+					t.Fatalf("main dispatch refused: %v %s", err, out)
+				}
+			} else if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), "Fixed renderer capture requires") {
+				t.Fatalf("unsafe event/ref did not fail with the refusal: %v %s", err, out)
+			}
+		})
+	}
+	// Risk: unset production CPU pins can hide an invalid prepare output path.
+	// Run the workflow's real command with pins only in an isolated fixture.
+	t.Run("actual prepare command", func(t *testing.T) {
+		var prepare string
+		for _, value := range mapping(mapping(workflow["jobs"])["visual-reference-capture"])["steps"].([]any) {
+			step := mapping(value)
+			if step["name"] == "Require OPS-pinned prepared renderer before installing dependencies" {
+				prepare, _ = step["run"].(string)
+			}
+		}
+		if prepare == "" {
+			t.Fatal("capture workflow must execute renderer preparation")
+		}
+		script, err := os.ReadFile("../test-prune/visual-renderer.mjs")
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := os.ReadFile("../test-prune/visual-manifest.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, setting := range []string{"agm2-baseline", "agm2-skia-runtime-disabled"} {
+			t.Run(setting, func(t *testing.T) {
+				var visual map[string]any
+				if err := json.Unmarshal(manifest, &visual); err != nil {
+					t.Fatal(err)
+				}
+				policy := mapping(mapping(mapping(visual["rendererPreparation"])["settings"])[setting])
+				machine := mapping(policy["machine"])
+				if machine == nil {
+					t.Fatal("prepared setting must define a fixed machine")
+				}
+				machine["cpuModel"] = "Synthetic CPU"
+				machine["cpuFlagsSHA256"] = strings.Repeat("a", 64)
+				pinned, err := json.Marshal(visual)
+				if err != nil {
+					t.Fatal(err)
+				}
+				directory := t.TempDir()
+				for path, body := range map[string][]byte{
+					"scripts/test-prune/visual-renderer.mjs":  script,
+					"scripts/test-prune/visual-manifest.json": pinned,
+					"web/package.json":                        []byte(`{"type":"module"}`),
+				} {
+					path = filepath.Join(directory, path)
+					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", prepare)
+				cmd.Dir = directory
+				cmd.Env = scenarioEnviron(map[string]string{
+					"AEON_VISUAL_RENDERER_SETTING": setting,
+					"RUNNER_TEMP":                  filepath.Join(directory, "runner-temp"),
+				})
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("workflow prepare command failed with pinned fixture: %v\n%s", err, out)
+				}
+				body, err := os.ReadFile(filepath.Join(directory, "web/test-results/prepared-renderer.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var renderer map[string]any
+				if err := json.Unmarshal(body, &renderer); err != nil {
+					t.Fatal(err)
+				}
+				if renderer["rasterSetting"] != setting || !reflect.DeepEqual(renderer["machine"], machine) ||
+					!reflect.DeepEqual(mapping(renderer["browser"])["args"], policy["browserArgs"]) {
+					t.Fatal("prepared output must retain the selected setting, CPU pins and browser arguments")
+				}
+			})
+		}
+	})
 }
 
 func TestTreeProofFailureCannotSkipRequiredChecks(t *testing.T) {

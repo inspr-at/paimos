@@ -462,7 +462,7 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         assert.equal(rows.length, wanted, `${label}/${id} matrix`);
         if (flag === 'on' && mode === 'full') assert.equal(rows.length, fullRows, `${label}/${id} full matrix`);
       }
-      assert.deepEqual(evaluate(/^    runs-on: (.+)$/m.exec(requiredJob('go-test'))[1], context), ['ubuntu-latest'], label);
+      assert.equal(/^    runs-on: (.+)$/m.exec(requiredJob('go-test'))[1], 'ubuntu-latest', label);
       for (const id of ['go', 'web', 'e2e', 'release-check']) {
         const job = requiredJob(id), gate = job.slice(job.indexOf('      - name: Require '));
         assert.ok(gate.startsWith('      - name: Require '), id);
@@ -491,6 +491,30 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
   assert.equal(combinations, 90);
   for (const flag of [undefined, '', 'ON', 'true', ' on', 'on ']) for (const lane of ['full', 'spec-only', 'docs-only'])
     assert.equal(effectiveLane(lane, {mode: 'full', event: 'push', affectedLane: flag}), lane, 'flag off remains exact');
+});
+
+test('hosted Go execution retains guarded four-way partitions and essential/full fallbacks', () => {
+  // Risk: restoring a partition must neither restore self-hosted execution nor
+  // allow a fork, stale attempt or non-main dispatch to narrow the full layout.
+  const job = requiredJob('go-test');
+  assert.equal(/^    runs-on: (.+)$/m.exec(job)[1], 'ubuntu-latest');
+  const expression = /^        shard: (.+)$/m.exec(job)[1];
+  for (const event of ['pull_request', 'merge_group', 'push', 'workflow_dispatch', 'schedule'])
+    for (const ref of ['refs/heads/main', 'refs/heads/work/example'])
+      for (const repository of ['inspr-at/paimos', 'fork/paimos'])
+        for (const attempt of ['1', '2']) for (const runner of ['hosted', 'mbp2606'])
+          for (const mode of ['essential', 'full']) {
+            const label = `${event}/${ref}/${repository}/${attempt}/${runner}/${mode}`;
+            const context = {'github.event_name': event, 'github.ref': ref,
+              'github.repository': 'inspr-at/paimos', 'github.event.pull_request.head.repo.full_name': repository,
+              'github.run_attempt': '2', 'needs.runner-route.outputs.run_attempt': attempt,
+              'needs.runner-route.outputs.runner_class': runner, 'needs.ci-plan.outputs.mode': mode};
+            const trusted = event === 'merge_group' || event === 'pull_request' && repository === 'inspr-at/paimos' ||
+              ['push', 'workflow_dispatch'].includes(event) && ref === 'refs/heads/main';
+            const count = trusted && attempt === '2' && runner === 'mbp2606' ? 4
+              : event === 'pull_request' && mode === 'essential' ? 2 : 7;
+            assert.deepEqual(evaluate(expression, context), Array.from({length: count}, (_, i) => i + 1), label);
+          }
 });
 
 test('merge-group workflow retains full matrices, job gates and execution proofs despite essential/static planner outputs', () => {

@@ -1230,6 +1230,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 			{"ci.yml", "visual-reference-capture"},
 			{"ci.yml", "visual-comparison"},
 			{"nightly-full.yml", "visual-comparison"},
+			{"visual-capture.yml", "visual-reference-capture"},
 		} {
 			t.Run(owner.workflow+"/"+owner.job, func(t *testing.T) {
 				job := treeMap(treeMap(treeWorkflow(t, owner.workflow)["jobs"])[owner.job])
@@ -1265,8 +1266,12 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				}
 				trust := reuseStep(t, job, "Trust the visual container checkout")
 				steps := reuseSteps(job)
-				if len(steps) < 3 || !strings.HasPrefix(fmt.Sprint(treeMap(steps[0])["uses"]), "actions/checkout@") ||
-					treeMap(steps[1])["name"] != trust["name"] || len(trust) != 2 {
+				checkoutAt := 0
+				if owner.workflow == "visual-capture.yml" {
+					checkoutAt = 1 // The main-only refusal must precede checkout.
+				}
+				if len(steps) < checkoutAt+3 || !strings.HasPrefix(fmt.Sprint(treeMap(steps[checkoutAt])["uses"]), "actions/checkout@") ||
+					treeMap(steps[checkoutAt+1])["name"] != trust["name"] || len(trust) != 2 {
 					t.Fatal("container checkout trust must run unconditionally immediately after checkout")
 				}
 				if out, err := run(checkout, "", "bash", "-euo", "pipefail", "-c", fmt.Sprint(trust["run"])); err != nil {
@@ -1536,22 +1541,16 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 					t.Fatal("Go build cache restore and save must run only on GitHub-hosted runners")
 				}
 				delete(cache, "if")
-				// AEON-777 broadens routing through the router's event switch.
-				// Pin the exact new event/ref/head boundary before normalizing to
-				// the historical main-only expressions; all other fields stay pinned.
+				// AEON-1713 keeps every CI execution job hosted. Verify the guarded
+				// four-way/essential/full partition before projecting onto the historical
+				// pool expressions; all other pinned fields and checks remain required.
 				const oldRoute = `contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && `
-				const poolRoute = `((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && `
 				matrix := treeMap(treeMap(j["strategy"])["matrix"])
-				for _, field := range []struct {
-					owner map[string]any
-					key   string
-				}{{j, "runs-on"}, {matrix, "shard"}} {
-					expression, _ := field.owner[field.key].(string)
-					if strings.Count(expression, poolRoute) != 1 {
-						t.Fatalf("%s must retain the reviewed pool event/ref/head guards", field.key)
-					}
-					field.owner[field.key] = strings.Replace(expression, poolRoute, oldRoute, 1)
+				if j["runs-on"] != "ubuntu-latest" || matrix["shard"] != `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}` {
+					t.Fatal("CI Go execution must stay hosted with the complete guarded four-way/essential/full partition")
 				}
+				j["runs-on"] = `${{ fromJSON(` + oldRoute + `needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
+				matrix["shard"] = `${{ fromJSON(` + oldRoute + `needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 				// AEON-707 binds backup clients to this job's actual service.
 				// Assert the exact addition before comparing every older field
 				// against the unchanged accepted-CI hash.

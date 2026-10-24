@@ -38,15 +38,29 @@ case "${1:-}" in
   dispatch-candidate)
     capture_ref=${2:?usage: lead-commands.sh dispatch-candidate COORDINATOR_PUBLISHED_REF PREPARED_SETTING}
     setting=${3:?prepared renderer setting required}
-    SETTING="$setting" node --input-type=module -e 'import { readFileSync } from "node:fs"; import { preparedRenderer } from "./scripts/test-prune/visual-renderer.mjs"; const renderer = preparedRenderer(JSON.parse(readFileSync("scripts/test-prune/visual-manifest.json")), process.env.SETTING); if (!renderer.rasterSetting) throw new Error("Choose an explicit prepared renderer"); if (renderer.machine) throw new Error("agm2 scheduling is prepared only; OPS and coordinator must review the runner boundary before enabling that workflow input");'
+    SETTING="$setting" node --input-type=module -e 'import { readFileSync } from "node:fs"; import { preparedRenderer } from "./scripts/test-prune/visual-renderer.mjs"; const renderer = preparedRenderer(JSON.parse(readFileSync("scripts/test-prune/visual-manifest.json")), process.env.SETTING); if (!renderer.rasterSetting) throw new Error("Choose an explicit prepared renderer");'
+    capture_workflow=ci.yml
+    case "$setting" in
+      agm2-*)
+        if [ "$capture_ref" != main ]; then
+          echo 'Fixed renderer candidates require the published main ref; stop before dispatch.' >&2
+          exit 1
+        fi
+        capture_workflow=visual-capture.yml
+        ;;
+    esac
     expected_sha=$(git rev-parse HEAD)
     published_sha=$(gh api "repos/inspr-at/paimos/commits/$capture_ref" --jq .sha)
     if [ "$expected_sha" != "$published_sha" ]; then
       echo 'Published ref does not match this checkout; stop before dispatch.' >&2
       exit 1
     fi
-    gh workflow run ci.yml --repo inspr-at/paimos --ref "$capture_ref" -f visual_capture=true -f "visual_renderer=$setting"
-    echo 'Two runner jobs each capture all 72 candidates twice. Download visual-linux-candidate-SHA-ATTEMPT-runner-1 and -runner-2 into separate fresh directories. Prove all 60 selected PNGs across machines and review diffs vs set 3; no current reference is changed.'
+    if [ "$capture_workflow" = visual-capture.yml ]; then
+      gh workflow run "$capture_workflow" --repo inspr-at/paimos --ref main -f "visual_renderer=$setting"
+    else
+      gh workflow run "$capture_workflow" --repo inspr-at/paimos --ref "$capture_ref" -f visual_capture=true -f "visual_renderer=$setting"
+    fi
+    echo 'Two runner jobs each capture all 72 candidates twice. Download visual-linux-candidate-SHA-ATTEMPT-runner-1 and -runner-2 into separate fresh directories. Prove all 60 selected PNGs and review diffs vs set 3; no current reference is changed. Fixed renderer jobs intentionally use the same OPS-pinned machine.'
     ;;
   candidate-proof)
     setting=${2:?usage: lead-commands.sh candidate-proof PREPARED_SETTING FIRST_CAPTURE SECOND_CAPTURE VERIFIED_SET3_DIR NEW_REVIEW_DIR}

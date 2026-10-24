@@ -130,8 +130,14 @@ export function assertRenderer(actual, expected, { capture = false } = {}) {
 
 export function captureEnabled(visual, env = process.env) {
   if (env.AEON_VISUAL_CAPTURE !== '1') return false
-  if (env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_WORKFLOW !== 'CI' || env.GITHUB_JOB !== 'visual-reference-capture')
-    throw new Error('Visual capture is allowed only by the manual CI visual-reference-capture job')
+  const setting = env.AEON_VISUAL_RENDERER_SETTING ?? ''
+  const fixed = setting.startsWith('agm2-') || Boolean(visual.rendererPreparation?.settings?.[setting]?.machine)
+  const route = fixed
+    ? env.GITHUB_WORKFLOW === 'Visual capture' && env.GITHUB_REF === 'refs/heads/main' &&
+      env.GITHUB_WORKFLOW_REF === 'inspr-at/paimos/.github/workflows/visual-capture.yml@refs/heads/main'
+    : env.GITHUB_WORKFLOW === 'CI'
+  if (env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_JOB !== 'visual-reference-capture' || !route)
+    throw new Error('Visual capture is allowed only by the manual CI hosted job or the main-only fixed renderer workflow')
   if (visual.capture?.event !== 'workflow_dispatch') throw new Error('Missing manual capture policy')
   return true
 }
