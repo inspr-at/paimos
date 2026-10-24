@@ -139,6 +139,15 @@ func requireOwnerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ownerID 
 }
 
 func validateProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, policy Policy) error {
+	for _, id := range policy.ApproverPersonIDs {
+		var valid bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='person' AND status='active' AND linked_to IS NULL)`, p.TenantID, id).Scan(&valid); err != nil {
+			return err
+		}
+		if !valid {
+			return errInput
+		}
+	}
 	for _, id := range policy.AllowedProjects {
 		if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: id}); err != nil {
 			return err

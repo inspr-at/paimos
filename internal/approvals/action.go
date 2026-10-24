@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -228,6 +229,13 @@ func (m *Module) requestAction(ctx context.Context, p tenant.Principal, authoriz
 			return err
 		}
 		out.Reason = actionRefusal(in)
+		policy, err := assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: p.ID, ProjectID: project, Operation: "action.request", Key: "action/" + out.ID, Scopes: []string{"approvals.request"}, RequireBudget: true, Now: now})
+		if err != nil {
+			return err
+		}
+		if !policy.Allowed {
+			out.Reason = policy.Reason
+		}
 		var messageID *string
 		var approval Approval
 		if out.Reason != "" {
@@ -268,7 +276,10 @@ func (m *Module) requestAction(ctx context.Context, p tenant.Principal, authoriz
 			event = "action_request.refused"
 		}
 		_, err = events.Append(ctx, tx, p, events.Change{Type: event, NodeID: &project, After: out})
-		return err
+		if err != nil {
+			return err
+		}
+		return assistants.AppendDecisionsTx(ctx, tx, p, policy)
 	})
 	return out, err
 }
@@ -305,7 +316,7 @@ func canDecideAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, approva
 			return err
 		}
 	}
-	return nil
+	return assistants.CheckApproverTx(ctx, tx, p, a.AgentPrincipalID)
 }
 
 // actionDecisionFence is called before the approval request's row lock. A
@@ -328,6 +339,24 @@ func (m *Module) decideActionTx(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	a, err := scanAction(tx.QueryRow(ctx, actionSelect+` WHERE a.approval_id=$1 FOR UPDATE OF a`, before.ID))
 	if err != nil {
 		return Approval{}, err
+	}
+	var policy assistants.Decision
+	if decision == "approved" {
+		policy, err = assistants.EvaluateTx(ctx, tx, assistants.Check{TenantID: p.TenantID, PrincipalID: a.AgentPrincipalID, ProjectID: a.ProjectID, Operation: "action.approve", Key: "action/" + a.ID, Scopes: []string{"approvals.request"}, RequireBudget: true})
+		if err != nil {
+			return Approval{}, err
+		}
+		if !policy.Allowed {
+			decision, reason = "denied", policy.Reason
+		}
+		if policy.Applicable && decision == "approved" {
+			requester := tenant.Principal{ID: a.AgentPrincipalID, TenantID: p.TenantID, Kind: tenant.Agent, Scopes: []string{"approvals.request"}}
+			if err = authz.RequireTx(ctx, tx, requester, "approvals.request", authz.Scope{ProjectID: a.ProjectID}); errors.Is(err, authz.ErrForbidden) {
+				decision, reason = "denied", "assistant_authority_revoked"
+			} else if err != nil {
+				return Approval{}, err
+			}
+		}
 	}
 	if decision == "approved" {
 		kind, err := actionKindTx(ctx, tx, a.Kind)
@@ -365,6 +394,9 @@ func (m *Module) decideActionTx(ctx context.Context, tx pgx.Tx, p tenant.Princip
 		event = eventApproved
 	}
 	_, err = events.Append(ctx, tx, p, events.Change{Type: event, NodeID: nodeRef(out), Before: withoutAgentName(before), After: withoutAgentName(out)})
+	if err == nil {
+		err = assistants.AppendDecisionsTx(ctx, tx, p, policy)
+	}
 	return out, err
 }
 

@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -25,10 +27,11 @@ type AgentDestination struct {
 // AgentOwner is an explicit person grant, separate from the accountable
 // canonical person in Definition. It never changes a principal, key or role.
 type AgentOwner struct {
-	OwnerPrincipalID     string           `json:"owner_principal_id"`
-	Destination          AgentDestination `json:"destination"`
-	GrantedByPrincipalID string           `json:"granted_by_principal_id"`
-	DefinitionDigest     string           `json:"definition_digest"`
+	OwnerPrincipalID     string             `json:"owner_principal_id"`
+	Destination          AgentDestination   `json:"destination"`
+	GrantedByPrincipalID string             `json:"granted_by_principal_id"`
+	DefinitionDigest     string             `json:"definition_digest"`
+	BudgetCeiling        *assistants.Budget `json:"budget_ceiling,omitempty"`
 }
 
 // AgentBudgetRequest binds each admission to a tenant, owner, run and UTC week.
@@ -39,7 +42,11 @@ type AgentBudgetRequest struct {
 	TenantID, OwnerPrincipalID, RunID string
 	WeekStart, WeekEnd                time.Time
 }
-type AgentBudgetDecision struct{ Allowed bool }
+type AgentBudgetDecision struct {
+	Allowed bool
+	Reason  string
+	Changes []events.Change
+}
 type AgentBudgetTx func(context.Context, pgx.Tx, AgentBudgetRequest) (AgentBudgetDecision, error)
 
 // WithAgentBudget supplies the policy-owned admission hook. Missing policy is
@@ -161,9 +168,10 @@ func (m *Module) setAgentOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		ExpectedRevision int64            `json:"expected_revision"`
-		OwnerPrincipalID string           `json:"owner_principal_id"`
-		Destination      AgentDestination `json:"destination"`
+		ExpectedRevision int64              `json:"expected_revision"`
+		OwnerPrincipalID string             `json:"owner_principal_id"`
+		Destination      AgentDestination   `json:"destination"`
+		BudgetCeiling    *assistants.Budget `json:"budget_ceiling,omitempty"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -174,6 +182,10 @@ func (m *Module) setAgentOwner(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := in.Destination.validate(); err != nil {
 		reply(w, 200, nil, err)
+		return
+	}
+	if !assistants.ValidateCeiling(in.BudgetCeiling) {
+		reply(w, 200, nil, workorders.Fail(400, "invalid budget_ceiling"))
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
@@ -203,7 +215,7 @@ func (m *Module) setAgentOwner(w http.ResponseWriter, r *http.Request) {
 		if canonical != item.Definition.OwnerPrincipalID {
 			return authz.ErrForbidden
 		}
-		out = AgentOwner{OwnerPrincipalID: strings.ToLower(in.OwnerPrincipalID), Destination: in.Destination, GrantedByPrincipalID: canonical, DefinitionDigest: agentDefinitionDigest(item)}
+		out = AgentOwner{OwnerPrincipalID: strings.ToLower(in.OwnerPrincipalID), Destination: in.Destination, GrantedByPrincipalID: canonical, DefinitionDigest: agentDefinitionDigest(item), BudgetCeiling: in.BudgetCeiling}
 		if _, _, err = agentOwnerAuthority(ctx, tx, p.TenantID, item, out); err != nil {
 			return err
 		}
@@ -248,6 +260,15 @@ func persistAgentRun(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r R
  VALUES($1,$2,$3,$4,'project',$5,$6,$5,$7,$8,$9,$10,$11,$6,$12,'{}','created',$10) RETURNING id::text`, actor.TenantID, r.ID, o.Key, r.Revision, r.ProjectID, c.OwnerPrincipalID, r.ParentID, assignment, run.AssignmentDigest, policy, run.PolicyDigest, *o.NodeID).Scan(&run.ID)
 	if err != nil {
 		return true, err
+	}
+	if delegation, ok := ctx.Value(delegationContextKey{}).(*AgentDelegation); ok {
+		raw, err := json.Marshal(delegation)
+		if err != nil {
+			return true, err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE routine_runs SET agent_delegation=$2 WHERE id=$1`, run.ID, raw); err != nil {
+			return true, err
+		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,payload) VALUES($1,$2,'agent-dispatch','routine.agent_dispatch',jsonb_build_object('run_id',$2::uuid::text))`, actor.TenantID, run.ID)
 	if err == nil {

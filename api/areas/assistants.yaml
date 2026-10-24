@@ -151,8 +151,10 @@ components:
       additionalProperties: false
       required: [allowed_projects, allowed_scopes, weekly_budget, outward_action_rule, never_ask_person_for_secrets_or_manual_steps]
       properties:
+        approver_person_ids: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, format: uuid}, description: "Optional same-tenant canonical person approvers. Empty or omitted restricts outward approvals to the assistant owner; all existing project decision permissions remain required."}
+        weekly_reset_day: {type: integer, minimum: 0, maximum: 6, description: "UTC reset weekday, Sunday 0 through Saturday 6. Omitted means Monday. Reservations retain their original week and are never refunded from an assistant-reported result."}
         allowed_projects: {type: array, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}, description: "Explicit project allowlist; empty means no project authority under this policy."}
-        allowed_scopes: {type: array, maxItems: 200, uniqueItems: true, items: {type: string, maxLength: 100}, description: "Additional ceiling for later adapter enforcement; never a key or role grant."}
+        allowed_scopes: {type: array, maxItems: 200, uniqueItems: true, items: {type: string, maxLength: 100}, description: "Server-enforced additional ceiling for adapters, actions, routine runs and delegation; never a key or role grant."}
         weekly_budget:
           type: object
           additionalProperties: false

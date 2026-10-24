@@ -48,7 +48,7 @@ const statusLine = computed(() => {
 })
 const history = computed(() => store.events.filter(event => (event.after?.principal_id ?? event.before?.principal_id) === props.item.principal_id).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id - a.id))
 const activities = computed(() => [
-  ...history.value.map(event => ({ key: `policy:${event.id}`, at: event.at, kind: 'policy', text: words.changed(event.actor_principal_id === session.identity?.principal.id ? session.identity.principal.name : event.actor_principal_id.slice(0, 8), time(event.at), policyChange(event)), href: undefined as string | undefined, refused: false })),
+  ...history.value.map(event => ({ key: `policy:${event.id}`, at: event.at, kind: 'policy', text: words.changed(event.actor_principal_id === session.identity?.principal.id ? session.identity.principal.name : event.actor_principal_id.slice(0, 8), time(event.at), policyChange(event)), href: undefined as string | undefined, refused: event.type === 'assistant.policy_evaluated' && event.after?.allowed === false })),
   ...(props.facts.activity ?? []).map((event, index) => ({ ...event, key: `activity:${index}` })),
 ].filter(event => (activityFilter.value === 'all' || event.kind === activityFilter.value) && (!refusalsOnly.value || event.refused)).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)))
 const displayPolicy = computed(() => editing.value && draft.value ? draft.value : props.item.policy)

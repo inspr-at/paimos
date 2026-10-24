@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -156,12 +157,36 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 			return err
 		}
 		if !decision.Allowed {
-			if err := admission.Rollback(ctx); err != nil {
+			if err := admission.Commit(ctx); err != nil {
 				return err
 			}
-			return hold("owner_weekly_budget_exhausted", false)
+			reason := decision.Reason
+			if reason == "" {
+				reason = "owner_weekly_budget_exhausted"
+			}
+			if err = hold(reason, false); err != nil {
+				return err
+			}
+			for _, change := range decision.Changes {
+				if _, err = events.Append(ctx, tx, person, change); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
-		message, changes, err := inbox.QueueAgentRoutineTx(ctx, admission, person, c.OwnerPrincipalID, item.ProjectID, id, body)
+		policyKey := "routine-run/" + id
+		var delegationRaw []byte
+		if err = tx.QueryRow(ctx, `SELECT agent_delegation FROM routine_runs WHERE id=$1`, id).Scan(&delegationRaw); err != nil {
+			return err
+		}
+		if len(delegationRaw) > 0 {
+			var d AgentDelegation
+			if json.Unmarshal(delegationRaw, &d) != nil {
+				return errInvalidAssistantGrant()
+			}
+			policyKey = d.BudgetKey
+		}
+		message, changes, err := inbox.QueueAgentRoutineTx(ctx, admission, person, c.OwnerPrincipalID, item.ProjectID, id, body, policyKey)
 		if err != nil {
 			if rollbackErr := admission.Rollback(ctx); rollbackErr != nil {
 				return errors.Join(err, rollbackErr)
@@ -174,6 +199,7 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 		if err = admission.Commit(ctx); err != nil {
 			return err
 		}
+		changes = append(changes, decision.Changes...)
 		if _, err = tx.Exec(ctx, `UPDATE routine_runs SET state='created',updated_at=clock_timestamp() WHERE id=$1`, id); err != nil {
 			return err
 		}

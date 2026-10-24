@@ -227,6 +227,7 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		}
 	}
 	var out CompatMessage
+	var policyErr error
 	key, digest := messageDigest(in.Key), messageDigest(in)
 	if in.adapterTestID != "" {
 		digest = messageDigest(struct {
@@ -234,7 +235,12 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			AdapterID string
 		}{in, in.adapterTestID})
 	}
-	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) (txErr error) {
+		defer func() {
+			if txErr == nil && out.ID != "" {
+				policyErr = assistantReceiptErrorTx(ctx, tx, out.ID)
+			}
+		}()
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
 		}
@@ -490,6 +496,9 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		out, err = scanCompatMessage(tx.QueryRow(ctx, `SELECT `+compatMessageCols+` FROM inbox_compat_messages c `+compatObligationJoin+` WHERE c.id=$1::uuid`, id))
 		return err
 	})
+	if err == nil {
+		err = policyErr
+	}
 	return out, err
 }
 
@@ -530,6 +539,24 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		}
 		if in.adapterTestID != "" && in.adapterTestID != in.To && (target == nil || *target != in.adapterTestID) {
 			return errConflict
+		}
+	}
+	if !in.ActionRequest {
+		var recipient string
+		var policyKey *string
+		if err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,assistant_policy_key FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &policyKey); err != nil {
+			return err
+		}
+		key := ""
+		if policyKey != nil {
+			key = *policyKey
+		}
+		refusal, err := assistantDeliveryPolicyTx(ctx, tx, p, recipient, project, id, key, appendEvent)
+		if err != nil {
+			return err
+		}
+		if refusal != "" {
+			state, reason = "dead", refusal
 		}
 	}
 	var d MessageDelivery

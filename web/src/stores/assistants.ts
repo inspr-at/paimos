@@ -4,7 +4,7 @@ import { computed, onScopeDispose, ref, watch } from 'vue'
 import { APIError, pauseRecurrence } from '../lib/api'
 import { can, ensurePermissions, onAccessRevalidate, permissionsKnown } from '../lib/authz'
 import { assistantCopy } from '../lib/assistantsCopy'
-import { assistantCapabilities, assistantDeskLink, assistantPolicyEvents, assistantRequest, disconnectAssistant, listAssistants, saveAssistantPolicy, unavailableAssistantFacts, type Assistant, type AssistantEvent, type AssistantPolicy, type AssistantSnapshot, type AssistantRoutine } from '../lib/assistants'
+import { assistantCapabilities, assistantDeskLink, assistantPolicyEvents, assistantRequest, disconnectAssistant, listAssistants, policyChange, saveAssistantPolicy, unavailableAssistantFacts, type Assistant, type AssistantEvent, type AssistantPolicy, type AssistantSnapshot, type AssistantRoutine } from '../lib/assistants'
 import { presentAssistantRoutine, readAssistantRoutines, type OwnedAssistantRoutine } from '../lib/assistantRoutines'
 import { useSession } from './session'
 import { useProjects } from './projects'
@@ -28,7 +28,8 @@ export const useAssistants = defineStore('assistants', () => {
   let flight: Promise<void> | undefined
   const facts = computed(() => Object.fromEntries(items.value.map(item => {
     const own = ownedRoutines.value.filter(row => row.owner === item.principal_id)
-    const latest = own.flatMap(row => row.lastActivity ?? []).sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] ?? null
+    const policyActivity = events.value.filter(event => event.after?.principal_id === item.principal_id && ['assistant.policy_evaluated', 'assistant.delegated'].includes(event.type)).map(event => ({ at: event.at, text: policyChange(event) }))
+    const latest = [...own.flatMap(row => row.lastActivity ?? []), ...policyActivity].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] ?? null
     // Reuse the Desk's bounded, permission-checked live projection. Names are
     // presentation only: ownership always comes from the asker's principal id.
     const page = session.identity?.principal.kind === 'person' && mayRead.value ? desk.projection : null
@@ -87,6 +88,7 @@ export const useAssistants = defineStore('assistants', () => {
         items.value = body.items.map(item => (current.get(item.principal_id)?.revision ?? -1) > item.revision ? current.get(item.principal_id)! : item)
         truncated.value = body.truncated; state.value = 'ready'; error.value = ''
         if (assistantCapabilities.routines && !routineStarted && identity.principal.kind === 'person') void loadRoutines()
+        if (historyState.value === 'idle' && identity.principal.kind === 'person') void loadHistory()
       } catch (failure) {
         if (turn !== read || who !== owner.value || epoch !== generation) return
         state.value = failure instanceof APIError && failure.status === 403 ? 'forbidden' : failure instanceof APIError && failure.status === 404 ? 'unavailable' : 'error'
@@ -171,6 +173,7 @@ export const useAssistants = defineStore('assistants', () => {
     // discovery never runs from the page's 20-second identity poll.
     const stop = subscribeBrowserEvents([
       'assistant.created', 'assistant.updated', 'assistant.policy_updated', 'assistant.disabled',
+      'assistant.policy_evaluated', 'assistant.delegated',
       'recurrence.created', 'recurrence.updated', 'recurrence.deleted', 'recurrence.paused', 'recurrence.resumed',
       'recurrence.occurred', 'recurrence.skipped', 'recurrence.failed', 'recurrence.agent_result',
       'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked',
@@ -191,7 +194,7 @@ export const useAssistants = defineStore('assistants', () => {
         // the same Desk store once per burst, without another routine sweep.
         if (refreshApprovals) await desk.refresh()
         if (stopped || epoch !== generation) return
-        if (refreshIdentity) await load()
+        if (refreshIdentity) { await load(); await loadHistory() }
         if (!refreshRoutines || stopped || epoch !== generation) return
         // A hint received during discovery must be read after that snapshot.
         if (routineFlight) await routineFlight

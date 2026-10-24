@@ -34,6 +34,8 @@ type Policy struct {
 	WeeklyBudget                          Budget   `json:"weekly_budget"`
 	OutwardActionRule                     string   `json:"outward_action_rule"`
 	NeverAskPersonForSecretsOrManualSteps bool     `json:"never_ask_person_for_secrets_or_manual_steps"`
+	ApproverPersonIDs                     []string `json:"approver_person_ids,omitempty"`
+	WeeklyResetDay                        *int     `json:"weekly_reset_day,omitempty"`
 }
 
 type Snapshot struct {
@@ -75,6 +77,19 @@ func cleanPolicy(p Policy) (Policy, error) {
 	}
 	p.AllowedProjects = slices.Clone(p.AllowedProjects)
 	p.AllowedScopes = slices.Clone(p.AllowedScopes)
+	if len(p.ApproverPersonIDs) > 32 || p.WeeklyResetDay != nil && (*p.WeeklyResetDay < 0 || *p.WeeklyResetDay > 6) {
+		return Policy{}, errInput
+	}
+	p.ApproverPersonIDs = slices.Clone(p.ApproverPersonIDs)
+	approvers := map[string]bool{}
+	for i, id := range p.ApproverPersonIDs {
+		id = strings.ToLower(id)
+		if !uuid.MatchString(id) || approvers[id] {
+			return Policy{}, errInput
+		}
+		approvers[id], p.ApproverPersonIDs[i] = true, id
+	}
+	slices.Sort(p.ApproverPersonIDs)
 	seen := map[string]bool{}
 	for i, id := range p.AllowedProjects {
 		id = strings.ToLower(id)

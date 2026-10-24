@@ -26,7 +26,7 @@ func RecordActionOutcomeTx(ctx context.Context, tx pgx.Tx, system tenant.Princip
 	if !authorized || system.Kind != tenant.Agent {
 		return errForbidden
 	}
-	_, err = acceptMessageWith(ctx, tx, system, Acceptance{MessageID: messageID, RecipientPrincipalID: recipient, SenderLabel: "Action approvals", Body: body, IdempotencyKey: key}, func(change events.Change) (int64, error) {
+	_, err = acceptMessageWith(ctx, tx, system, Acceptance{policyOutcome: true, MessageID: messageID, RecipientPrincipalID: recipient, SenderLabel: "Action approvals", Body: body, IdempotencyKey: key}, func(change events.Change) (int64, error) {
 		if change.Type == "inbox.receipt_queued" {
 			// The established system-event allowlist predates queued receipts.
 			// Attribute this new receipt to the authorized initiating actor;

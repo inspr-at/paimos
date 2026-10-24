@@ -220,7 +220,13 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		return msg, err
 	}
 	var out Message
-	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	var policyErr error
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) (txErr error) {
+		defer func() {
+			if txErr == nil && out.ID != "" {
+				policyErr = assistantReceiptErrorTx(ctx, tx, out.ID)
+			}
+		}()
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
 		}
@@ -301,6 +307,9 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		})
 		return err
 	})
+	if err == nil {
+		err = policyErr
+	}
 	return out, err
 }
 
@@ -308,6 +317,7 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 // message. ProjectID scopes its sent event when an internal service knows the
 // project; ordinary principal messages keep their existing node-less event.
 type Acceptance struct {
+	policyOutcome  bool // a server-recorded refusal/decision stays deliverable
 	laneReportedAt time.Time
 	// MessageID lets an internal caller bind its durable outcome before the
 	// first event append. Empty preserves the ordinary generated identity.
@@ -377,6 +387,19 @@ func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	if err := recordLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, id, in.laneReportedAt); err != nil {
 		return Message{}, err
 	}
+	var policyChanges []events.Change
+	refusal := ""
+	if !in.policyOutcome {
+		project := ""
+		if in.ProjectID != nil {
+			project = *in.ProjectID
+		}
+		var err error
+		refusal, err = assistantDeliveryPolicyTx(ctx, tx, p, in.RecipientPrincipalID, project, id, "", func(c events.Change) error { policyChanges = append(policyChanges, c); return nil })
+		if err != nil {
+			return Message{}, err
+		}
+	}
 	eventID, err := appendEvent(events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
 		ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.RecipientPrincipalID,
 		ReplyToID: in.ReplyToID, IdempotencyKey: in.IdempotencyKey, ExpiresAt: in.ExpiresAt,
@@ -394,11 +417,27 @@ func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 		return Message{}, mapWrite(err)
 	}
 	appendChange := func(c events.Change) error { _, err := appendEvent(c); return err }
+	if refusal != "" {
+		if err := insertReceiptWith(ctx, tx, p, id, "failed", target, "", refusal, appendChange); err != nil {
+			return Message{}, err
+		}
+		for _, change := range policyChanges {
+			if err := appendChange(change); err != nil {
+				return Message{}, err
+			}
+		}
+		return out, nil
+	}
 	if err := enqueueWakesWith(ctx, tx, p.TenantID, out, appendChange); err != nil {
 		return Message{}, err
 	}
 	if err := insertReceiptWith(ctx, tx, p, out.ID, "queued", target, "", "", appendChange); err != nil {
 		return Message{}, err
+	}
+	for _, change := range policyChanges {
+		if err := appendChange(change); err != nil {
+			return Message{}, err
+		}
 	}
 	return out, nil
 }
@@ -425,6 +464,9 @@ func enqueueWakes(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg Messag
 
 // enqueueWakesWith lets System-authored notices append through their own path.
 func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Message, appendEvent func(events.Change) error) error {
+	if failed, err := receiptFailed(ctx, tx, msg.ID); err != nil || failed {
+		return err
+	}
 	if msg.RecipientSessionID != nil {
 		return nil
 	} // Wake targets belong to the principal, not this generation.

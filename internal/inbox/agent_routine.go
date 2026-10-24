@@ -17,7 +17,7 @@ import (
 // returned so the caller can finish all receipt writes before the event counter.
 // A single configured primary target uses its existing adapter; otherwise the
 // principal's inbox remains available to agentd/listening workers.
-func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, owner, project, run, body string) (string, []events.Change, error) {
+func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, owner, project, run, body string, policyKeys ...string) (string, []events.Change, error) {
 	if _, err := normalizeSend(sender, owner, body, "routine-run/"+run, nil, nil); err != nil {
 		return "", nil, workorders.Fail(400, err.Error())
 	}
@@ -70,7 +70,11 @@ func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal
 		}
 	}
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO inbox_messages(tenant_id,sender_principal_id,recipient_principal_id,body,idempotency_key,sender_label) VALUES($1,$2,$3,$4,$5,'Routines') RETURNING id::text`, sender.TenantID, sender.ID, owner, body, "routine-run/"+run).Scan(&id); err != nil {
+	policyKey := "routine-run/" + run
+	if len(policyKeys) > 0 {
+		policyKey = policyKeys[0]
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO inbox_messages(tenant_id,sender_principal_id,recipient_principal_id,body,idempotency_key,sender_label,assistant_policy_key) VALUES($1,$2,$3,$4,$5,'Routines',$6) RETURNING id::text`, sender.TenantID, sender.ID, owner, body, "routine-run/"+run, policyKey).Scan(&id); err != nil {
 		return "", nil, err
 	}
 	pending := []events.Change{}
@@ -89,6 +93,13 @@ func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal
 			return "", nil, err
 		}
 	} else {
+		refusal, err := assistantDeliveryPolicyTx(ctx, tx, sender, owner, project, id, policyKey, collect)
+		if err != nil {
+			return "", nil, err
+		}
+		if refusal != "" {
+			return "", nil, &httpError{409, "assistant_policy_denied", refusal}
+		}
 		if err = enqueueWakesWith(ctx, tx, sender.TenantID, Message{ID: id, RecipientPrincipalID: owner}, collect); err != nil {
 			return "", nil, err
 		}
@@ -96,9 +107,33 @@ func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal
 			return "", nil, err
 		}
 	}
+	if err := assistantReceiptErrorTx(ctx, tx, id); err != nil {
+		return "", nil, err
+	}
 	// The message's deferred event binding is completed by AppendAgentRoutineTx.
 	pending = append([]events.Change{{NodeID: &project, Type: typ, After: map[string]string{"id": id, "sender_principal_id": sender.ID, "recipient_principal_id": owner}}}, pending...)
 	return id, pending, nil
+}
+
+// QueueAgentLeadResultTx returns a pointer to the result to the original lead
+// session. It cannot switch to a successor or a different principal's target.
+// The caller has rechecked the live person grant and owns the access/tree fence.
+func QueueAgentLeadResultTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, lead, session, project, run, body string) (string, []events.Change, error) {
+	if _, err := messageSession(ctx, tx, &session, lead, project); err != nil {
+		return "", nil, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM principals WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, []string{sender.ID, lead}); err != nil {
+		return "", nil, err
+	}
+	var id string
+	if err := tx.QueryRow(ctx, `INSERT INTO inbox_messages(tenant_id,sender_principal_id,recipient_principal_id,recipient_session_id,body,idempotency_key,sender_label) VALUES($1,$2,$3,$4,$5,$6,'Assistant results') RETURNING id::text`, sender.TenantID, sender.ID, lead, session, body, "assistant-result/"+run).Scan(&id); err != nil {
+		return "", nil, err
+	}
+	changes := []events.Change{{NodeID: &project, Type: "inbox.sent", After: map[string]string{"id": id, "sender_principal_id": sender.ID, "recipient_principal_id": lead, "recipient_session_id": session}}}
+	if err := insertReceiptWith(ctx, tx, sender, id, "queued", receiptTarget{}, "", "", func(c events.Change) error { changes = append(changes, c); return nil }); err != nil {
+		return "", nil, err
+	}
+	return id, changes, nil
 }
 
 // AppendAgentRoutineTx is the final step after the caller persists run state.
