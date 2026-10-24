@@ -710,8 +710,10 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 		order, comparison = "DESC", "($2=0 OR c.sent_event_id<$2)"
 	}
 	page := compatPage{Items: []CompatMessage{}, NextAfter: after, Preamble: untrustedMessagePreamble}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
 	audit := &failureAudit{}
-	r = r.WithContext(context.WithValue(r.Context(), failureAuditKey{}, audit))
+	r = r.WithContext(context.WithValue(ctx, failureAuditKey{}, audit))
 	err = db.InTenant(r.Context(), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if !inspect {
 			if err := attachedmsg.Lock(r.Context(), tx); err != nil {
