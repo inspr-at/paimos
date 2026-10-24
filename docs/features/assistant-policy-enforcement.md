@@ -108,6 +108,8 @@ assistant identity must be explicitly person-linked for assistant execution.
 
 Coverage: `TestAssistantPolicyAdmissionMatrix` (including lock contention and
 injected policy weeks), `TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff`,
+`TestAssistantAdapterMessagesPreserveRunBudget`,
+`TestAssistantPullRefusalDoesNotStarveAllowedMessages`,
 `TestAssistantOutwardPolicyApproversAndReceipts`,
 `TestAssistantLeadDelegationPolicyAndResults`, and
 `TestAssistantPolicyDirectAPICeilingAndRLS`. Assistants unit/browser cases cover

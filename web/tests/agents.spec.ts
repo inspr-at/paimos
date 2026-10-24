@@ -1332,6 +1332,8 @@ test('assistant policy refusals remain visible in rows and the stable existing a
       await expect(panel.locator('.policy-audit')).toContainText('Budget: $10 to $15')
       await expect(panel.locator('.policy-audit')).not.toContainText('Action admitted within policy')
       await expect(panel.locator('.policy-audit')).not.toContainText('Action refused: weekly budget unavailable')
+      await panel.locator('.policy-audit').scrollIntoViewIfNeeded()
+      await expect(panel.locator('.policy-audit')).toBeVisible()
     })
     await page.screenshot({ path: testInfo.outputPath(`aeon-1706-policy-audit-${width}-${theme}.png`), fullPage: true })
     await guard.check(async () => {
