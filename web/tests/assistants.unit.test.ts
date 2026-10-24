@@ -11,6 +11,7 @@ import { assistantCopy } from '../src/lib/assistantsCopy'
 import AssistantsSection from '../src/components/agents/AssistantsSection.vue'
 import AssistantPanel from '../src/components/agents/AssistantPanel.vue'
 import { assistantEvidence } from './agents-fixtures'
+import * as apiModule from '../src/lib/api'
 
 vi.mock('../src/lib/assistants', async original => ({ ...await original<typeof import('../src/lib/assistants')>(), listAssistants: vi.fn() }))
 vi.mock('../src/lib/assistantRoutines', async original => ({ ...await original<typeof import('../src/lib/assistantRoutines')>(), readAssistantRoutines: vi.fn() }))
@@ -19,7 +20,7 @@ vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ load: async () 
 vi.mock('../src/stores/decisionDesk', () => ({ useDecisionDesk: () => desk }))
 vi.mock('../src/lib/sharedRequests', () => ({ subscribeBrowserEvents: (events: string[], changed: (event?: string) => void) => { routineHints = { events, changed }; return () => {} } }))
 vi.mock('../src/lib/authz', () => ({ can: () => true, permissionsKnown: () => true, ensurePermissions: async () => {}, onAccessRevalidate: () => () => {} }))
-const viewer = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'owner', kind: 'person' } } })
+const viewer = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'owner', kind: 'person', name: 'Policy owner' } } })
 const desk = reactive<{ projection: DeskProjection | null; failures: number; error: string; refresh: () => Promise<boolean> }>({ projection: null, failures: 0, error: '', refresh: vi.fn(async () => true) })
 let pinia: ReturnType<typeof createPinia>
 let routineHints: { events: string[]; changed: (event?: string) => void }
@@ -32,7 +33,64 @@ beforeEach(() => {
   vi.mocked(listAssistants).mockResolvedValue({ items: assistantEvidence(Date.now(), 'owner').items, truncated: false })
   vi.mocked(readAssistantRoutines).mockResolvedValue({ rows: [], truncated: false })
 })
-afterEach(() => { disposePinia(pinia); vi.useRealTimers() })
+afterEach(() => { disposePinia(pinia); vi.useRealTimers(); vi.restoreAllMocks() })
+
+async function renderHistoryPanel(store: ReturnType<typeof useAssistants>) {
+  const amy = store.items.find(item => item.display_name === 'Amy')!
+  const app = createSSRApp(AssistantPanel, { item: amy, facts: store.facts[amy.principal_id]!, now: Date.now(), docked: true, sheet: false, layout: 'side', sidebarAvailable: true })
+  app.component('RouterLink', defineComponent({ props: ['to'], setup: (props, { slots }) => () => h('a', { href: props.to }, slots.default?.()) }))
+  return renderToString(app)
+}
+
+it('assistant policy changes retain their own history window during admission bursts', async () => {
+  // Risk: a busy assistant's successful admissions evict policy edits from
+  // the bounded query and crowd them out of the Policy audit section.
+  const now = Date.now(), amy = assistantEvidence(now, 'owner').items.find(item => item.display_name === 'Amy')!
+  const changed = { id: 1, type: 'assistant.policy_updated', at: new Date(now - 86400_000).toISOString(), actor_principal_id: 'owner', before: amy, after: { ...amy, policy: { ...amy.policy, weekly_budget: { amount: '15', unit: 'USD' } } } }
+  const admitted = Array.from({ length: 100 }, (_, index) => ({ id: index + 2, type: 'assistant.policy_evaluated', at: new Date(now - index * 1000).toISOString(), actor_principal_id: 'owner', after: { principal_id: amy.principal_id, allowed: true } }))
+  const queries: URLSearchParams[] = []
+  vi.spyOn(apiModule, 'api').mockImplementation(async path => {
+    const query = new URL(path, 'https://fixture.invalid').searchParams
+    queries.push(query)
+    const types = query.get('type')?.split(',') ?? []
+    const matching = [...admitted, changed].filter(event => types.includes(event.type))
+    return new Response(JSON.stringify({ items: matching.slice(0, 100), next_after: matching.length > 100 ? 100 : null }))
+  })
+  const store = useAssistants()
+  await store.load()
+  await store.loadHistory()
+  expect(store.historyState).toBe('ready')
+  expect(store.events).toContainEqual(changed)
+  expect(store.events.filter(event => event.type === 'assistant.policy_evaluated')).toHaveLength(100)
+  const changeQuery = queries.find(query => query.get('type')?.split(',').includes('assistant.policy_updated'))!
+  expect(changeQuery.get('type')?.split(',')).not.toContain('assistant.policy_evaluated')
+  expect(queries.some(query => query.get('type')?.split(',').includes('assistant.policy_evaluated'))).toBe(true)
+  for (const query of queries) {
+    expect(query.get('limit')).toBe('100')
+    expect(Date.parse(query.get('to')!) - Date.parse(query.get('from')!)).toBe(90 * 86400_000)
+  }
+  const html = await renderHistoryPanel(store)
+  const audit = html.match(/class="assistant-block policy-audit"[^>]*>([\s\S]*?)<\/section>/)?.[1] ?? ''
+  expect(audit).toContain('Budget: $10 to $15')
+  expect(audit).not.toContain(assistantCopy().policyAllowed)
+  expect(html).toContain(assistantCopy().policyAllowed) // Admissions stay in Activity.
+})
+
+it('assistant history resolves loaded actor names and uses neutral text for unknown members', async () => {
+  // Risk: policy decisions display UUID fragments as if they were names.
+  const store = useAssistants()
+  await store.load()
+  const amy = store.items.find(item => item.display_name === 'Amy')!
+  const now = Date.now(), lead = 'cafebabe-0000-4000-8000-000000000001', unknown = 'feedface-0000-4000-8000-000000000002'
+  desk.projection = { items: [{ id: 'lead-ask', kind: 'approval', title: 'Known lead request', created_at: new Date(now).toISOString(), revision: 1, held: true, asked_by: { id: lead, name: 'Research lead' }, href: '/decision-desk', source: '/api/approvals/lead-ask' }], counts: { open: 1, held: 1, chores: 0 }, has_more: false, as_of: new Date(now).toISOString() }
+  store.events = ['owner', amy.principal_id, lead, unknown].map((actor, index) => ({ id: index + 1, type: 'assistant.policy_evaluated', at: new Date(now - index * 1000).toISOString(), actor_principal_id: actor, after: { principal_id: amy.principal_id, allowed: false, reason: 'assistant_weekly_budget_exhausted' } }))
+  const html = await renderHistoryPanel(store), visible = html.replace(/<[^>]*>/g, '')
+  for (const name of ['Policy owner', 'Amy', 'Research lead', 'another member']) expect(visible).toContain(`Recorded by ${name}`)
+  expect(visible).not.toContain(unknown.slice(0, 8))
+  expect(visible).not.toContain(lead.slice(0, 8))
+  expect(html).toContain(`title="${unknown}"`)
+  expect(assistantCopy('de').anotherMember).toBe('einem anderen Mitglied')
+})
 
 async function renderApprovalViews(partial: boolean, count = 2) {
   const now = Date.parse('2026-10-23T16:00:00Z')

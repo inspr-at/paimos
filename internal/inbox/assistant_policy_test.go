@@ -112,3 +112,108 @@ func TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff(t *testing.T) {
 		t.Fatal("denied pull was marked fetched")
 	}
 }
+
+func putMessageAssistantPolicy(t *testing.T, w *world, policy assistants.Policy) {
+	t.Helper()
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE principals SET agent_class='assistant' WHERE id=$1`, w.agent.ID); err != nil {
+			return err
+		}
+		raw, _ := json.Marshal(policy)
+		_, err := tx.Exec(t.Context(), `INSERT INTO assistant_profiles(tenant_id,principal_id,owner_person_id,vendor,policy) VALUES($1,$2,$3,'grok',$4) ON CONFLICT(tenant_id,principal_id) DO UPDATE SET policy=excluded.policy,revision=assistant_profiles.revision+1`, w.agent.TenantID, w.agent.ID, w.admin.ID, raw)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Risk: accepting one hosted message consumes a whole week's run allowance.
+// Messages check admission, while only person-granted work reserves spend.
+func TestAssistantAdapterMessagesPreserveRunBudget(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	if _, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "grok_bot:worker", Adapter: "grok_bot_routine", Kind: "https_webhook", Ref: "https://8.8.8.8/policy-fixture", Secret: "synthetic-adapter-fixture", Role: "primary", MaximumLevel: "simple"}); err != nil {
+		t.Fatal(err)
+	}
+	policy := assistants.Policy{AllowedProjects: []string{project}, AllowedScopes: []string{"inbox.read", "inbox.send"}, WeeklyBudget: assistants.Budget{Amount: "1", Unit: "USD"}, OutwardActionRule: "approval_required", NeverAskPersonForSecretsOrManualSteps: true}
+	putMessageAssistantPolicy(t, w, policy)
+	calls := 0
+	dispatcher := &RoutineDispatcher{m: m, client: &http.Client{Transport: routineRoundTrip(func(*http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})}}
+	for _, key := range []string{"first-send", "second-send"} {
+		msg, err := m.commitMessage(t.Context(), w.sender, project, compatInput("grok_bot:worker", key))
+		if err != nil {
+			t.Fatalf("message %s should fit unchanged run allowance: %v", key, err)
+		}
+		if worked, err := dispatcher.DispatchOne(t.Context(), w.agent.TenantID); err != nil || !worked {
+			t.Fatalf("handoff %s: worked=%v err=%v", key, worked, err)
+		}
+		if state, reason := receiptState(t, w, msg.ID); state != "handed_off" || reason != "" {
+			t.Fatalf("message %s receipt=%s reason=%s", key, state, reason)
+		}
+	}
+	if calls != 2 || countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM assistant_budget_reservations WHERE principal_id=$1`, w.agent.ID) != 0 {
+		t.Fatalf("message transport reserved run budget; provider calls=%d", calls)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(t.Context(), tx, w.agent.TenantID); err != nil {
+			return err
+		}
+		d, err := assistants.EvaluateTx(t.Context(), tx, assistants.Check{TenantID: w.agent.TenantID, PrincipalID: w.agent.ID, ProjectID: project, Operation: "routine.admit", Key: "granted-run", Charge: true, Ceiling: &policy.WeeklyBudget})
+		if err != nil {
+			return err
+		}
+		if !d.Allowed {
+			t.Fatalf("message sends exhausted routine allowance: %s", d.Reason)
+		}
+		return assistants.AppendDecisionsTx(t.Context(), tx, w.admin, d)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	denied, err := m.commitMessage(t.Context(), w.sender, project, compatInput("grok_bot:worker", "spent-run-budget"))
+	if err == nil || !strings.Contains(err.Error(), "assistant_weekly_budget_exhausted") || denied.ID == "" {
+		t.Fatalf("exhausted run budget must refuse new messages: id=%s err=%v", denied.ID, err)
+	}
+	if state, reason := receiptState(t, w, denied.ID); state != "failed" || reason != "assistant_weekly_budget_exhausted" {
+		t.Fatalf("budget refusal receipt=%s reason=%s", state, reason)
+	}
+}
+
+// Risk: one newly forbidden project blocks permitted work in the same page,
+// while the sender is still told that the rejected message is queued.
+func TestAssistantPullRefusalDoesNotStarveAllowedMessages(t *testing.T) {
+	w, m, revoked, _ := messagingWorld(t)
+	allowed := peerTestProject(t, w, w.admin, "ALLOWED")
+	for _, project := range []string{revoked, allowed} {
+		if _, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "grok_bot:worker", Adapter: "grok_bot_routine", Kind: "pull", Role: "primary", MaximumLevel: "simple"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := assistants.Policy{AllowedProjects: []string{revoked, allowed}, AllowedScopes: []string{"inbox.read", "inbox.send"}, WeeklyBudget: assistants.Budget{Amount: "1", Unit: "USD"}, OutwardActionRule: "approval_required", NeverAskPersonForSecretsOrManualSteps: true}
+	putMessageAssistantPolicy(t, w, policy)
+	denied := mustCompatSend(t, m, w.sender, revoked, compatInput("grok_bot:worker", "revoked-project"))
+	permitted := mustCompatSend(t, m, w.sender, allowed, compatInput("grok_bot:worker", "allowed-project"))
+	policy.AllowedProjects = []string{allowed}
+	putMessageAssistantPolicy(t, w, policy)
+	for attempt := 0; attempt < 2; attempt++ {
+		page, err := m.base.pending(t.Context(), w.agent, 0, 100)
+		if err != nil || len(page) != 1 || page[0].ID != permitted.ID {
+			t.Fatalf("mixed pull page must return permitted message: items=%+v err=%v", page, err)
+		}
+	}
+	if state, reason := receiptState(t, w, denied.ID); state != "failed" || reason != "assistant_project_denied" {
+		t.Fatalf("rejected pull receipt=%s reason=%s", state, reason)
+	}
+	if state, reason := receiptState(t, w, permitted.ID); state != "queued" || reason != "" {
+		t.Fatalf("unacknowledged allowed receipt=%s reason=%s", state, reason)
+	}
+	for _, check := range []struct {
+		kind, id string
+		want     int
+	}{{"inbox.message_fetched", denied.ID, 0}, {"inbox.receipt_failed", denied.ID, 1}, {"inbox.message_fetched", permitted.ID, 1}} {
+		if got := countSQL(t, w.db.App, w.agent.TenantID, `SELECT count(*) FROM events WHERE type=$1 AND after->>'message_id'=$2`, check.kind, check.id); got != check.want {
+			t.Fatalf("%s for %s=%d want %d", check.kind, check.id, got, check.want)
+		}
+	}
+}

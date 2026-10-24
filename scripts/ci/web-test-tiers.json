@@ -16918,9 +16918,13 @@
     ,
     {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant facts retain the specified status order, exact budget words and independent Desk links","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant history resolves loaded actor names and uses neutral text for unknown members","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant identity polls reuse discovered routines instead of repeating the owner and history sweep","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant partial approval links expose explanations to the shared tooltip","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant policy changes retain their own history window during admission bursts","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant policy refusals reach row activity without claiming execution or dropping configured approvers","tier":"ESSENTIAL"}
     ,

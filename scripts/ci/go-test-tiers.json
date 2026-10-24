@@ -7962,7 +7962,11 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAgentScope","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterMessagesPreserveRunBudget","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestAssistantAdapterPolicyBeforeAcceptanceAndHandoff","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestAssistantPullRefusalDoesNotStarveAllowedMessages","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestAttemptCapAndSettings","tier":"GATED-FULL"}
     ,
